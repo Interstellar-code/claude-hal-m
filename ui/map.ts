@@ -239,6 +239,7 @@ import {
   setSolarQuery,
   SEARCH_MEMORY_MIN,
   SHOW_TOGGLES,
+  LINE_TOGGLES,
   showAllBodies,
   shownText,
   solarCrumbs,
@@ -865,6 +866,16 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
         const item = button(spec.label, 'stage-btn')
         item.setAttribute('aria-label', spec.aria)
         item.addEventListener('click', () => send(scene => ('zoom' in spec.action ? scene.zoom(spec.action.zoom) : scene.showView(spec.action.view))))
+        return item
+      }),
+      // Quick switches for the busiest lines: the violet bond strands and the nebula's ties.
+      ...LINE_TOGGLES.map(toggle => {
+        const item = button(toggle.label, 'stage-btn line-toggle', page[toggle.key])
+        item.title = toggle.title
+        item.addEventListener('click', () => {
+          changeView(toggleShow(page, toggle.key))
+          renderViews()
+        })
         return item
       }),
     )
@@ -2953,7 +2964,7 @@ export function createMap(host: MapHost): MapView {
   byId<HTMLButtonElement>('map-sim-write').addEventListener('click', () => simulateOnce('write'))
   byId<HTMLButtonElement>('solar-sim-recall').addEventListener('click', () => simulateOnce('recall'))
   byId<HTMLButtonElement>('solar-sim-write').addEventListener('click', () => simulateOnce('write'))
-  // Simulate auto: about one demo event a second (mostly recalls, now and then a write or a double burst) for the chosen
+  // Simulate auto: about one demo event a second (half recalls, half writes, now and then a second recall) for the chosen
   // number of seconds, then it stops by itself. Same demo events as the buttons above: nothing reaches the server.
   const autoBtn = byId<HTMLButtonElement>('solar-sim-auto')
   const autoSecs = byId<HTMLInputElement>('solar-sim-secs')
@@ -2976,7 +2987,7 @@ export function createMap(host: MapHost): MapView {
       const left = Math.ceil((endAt - Date.now()) / 1000)
       if (left <= 0) return stopAuto()
       autoBtn.textContent = `Stop (${left}s)`
-      simulateOnce(Math.random() < 0.7 ? 'recall' : 'write')
+      simulateOnce(Math.random() < 0.5 ? 'recall' : 'write')
       if (Math.random() < 0.2) window.setTimeout(() => simulateOnce('recall'), 350)
     }
     tick()

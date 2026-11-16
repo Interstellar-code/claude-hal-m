@@ -241,6 +241,14 @@ describe('MAPX.5 hover', () => {
     const p1 = s1.geometry.attributes.position.array
     const p2 = s2.geometry.attributes.position.array
     expect(Math.hypot(p1[90] - p2[90], p1[91] - p2[91], p1[92] - p2[92])).toBeGreaterThan(1)
+    // the Links switch hides the strands and chips but keeps the black holes
+    r.scene.setView({ bonds: false })
+    r.run(0.1)
+    for (const strand of strands) expect(strand.visible).toBe(false)
+    for (const chip of r.all(o => o.userData?.kind === 'hole-chip')) expect(chip.visible).toBe(false)
+    r.scene.setView({ bonds: true })
+    r.run(0.1)
+    for (const strand of strands) expect(strand.visible).toBe(true)
     // the tether: one string of 16 gold beads, its middle lifted above the straight line between its ends
     const beads = r.all(o => o.userData?.kind === 'tether')
     expect(beads).toHaveLength(1)
@@ -724,7 +732,8 @@ describe('MAPX.5 live events', () => {
   test('a recall is a gold comet from the planet towards the caller\'s nodule', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall'))
-    expect(r.fx().children).toHaveLength(14)
+    // 14 comet sprites, the planet's flash and its glow ring.
+    expect(r.fx().children).toHaveLength(16)
     r.clock.tick()
     const head = r.fx().children[0]
     expect(hex(r.fx().children[1])).toBe('f0e442')
@@ -732,7 +741,7 @@ describe('MAPX.5 live events', () => {
     const nodule = nodulePos(r, 'claude-code')
     const here = head.position
     expect(here.distanceTo(planet)).toBeLessThan(here.distanceTo(nodule))
-    r.run(2.2)
+    r.run(2.8)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
   })
@@ -740,14 +749,14 @@ describe('MAPX.5 live events', () => {
   test('a save is a blue comet from the writer\'s nodule to the planet', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('save', { ids: ['m-new'] }))
-    expect(r.fx().children).toHaveLength(14)
+    expect(r.fx().children).toHaveLength(16)
     r.clock.tick()
     expect(hex(r.fx().children[1])).toBe('56b4e9')
     const head = r.fx().children[0].position
     const planet = r.worldPos(r.planet(MATRIX))
     const nodule = nodulePos(r, 'claude-code')
     expect(head.distanceTo(nodule)).toBeLessThan(head.distanceTo(planet))
-    r.run(2.2)
+    r.run(2.8)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
   })
@@ -843,7 +852,7 @@ describe('MAPX.5 live events', () => {
   test('demo events from Simulate draw like any other', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall', { client: 'demo', demo: true }))
-    expect(r.fx().children).toHaveLength(14)
+    expect(r.fx().children).toHaveLength(16)
     r.scene.dispose()
   })
 
@@ -853,7 +862,8 @@ describe('MAPX.5 live events', () => {
     expect(r.fx().children).toHaveLength(0)
     r.scene.setView({ hidden: {} })
     for (let i = 0; i < 100; i++) r.scene.event(ev('update'))
-    expect(r.fx().children.length).toBeLessThanOrEqual(80)
+    // 40 events at most, 4 objects each (beam, flash, head, glow ring).
+    expect(r.fx().children.length).toBeLessThanOrEqual(160)
     r.run(3)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
@@ -1351,7 +1361,7 @@ describe('MAPX.5 review R5 fixes', () => {
         r.run(0.25)
         beamSeen.push(beam.material.opacity)
       }
-      r.run(1)
+      r.run(1.5)
       r.scene.event(ev('save', { owner: 'global' }))
       const glow = r.fx().children[0]
       const pulseSeen: number[] = []
@@ -1749,6 +1759,19 @@ describe('0.30.0 nebula ties in the scene', () => {
     r.scene.setView({ nebula: true })
     r.run(0.1)
     for (const line of ties(r)) expect(line.visible).toBe(true)
+    r.scene.dispose()
+  })
+
+  test('the Ties switch hides every tie and brings them back; the nebula stays', () => {
+    const r = rig({ data: tiedData() })
+    r.run(0.5)
+    expect(ties(r).some(l => l.visible)).toBe(true)
+    r.scene.setView({ ties: false })
+    r.run(0.1)
+    for (const line of ties(r)) expect(line.visible).toBe(false)
+    r.scene.setView({ ties: true })
+    r.run(0.1)
+    expect(ties(r).some(l => l.visible)).toBe(true)
     r.scene.dispose()
   })
 

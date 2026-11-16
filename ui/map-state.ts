@@ -1773,6 +1773,10 @@ export type SolarView = {
   /** 0.30.0: idle captions in the nebula. */
   captions: boolean
   legend: boolean
+  /** The twin violet strands between bonded projects (black-hole pairs) are drawn. */
+  bonds: boolean
+  /** The nebula's ties (cloud → project lines and their sparks) are drawn. */
+  ties: boolean
 }
 
 export type SolarViewName = 'top' | 'below' | 'side' | 'reset'
@@ -1823,11 +1827,11 @@ export const SOLAR_KEY = 'mnemosyne.map.solar'
 const GALAXY_LEVEL: Target = { level: 'galaxy' }
 
 export const initialSolarPage = (): SolarPage => ({
-  arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, nebula: true, captions: true, legend: true, legL: true, legR: true, level: GALAXY_LEVEL, findOpen: false,
+  arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, nebula: true, captions: true, legend: true, bonds: true, ties: true, legL: true, legR: true, level: GALAXY_LEVEL, findOpen: false,
 })
 
 /** What is remembered per viewer: Arrange by and the Show toggles (and the folds of the two legend cards). */
-const SOLAR_KEYS = ['arrange', 'rotate', 'nebula', 'captions', 'legend', 'legL', 'legR'] as const
+const SOLAR_KEYS = ['arrange', 'rotate', 'nebula', 'captions', 'legend', 'bonds', 'ties', 'legL', 'legR'] as const
 
 /** The remembered settings laid over the defaults; anything stored that is not a known value is ignored. */
 export function readSolarPage(storage: Pick<Storage, 'getItem'> | undefined): SolarPage {
@@ -1837,7 +1841,7 @@ export function readSolarPage(storage: Pick<Storage, 'getItem'> | undefined): So
     if (raw === null || typeof raw !== 'object') return page
     if (ARRANGE.some(a => a.id === raw.arrange)) page.arrange = raw.arrange as Arrange
     // 0.28.3: no Colour-dots-by card any more, so a remembered Recalls or Age is not restored: dots are by writer.
-    for (const key of ['rotate', 'nebula', 'captions', 'legend', 'legL', 'legR'] as const) if (typeof raw[key] === 'boolean') page[key] = raw[key] as boolean
+    for (const key of ['rotate', 'nebula', 'captions', 'legend', 'bonds', 'ties', 'legL', 'legR'] as const) if (typeof raw[key] === 'boolean') page[key] = raw[key] as boolean
   } catch {
     // storage is a convenience only
   }
@@ -1854,7 +1858,7 @@ export function saveSolarPage(storage: Pick<Storage, 'setItem'> | undefined, pag
 
 export const setArrange = (page: SolarPage, arrange: Arrange): SolarPage => (ARRANGE.some(a => a.id === arrange) && arrange !== page.arrange ? { ...page, arrange } : page)
 export const setColour = (page: SolarPage, colour: ColourMode): SolarPage => (COLOURS.some(c => c.id === colour) && colour !== page.colour ? { ...page, colour } : page)
-export const toggleShow = (page: SolarPage, key: 'rotate' | 'nebula' | 'captions' | 'legend' | 'legL' | 'legR'): SolarPage => ({ ...page, [key]: !page[key] })
+export const toggleShow = (page: SolarPage, key: 'rotate' | 'nebula' | 'captions' | 'legend' | 'bonds' | 'ties' | 'legL' | 'legR'): SolarPage => ({ ...page, [key]: !page[key] })
 
 /** The Bodies strip: hides one body, or shows it again. */
 export function toggleBody(page: SolarPage, owner: string): SolarPage {
@@ -1870,7 +1874,7 @@ export const setSolarLevel = (page: SolarPage, level: Target): SolarPage => ({ .
 
 /** The C13 `view`: a fresh object, so the scene can keep it. */
 export const viewOf = (page: SolarPage): SolarView => ({
-  arrange: page.arrange, colour: page.colour, hidden: { ...page.hidden }, query: page.query, rotate: page.rotate, nebula: page.nebula, captions: page.captions, legend: page.legend,
+  arrange: page.arrange, colour: page.colour, hidden: { ...page.hidden }, query: page.query, rotate: page.rotate, nebula: page.nebula, captions: page.captions, legend: page.legend, bonds: page.bonds, ties: page.ties,
 })
 
 export const arrangeHint = (arrange: Arrange): string => ARRANGE.find(a => a.id === arrange)?.hint ?? ''
@@ -2092,6 +2096,11 @@ export const VIEW_BUTTONS: readonly { label: string; aria: string; action: { zoo
   { label: 'Side', aria: 'View from the side', action: { view: 'side' } },
   { label: 'Reset', aria: 'Reset the view', action: { view: 'reset' } },
 ]
+
+export const LINE_TOGGLES = [
+  { key: 'bonds', label: 'Links', title: 'Show or hide the violet strands between projects that share similar memories' },
+  { key: 'ties', label: 'Ties', title: 'Show or hide the lines from the nebula clouds to their projects' },
+] as const
 
 export const SHOW_TOGGLES = [
   { key: 'rotate', label: 'Auto-rotate' },

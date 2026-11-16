@@ -80,6 +80,10 @@ export type SolarView = {
   /** 0.30.0: when the map is left alone, specks show their memory's first line now and then. */
   captions: boolean
   legend: boolean
+  /** The twin violet strands of the black-hole pairs (off: the holes stay, their lines, chip and pulse go). Default on. */
+  bonds?: boolean
+  /** The nebula's ties to the projects, with their sparks. Default on. */
+  ties?: boolean
 }
 
 export type ViewName = 'top' | 'below' | 'side' | 'reset'
@@ -144,6 +148,14 @@ const MOTION_SCALE = 0.5
 const HOVER_HOLD_SECONDS = 2
 // A port choice, not in the mockup: at most this many live events are drawn at once; the oldest end early.
 const MAX_EVENTS = 40
+// The share of the canvas height the whole picture is moved up by.
+const VIEW_LIFT = 0.09
+// A live comet's head and tail, in units of the sun's radius, so a comet stays visible however big the map is.
+const COMET_HEAD = 0.55
+const COMET_TAIL = 0.42
+// How long a comet (recall, save) and a beam (update, forget) take, in seconds.
+const COMET_SECONDS = 2.4
+const BEAM_SECONDS = 1.8
 // A port choice, not in the mockup: an opened memory shows at most this many knowledge satellites.
 const MAX_SATELLITES = 12
 const FADE_DAYS = 7
@@ -289,7 +301,11 @@ type EventRec = {
   objs: O3[]
   trail?: O3[]
   beam?: O3
+  /** A beam's travelling head, so an update or forget is seen as more than a thin line. */
+  head?: O3
   flash?: O3
+  /** The ring of light the planet sends out while the event lasts. */
+  ring?: O3
   fade?: Fade[]
 }
 
@@ -1800,7 +1816,7 @@ class SolarImpl {
       const P = this.P[tie.owner]
       const to = P ? this.worldOf(P.pG) : tie.owner === 'global' && this.sunG ? this.worldOf(this.sunG) : null
       const cloud = N.clouds[tie.cloud]
-      if (to === null || cloud === undefined || s.hidden[tie.owner]) {
+      if (to === null || cloud === undefined || s.hidden[tie.owner] || s.ties === false) {
         line.visible = false
         continue
       }
@@ -2315,7 +2331,9 @@ class SolarImpl {
     const T = this.T
     const owner = e.owner !== undefined && e.owner !== 'global' && this.P[e.owner] ? e.owner : null
     if (owner !== null && this.hiddenOwner(owner)) return
-    const source = noduleFor(e.client, this.writers.map(w => w.source))
+    const sources = this.writers.map(w => w.source)
+    // A demo event (Simulate) has no writer of its own: it is drawn from one of the real writers, so the sparks spread out.
+    const source = e.demo === true && sources.length > 0 && noduleFor(e.client, sources) === null ? (sources[Math.floor(Math.random() * sources.length)] as string) : noduleFor(e.client, sources)
     const col = EVENT_COLOUR[e.kind]
     const P = owner === null ? null : (this.P[owner] as PlanetRec)
     const ev: EventRec = {
@@ -2323,7 +2341,7 @@ class SolarImpl {
       owner,
       source,
       start: this.clock,
-      dur: P === null || e.kind === 'update' || e.kind === 'forget' ? 1.1 : 1.8,
+      dur: P === null ? 1.1 : e.kind === 'update' || e.kind === 'forget' ? BEAM_SECONDS : COMET_SECONDS,
       bend: Math.random() < 0.5 ? 1 : -1,
       objs: [],
     }
@@ -2343,15 +2361,31 @@ class SolarImpl {
       ev.flash = this.glow(col, P.R * 4, 0)
       this.fx.add(ev.beam, ev.flash)
       ev.objs.push(ev.beam, ev.flash)
+      ev.head = this.glow(col, this.sunR * COMET_HEAD, 0)
+      this.fx.add(ev.head)
+      ev.objs.push(ev.head)
       if (e.kind === 'forget') ev.fade = this.fadesOf(e.ids)
     } else {
       ev.trail = []
+      // The head is a pale tint of the event's colour (gold recall, blue save), so the two read apart at a glance.
+      const tint = new T.Color(col).lerp(new T.Color('#ffffff'), 0.45).getStyle()
+      const head = this.sunR * COMET_HEAD
+      const tail = this.sunR * COMET_TAIL
       for (let k = 0; k < 14; k++) {
-        const sp = this.glow(k === 0 ? '#ffffff' : col, k === 0 ? 9 : 7 * (1 - k / 14) + 2, k === 0 ? 1 : 0.8 * (1 - k / 14))
+        const sp = this.glow(k === 0 ? tint : col, k === 0 ? head : tail * (1 - k / 14) + 2, k === 0 ? 1 : 0.85 * (1 - k / 14))
         this.fx.add(sp)
         ev.trail.push(sp)
         ev.objs.push(sp)
       }
+      ev.flash = this.glow(col, P.R * 4, 0)
+      this.fx.add(ev.flash)
+      ev.objs.push(ev.flash)
+    }
+    if (P !== null) {
+      // The planet glows in the event's colour while it lasts: something is happening there.
+      ev.ring = this.glow(col, P.R * 9, 0)
+      this.fx.add(ev.ring)
+      ev.objs.push(ev.ring)
     }
     this.events.push(ev)
     while (this.events.length > MAX_EVENTS) this.endEvent(this.events.shift() as EventRec)
@@ -2403,6 +2437,12 @@ class SolarImpl {
         continue
       }
       const pp = this.worldOf((P as PlanetRec).pG)
+      if (ev.ring) {
+        // Two soft beats of the planet's glow over the event's life.
+        const beat = this.reduced ? 1 : 0.55 + 0.45 * Math.abs(Math.sin(Math.PI * 2 * u))
+        ev.ring.position.copy(pp)
+        ev.ring.material.opacity = 0.55 * al * beat
+      }
       if (ev.type === 'update' || ev.type === 'forget') {
         const ba = ev.beam.geometry.attributes.position.array
         ba[0] = nod.x
@@ -2415,6 +2455,10 @@ class SolarImpl {
         ev.beam.material.opacity = al
         ev.flash.position.copy(pp)
         ev.flash.material.opacity = 0.7 * al
+        if (ev.head) {
+          ev.head.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : Math.min(1, u * 1.6)))
+          ev.head.material.opacity = al
+        }
         if (ev.fade) this.setFade(ev.fade, this.reduced ? 1 : u)
         continue
       }
@@ -2425,6 +2469,10 @@ class SolarImpl {
       for (let k = 0; k < trail.length; k++) {
         const v = this.reduced ? 1 : Math.max(0, u - k * 0.016)
         trail[k].position.copy(from.clone().multiplyScalar((1 - v) * (1 - v)).add(mid.clone().multiplyScalar(2 * (1 - v) * v)).add(to.clone().multiplyScalar(v * v)))
+      }
+      if (ev.flash) {
+        ev.flash.position.copy(pp)
+        ev.flash.material.opacity = 0.7 * al
       }
     }
     this.events = keep
@@ -2501,6 +2549,8 @@ class SolarImpl {
       this.renderer.setSize(w, h, false)
       this.composer.setSize(w, h)
       this.camera.aspect = w / h
+      // The galaxy sits a little above the middle: the empty sky at the top is used and the nebula below fits.
+      this.camera.setViewOffset?.(w, h, 0, Math.round(h * VIEW_LIFT), w, h)
       this.camera.updateProjectionMatrix()
     }
     const motion = this.reduced ? 0 : 1
@@ -2649,8 +2699,10 @@ class SolarImpl {
       // Focus (0.16.0): the focused project's bonds are brighter with their chip; others' fade and lose the chip.
       const touches = focus !== null && (H.L.older === focus || H.L.newer === focus)
       const faded = focus !== null && !touches
-      H.pair[0]!.g.visible = H.pair[1]!.g.visible = H.line.visible = H.line2.visible = !gone
-      H.chip.visible = !gone && !faded
+      const strands = !gone && s.bonds !== false
+      H.pair[0]!.g.visible = H.pair[1]!.g.visible = !gone
+      H.line.visible = H.line2.visible = strands
+      H.chip.visible = strands && !faded
       const a = this.worldOf(A.pG)
       const b = this.worldOf(B.pG)
       const dir = b.clone().sub(a)
@@ -2699,7 +2751,7 @@ class SolarImpl {
       const mid = pts[30] as O3
       H.chip.position.set(mid.x, mid.y + 6, mid.z)
       const local = (((this.clock + H.phase) % PULSE_EVERY) + PULSE_EVERY) % PULSE_EVERY
-      const on = local < 7 && !this.reduced && !gone
+      const on = local < 7 && !this.reduced && strands
       for (let k = 0; k < H.pulse.length; k++) {
         H.pulse[k].visible = on
         if (on) {

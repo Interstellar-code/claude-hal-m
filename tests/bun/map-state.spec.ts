@@ -3686,7 +3686,7 @@ describe('the solar page state (MAPX.11)', () => {
     expect(hidden.hidden).toEqual({ a: true })
     // 0.29.0: the view carries the Meaning nebula toggle too.
     // 0.30.0: ... and the Nebula captions toggle.
-    expect(Object.keys(viewOf(initialSolarPage())).sort()).toEqual(['arrange', 'captions', 'colour', 'hidden', 'legend', 'nebula', 'query', 'rotate'])
+    expect(Object.keys(viewOf(initialSolarPage())).sort()).toEqual(['arrange', 'bonds', 'captions', 'colour', 'hidden', 'legend', 'nebula', 'query', 'rotate', 'ties'])
     expect(setSolarQuery(hidden, 'ab').findOpen).toBe(true)
     expect(setSolarQuery(hidden, 'a').findOpen).toBe(false)
     expect(closeFind(setSolarQuery(hidden, 'abc'))).toMatchObject({ query: '', findOpen: false })
