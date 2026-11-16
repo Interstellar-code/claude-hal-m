@@ -331,7 +331,7 @@ export function placeOne(layout: GalaxyLayout, memory: GalaxyInputMemory): Galax
 
 export type TimelineRange = 7 | 30 | 'all'
 export type TimelineNode =
-  | { kind: 'claude' }
+  | { kind: 'claude'; lanes?: number }
   | { kind: 'project'; lane: number; lanes: number }
   | { kind: 'topic'; id: string; lane: number; lanes: number; age: number; depth: number }
   | { kind: 'memory'; id: string; lane: number; lanes: number; age: number; depth: number }
@@ -341,6 +341,13 @@ export const TIMELINE_TODAY_X = 280
 export const TIMELINE_DAYS_X = 560
 // One lane per project, centred and spaced evenly within this many units.
 export const LANE_SPAN = 240
+// With many projects the lanes spread taller (LANE_GAP apart), up to LANE_SPAN_MAX, so the lanes keep room for their dots.
+export const LANE_GAP = 10.6
+export const LANE_SPAN_MAX = 520
+/** The height the lanes take: LANE_SPAN for a few projects, more for many (LANE_GAP apart), at most LANE_SPAN_MAX. */
+export function laneSpan(lanes: number): number {
+  return lanes <= 1 ? LANE_SPAN : Math.min(LANE_SPAN_MAX, Math.max(LANE_SPAN, (lanes - 1) * LANE_GAP))
+}
 export const PROJECT_CORE_X = -340
 export const CLAUDE_CORE: Vec3 = [300, 185, 0]
 // A memory's seeded y jitter around its lane.
@@ -351,15 +358,17 @@ export function rangeDays(range: TimelineRange, oldestDays = 0): number {
   return range === 'all' ? Math.max(0, oldestDays) + 2 : range
 }
 
-/** A lane's y: centred on zero, lane 0 at the top (+LANE_SPAN/2), as the mockup's [120, 40, -40, -120]. */
+/** A lane's y: centred on zero, lane 0 at the top (+span/2), as the mockup's [120, 40, -40, -120] for a few lanes. */
 export function laneY(lane: number, lanes: number): number {
   if (lanes <= 1) return 0
-  return LANE_SPAN / 2 - (lane * LANE_SPAN) / (lanes - 1)
+  const span = laneSpan(lanes)
+  return span / 2 - (lane * span) / (lanes - 1)
 }
 
 /** Where a node sits in the timeline layout: x from its age, y on its lane, z at its topic's depth. */
 export function timelinePosition(node: TimelineNode, days: number): Vec3 {
-  if (node.kind === 'claude') return [...CLAUDE_CORE]
+  // The Claude core sits above the top lane: where the mockup has it, or higher when the lanes spread taller.
+  if (node.kind === 'claude') return [CLAUDE_CORE[0], Math.max(CLAUDE_CORE[1], laneSpan(node.lanes ?? 0) / 2 + 65), CLAUDE_CORE[2]]
   const y = laneY(node.lane, node.lanes)
   if (node.kind === 'project') return [PROJECT_CORE_X, y, 0]
   const scale = TIMELINE_DAYS_X / Math.max(1, days)

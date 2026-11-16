@@ -65,9 +65,11 @@ import {
   morphTarget,
   TICK_LABEL_COLOUR,
   TICK_LABEL_HEIGHT,
-  TICK_LABEL_Y,
+  tickLabelY,
+  timelineDim,
+  timelinePose,
+  laneLabelFit,
   tickX,
-  TIMELINE_POSE,
   timelineDays,
   timelinePlaces,
   type TimelinePlaces,
@@ -1503,6 +1505,14 @@ export function createMap(host: MapHost): MapView {
   }
 
   /** Flies the camera to a pose (position and what it looks at), as the Timeline view does. */
+  /** The Timeline's straight-on view for this canvas and this many lanes (the whole axis in view). */
+  function timelinePoseNow(): { position: Vec3; target: Vec3 } {
+    const camera = loose().camera?.() as Any
+    const box = stage.getBoundingClientRect?.()
+    const aspect = box && box.height > 0 ? box.width / box.height : ((camera?.aspect as number | undefined) ?? 1.6)
+    return timelinePose(aspect, (camera?.fov as number | undefined) ?? 40, galaxy?.layout.cores.length ?? 0)
+  }
+
   function flyToPose(pose: { position: Vec3; target: Vec3 }) {
     if (graph === null) return
     const camera = loose().camera?.()
@@ -1527,7 +1537,7 @@ export function createMap(host: MapHost): MapView {
   function flyHere(kind: 'core' | 'hub' | 'star' | 'reset', id = '') {
     if (galaxy === null) return
     if (state.layout !== 'timeline') return fly(flightTo(galaxy, kind, id))
-    if (kind === 'reset') return flyToPose(TIMELINE_POSE)
+    if (kind === 'reset') return flyToPose(timelinePoseNow())
     const flight = flightTo(galaxy, kind, id)
     if (flight !== null) fly({ target: timelineAt(kind, id) ?? flight.target, distance: flight.distance })
   }
@@ -1885,6 +1895,38 @@ export function createMap(host: MapHost): MapView {
     return sprite
   }
 
+  // How much taller than the old Claude glow the monolith stands.
+  const MONOLITH_TALL = 2.4
+  /** The monolith as a flat sprite: a dark 4:9 slab, a grid of green lights and a green rim, drawn once. */
+  let monolithTexture: Any = null
+  function makeMonolithSprite() {
+    const T = three
+    if (T === null) return null
+    if (monolithTexture === null) {
+      const c = document.createElement('canvas')
+      c.width = 72
+      c.height = 162
+      const g = c.getContext('2d')
+      // No drawing canvas (a stub one in a test): the old round glow stands in.
+      if (!g || typeof g.fillRect !== 'function') return null
+      g.fillStyle = '#020604'
+      g.fillRect(0, 0, 72, 162)
+      for (let x = 0; x < 9; x++)
+        for (let y = 0; y < 20; y++) {
+          const lit = (x * 7 + y * 13) % 11 < 3 ? 0.9 : 0.18 + ((x + y * 3) % 5) * 0.05
+          g.fillStyle = `rgba(61, 255, 138, ${lit})`
+          g.fillRect(x * 8 + 1, y * 8 + 1, 6, 6)
+        }
+      g.strokeStyle = 'rgba(61, 255, 138, 0.85)'
+      g.lineWidth = 3
+      g.strokeRect(1.5, 1.5, 69, 159)
+      monolithTexture = new T.CanvasTexture(c)
+    }
+    const sprite = new T.Sprite(new T.SpriteMaterial({ map: monolithTexture, transparent: true, depthWrite: false, opacity: 0 }))
+    sprite.userData = { monolith: true }
+    return sprite
+  }
+
   function makeLabel(text: string, height: number, colour: string) {
     if (lib === null) return null
     const label = new lib.SpriteText(text, height, colour) as Any
@@ -1978,7 +2020,8 @@ export function createMap(host: MapHost): MapView {
     layout.hubs.forEach((hub, i) => addHub(g, hub, i))
     layout.stars.forEach((star, i) => addStar(g, star, i))
     for (const bridge of layout.bridges) graphLinks.push({ source: `h:${bridge.a}`, target: `h:${bridge.b}`, kind: 'bridge', owner: '' })
-    claudeVisual = addVisual('claude', [0, 0, 0], 0, { kind: 'claude', key: '', owner: '', sprite: makeSprite('glow', CLAUDE_COLOUR), size: CLAUDE_SIZE, ...labelFor('Claude', 16.8, '#FFFFFF', 18) })
+    // The Human: the monolith (a 1:4:9 slab with a green dot-matrix face) where the Claude core was; recalls start here.
+    claudeVisual = addVisual('claude', [0, 0, 0], 0, { kind: 'claude', key: '', owner: '', sprite: makeMonolithSprite() ?? makeSprite('glow', CLAUDE_COLOUR), size: CLAUDE_SIZE, ...labelFor('The Human', 16.8, '#BFFFD6', 24) })
     // Meaning: one label per cluster, and the "Not embedded" ring's own, each a label with no star; they show only in Meaning.
     if (g.meaning) {
       meaningClusters(g).forEach((cluster, i) => addVisual(`m:${cluster.name}`, cluster.centre, i, { kind: 'cluster', key: cluster.name, owner: '', sprite: null, size: 0, ...labelFor(cluster.name, 14, '#E8EEF4', 0) }))
@@ -2179,7 +2222,7 @@ export function createMap(host: MapHost): MapView {
     if (before !== null && before.layout !== state.layout) {
       // Timeline: a straight-on view of the axis (auto-rotate was paused by the state change). Leaving it: the Galaxy view.
       const flightKind = layoutFlight(before.layout, state.layout)
-      if (flightKind === 'timeline') flyToPose(TIMELINE_POSE)
+      if (flightKind === 'timeline') flyToPose(timelinePoseNow())
       else if (flightKind === 'galaxy') fly(flightTo(galaxy, 'reset'))
     }
     const controls = graph?.controls()
@@ -2385,12 +2428,12 @@ export function createMap(host: MapHost): MapView {
       if (needsGridLine(item.line !== null, item.alpha)) item.line = makeFurnitureLine(GRID_COLOUR)
       const x = tickX(days, shownDays)
       if (item.label) {
-        item.label.position.set(x, TICK_LABEL_Y, 0)
+        item.label.position.set(x, tickLabelY(galaxy?.layout.cores.length ?? 0), 0)
         item.label.material.opacity = item.alpha
         item.label.visible = item.alpha > 0.003
       }
       if (item.line) {
-        const [a, b] = gridLine(x)
+        const [a, b] = gridLine(x, galaxy?.layout.cores.length ?? 0)
         setLine(item.line, a, b, gridOpacity(item.alpha))
       }
       // A tick of a range no longer showing is let go once it has faded out.
@@ -2438,7 +2481,8 @@ export function createMap(host: MapHost): MapView {
       if (view[2]! * v.position[0] + view[6]! * v.position[1] + view[10]! * v.position[2] + view[14]! >= 0) continue
       const base = labelBaseY(v, g, blend)
       const distance = Math.hypot(v.position[0] - cam[0], v.position[1] + base - cam[1], v.position[2] - cam[2])
-      const k = labelScale(distance)
+      // The same size the frame draws: a project label in Timeline is shrunk to fit its lane.
+      const k = labelScale(distance) * (v.kind === 'core' ? laneLabelFit(g.layout.cores.length, blend) : 1)
       const perUnit = pixelsPerUnit(canvasBox.clientHeight, fov, distance)
       const w = v.labelBase[0] * k * perUnit
       const h = v.labelBase[1] * k * perUnit
@@ -2493,8 +2537,10 @@ export function createMap(host: MapHost): MapView {
       v.pulse = v.kind === 'star' && v.key === selectedKey ? selectedPulse(clock) : v.kind === 'core' || v.kind === 'claude' ? 0.1 + 0.07 * Math.sin(clock * 1.5 + v.index) : v.pulse * Math.exp(-dt * 2.2)
       if (v.sprite) {
         const scale = visualScale(v.kind, v.size, blend, v.pulse)
-        v.sprite.scale.set(scale, scale, 1)
-        v.sprite.material.opacity = Math.min(1, v.alpha) * v.fade
+        // The monolith is a tall slab (4:9), not a round glow.
+        if (v.sprite.userData?.monolith) v.sprite.scale.set(scale * MONOLITH_TALL * (4 / 9), scale * MONOLITH_TALL, 1)
+        else v.sprite.scale.set(scale, scale, 1)
+        v.sprite.material.opacity = Math.min(1, v.alpha) * v.fade * timelineDim(v.kind, blend)
         const mark = v.kind === 'star' ? knowledgeMarks.get(v.key) : undefined
         if (mark) {
           mark.scale.set(scale * KNOWLEDGE_MARK_SCALE, scale * KNOWLEDGE_MARK_SCALE, 1)
@@ -2506,7 +2552,8 @@ export function createMap(host: MapHost): MapView {
         const nudge = labelNudge.get(v.index)
         if (nudge !== undefined) nudge.now = easeToward(nudge.now, nudge.target, follow)
         v.label.position.y = base + (nudge?.now ?? 0)
-        const k = labelScale(Math.hypot(v.position[0] - cam[0], v.position[1] + base - cam[1], v.position[2] - cam[2]))
+        // A project label in Timeline also shrinks to fit its lane.
+        const k = labelScale(Math.hypot(v.position[0] - cam[0], v.position[1] + base - cam[1], v.position[2] - cam[2])) * (v.kind === 'core' ? laneLabelFit(galaxy.layout.cores.length, blend) : 1)
         v.label.scale.set(v.labelBase[0] * k, v.labelBase[1] * k, 1)
         v.label.material.opacity = Math.min(1, v.labelAlpha) * v.fade
       }
@@ -2997,28 +3044,35 @@ export function createMap(host: MapHost): MapView {
   // Simulate auto: one demo event every AUTO_EVERY seconds (half recalls, half writes, now and then a second recall) for the chosen
   // number of seconds, then it stops by itself. Same demo events as the buttons above: nothing reaches the server.
   const AUTO_EVERY = 3
-  const autoBtn = byId<HTMLButtonElement>('solar-sim-auto')
-  const autoSecs = byId<HTMLInputElement>('solar-sim-secs')
+  // Two Simulate auto controls (the LIVE panel in Galaxy, the Demo row in Timeline) drive one run.
+  const autos = [
+    { button: byId<HTMLButtonElement>('solar-sim-auto'), secs: byId<HTMLInputElement>('solar-sim-secs') },
+    { button: byId<HTMLButtonElement>('map-sim-auto'), secs: byId<HTMLInputElement>('map-sim-secs') },
+  ]
   let autoTimer: number | undefined
   const stopAuto = () => {
     if (autoTimer !== undefined) window.clearInterval(autoTimer)
     autoTimer = undefined
-    autoBtn.setAttribute('aria-pressed', 'false')
-    autoBtn.textContent = 'Simulate auto'
-    autoSecs.disabled = false
+    for (const { button, secs } of autos) {
+      button.setAttribute('aria-pressed', 'false')
+      button.textContent = 'Simulate auto'
+      secs.disabled = false
+    }
   }
-  autoBtn.addEventListener('click', () => {
+  for (const { button: autoBtn, secs: autoSecs } of autos) autoBtn.addEventListener('click', () => {
     if (autoTimer !== undefined) return stopAuto()
     const seconds = Math.min(3600, Math.max(5, Math.round(Number(autoSecs.value)) || 120))
-    autoSecs.value = String(seconds)
     const endAt = Date.now() + seconds * 1000
-    autoBtn.setAttribute('aria-pressed', 'true')
-    autoSecs.disabled = true
+    for (const { button, secs } of autos) {
+      secs.value = String(seconds)
+      button.setAttribute('aria-pressed', 'true')
+      secs.disabled = true
+    }
     let ticks = 0
     const tick = () => {
       const left = Math.ceil((endAt - Date.now()) / 1000)
       if (left <= 0) return stopAuto()
-      autoBtn.textContent = `Stop (${left}s)`
+      for (const { button } of autos) button.textContent = `Stop (${left}s)`
       // The countdown moves every second; an event comes every AUTO_EVERY seconds.
       if (ticks++ % AUTO_EVERY !== 0) return
       simulateOnce(Math.random() < 0.5 ? 'recall' : 'write')
@@ -3175,7 +3229,7 @@ export function createMap(host: MapHost): MapView {
     }
     bloomPass = bloom
     if (bloom?.basic && typeof bloom.basic.constructor === 'function') bloomPassBasic = bloom.basic.constructor
-    const opening = state.layout === 'timeline' ? TIMELINE_POSE : { position: HOME, target: [0, 0, 0] as Vec3 }
+    const opening = state.layout === 'timeline' ? timelinePoseNow() : { position: HOME, target: [0, 0, 0] as Vec3 }
     graph.cameraPosition({ x: opening.position[0], y: opening.position[1], z: opening.position[2] }, { x: opening.target[0], y: opening.target[1], z: opening.target[2] }, 0)
     const fit = () => {
       if (graph === null) return

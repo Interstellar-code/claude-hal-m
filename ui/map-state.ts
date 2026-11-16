@@ -10,7 +10,7 @@
 //
 // Every transition returns a new state; none changes the one it is given.
 import { plainLabel } from './escape'
-import { gauss, galaxyLayout, placeOne, randomOf, rangeDays, seedOf, ticks, timelinePosition, LANE_SPAN, TIMELINE_DAYS_X, TIMELINE_TODAY_X, UNTAGGED, type GalaxyInputMemory, type GalaxyLayout, type GalaxyStar, type Tick, type TimelineRange, type Vec3 } from './map-layout'
+import { gauss, galaxyLayout, laneSpan, placeOne, randomOf, rangeDays, seedOf, ticks, timelinePosition, LANE_SPAN, TIMELINE_DAYS_X, TIMELINE_TODAY_X, UNTAGGED, type GalaxyInputMemory, type GalaxyLayout, type GalaxyStar, type Tick, type TimelineRange, type Vec3 } from './map-layout'
 import type { MapEvent, MapEventKind } from './map-live'
 import { ARRANGE, COLOURS, STYLES, SEARCH_MIN, describe, kindLabel, kindOne, labelName, metric, metricText, searchResults, type Arrange, type Body, type ColourMode, type SolarGalaxy, type SolarMemory, type Target } from './solar-layout'
 
@@ -185,7 +185,7 @@ export const labelScale = (distance: number) => Math.min(1, Math.max(0.2, distan
 export const selectedPulse = (seconds: number) => 0.22 + 0.14 * Math.sin(seconds * 4)
 
 /** The original, strong glow (0.6.0 shipped with it as the only setting). Now the "full" level. */
-export const BLOOM = { strength: 0.95, radius: 0.55, threshold: 0.12 } as const
+export const BLOOM = { strength: 0.6, radius: 0.45, threshold: 0.3 } as const
 
 // ---- Glow: how strong the bloom is (off, soft, full) ----
 
@@ -193,7 +193,7 @@ export type GlowLevel = 'off' | 'soft' | 'full'
 export const GLOW_LEVELS: readonly GlowLevel[] = ['off', 'soft', 'full']
 export const GLOW_KEY = 'mnemosyne.map.glow'
 /** Soft is the default: a higher threshold so ordinary stars do not bloom at all, only the brightest cores, and a gentler strength. */
-export const BLOOM_SOFT = { strength: 0.35, radius: 0.3, threshold: 0.35 } as const
+export const BLOOM_SOFT = { strength: 0.22, radius: 0.3, threshold: 0.55 } as const
 
 /** The bloom pass settings for a level. Off keeps the soft numbers but the pass is switched off. */
 export function bloomFor(level: GlowLevel): { enabled: boolean; strength: number; radius: number; threshold: number } {
@@ -875,7 +875,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /** The tooltip for a hit: a memory says topic · project, recalls, saved date and label; a hub or core says how many memories and 'Click to fly in'. */
 /** The Claude core's tooltip: it is not a project, so no click hint. */
-export const CLAUDE_TOOLTIP = { title: 'Claude', sub: 'Recalls start here — gold sparks fly from this core to the memories a recall finds' } as const
+export const CLAUDE_TOOLTIP = { title: 'The Human', sub: 'The monolith: recalls start here — gold sparks fly from it to the memories a recall finds' } as const
 
 export function tooltip(galaxy: Galaxy, hit: Hit): { title: string; sub: string } | null {
   if (hit.kind === 'claude') return CLAUDE_TOOLTIP
@@ -963,9 +963,16 @@ export function stepMorph(weight: number, target: number, dt: number, seconds: n
 }
 /** The drawn blend of a morph weight: 0 Galaxy, 1 Timeline. */
 export const morphBlend = (weight: number) => ease(Math.min(1, Math.max(0, weight)))
-/** Project cores and the Claude core shrink to half size in Timeline. */
-export const TIMELINE_CORE_SCALE = 0.5
+/** In Timeline project cores shrink to a small head for their lane, and the Claude core to half size. */
+export const TIMELINE_CORE_SCALE = 0.16
 export const coreScale = (blend: number) => 1 - (1 - TIMELINE_CORE_SCALE) * blend
+const TIMELINE_CLAUDE_SCALE = 0.5
+const claudeScale = (blend: number) => 1 - (1 - TIMELINE_CLAUDE_SCALE) * blend
+/** In Timeline memories shrink to fit their lane, and are drawn fainter, so thousands of them do not stack to white. */
+const TIMELINE_STAR_SCALE = 0.42
+const TIMELINE_STAR_DIM = 0.35
+const starScale = (blend: number) => 1 - (1 - TIMELINE_STAR_SCALE) * blend
+export const timelineDim = (kind: VisualKind, blend: number) => (kind === 'star' ? 1 - TIMELINE_STAR_DIM * blend : 1)
 /** Topic hubs, threads, bridges and their particles fade out in Timeline: what is left of them at a blend. */
 export const galaxyOnlyFade = (blend: number) => Math.max(0, 1 - blend)
 /** The links leave faster than the stars move: gone by the first 30% of the morph (and back in during the last 30%), so no streaks trail the glide. */
@@ -1016,7 +1023,7 @@ export function timelinePlaces(galaxy: Galaxy, days: number): TimelinePlaces {
     counts[h] = counts[h]! + 1
   })
   return {
-    claude: timelinePosition({ kind: 'claude' }, days),
+    claude: timelinePosition({ kind: 'claude', lanes }, days),
     cores: cores.map((core, lane) => timelinePosition({ kind: 'project', lane, lanes }, days)),
     hubs: hubs.map((hub, h) => timelinePosition({ kind: 'topic', id: hub.key, lane: laneOf(hub.project), lanes, age: sums[h]! / Math.max(1, counts[h]!), depth: depthOf[h]! }, days)),
     stars: stars.map((star, i) => {
@@ -1049,15 +1056,43 @@ export const LANE_OPACITY = 0.4
 export const rangeTicks = (range: TimelineRange, days: number): Tick[] => ticks(range, days)
 /** A tick's x while the axis shows `shownDays`: today stays at 280, older ticks slide as the range rescales. */
 export const tickX = (tickDays: number, shownDays: number) => TIMELINE_TODAY_X - (tickDays * TIMELINE_DAYS_X) / Math.max(1, shownDays)
-/** A gridline's two ends: from y -160 to 160 at the tick's x, behind the stars. */
-export const gridLine = (x: number): [Vec3, Vec3] => [
-  [x, GRID_Y[0], GRID_Z],
-  [x, GRID_Y[1], GRID_Z],
+/** How far a gridline reaches above and below the middle: 160, or past the outer lanes when they spread taller. */
+const gridHalf = (lanes = 0) => Math.max(GRID_Y[1], laneSpan(lanes) / 2 + 40)
+/** A gridline's two ends: from y -160 to 160 at the tick's x (further for many lanes), behind the stars. */
+export const gridLine = (x: number, lanes = 0): [Vec3, Vec3] => [
+  [x, -gridHalf(lanes), GRID_Z],
+  [x, gridHalf(lanes), GRID_Z],
 ]
+/** The tick labels' y: under the grid. */
+export const tickLabelY = (lanes = 0) => Math.min(TICK_LABEL_Y, -gridHalf(lanes) - 18)
 /** How far above its lane's line a project label sits: just above its own core, and never nearer to a neighbouring lane than to its own line (under 40% of the lane spacing). */
 export const LANE_LABEL_LIFT = 22
 export function laneLabelLift(lanes: number): number {
-  return lanes <= 1 ? LANE_LABEL_LIFT : Math.min(LANE_LABEL_LIFT, (LANE_SPAN / (lanes - 1)) * 0.4)
+  return lanes <= 1 ? LANE_LABEL_LIFT : Math.min(LANE_LABEL_LIFT, (laneSpan(lanes) / (lanes - 1)) * 0.4)
+}
+/** A project label's own height (its SpriteText height in Galaxy). */
+const CORE_LABEL_HEIGHT = 16.8
+/** How much a project label shrinks in Timeline so it fits its lane (85% of the gap between lanes), between while it morphs. */
+export function laneLabelFit(lanes: number, blend: number): number {
+  if (lanes <= 1) return 1
+  const fit = Math.min(1, ((laneSpan(lanes) / (lanes - 1)) * 0.85) / CORE_LABEL_HEIGHT)
+  return 1 + (fit - 1) * blend
+}
+/**
+ * The straight-on Timeline view for a canvas: far enough back that the whole axis fits its width (project names on
+ * the left to the Claude core on the right) and its height (Claude above, tick labels below), never nearer than
+ * TIMELINE_POSE. `aspect` is width / height, `fov` the vertical field of view in degrees.
+ */
+export function timelinePose(aspect: number, fov: number, lanes: number): { position: Vec3; target: Vec3 } {
+  const left = -440
+  const right = 330
+  const top = timelinePosition({ kind: 'claude', lanes }, 1)[1] + 30
+  const bottom = tickLabelY(lanes) - 20
+  const cx = (left + right) / 2
+  const cy = (top + bottom) / 2
+  const t = Math.tan(((fov > 0 ? fov : 40) * Math.PI) / 360)
+  const z = Math.max(TIMELINE_POSE.position[2], (right - left) / 2 / t / Math.max(0.2, aspect), (top - bottom) / 2 / t)
+  return { position: [cx, cy + 10, z], target: [cx, cy, 0] }
 }
 /** A project label's height above its core at a blend: the Galaxy offset in Galaxy, the lane lift in Timeline, between while it morphs. */
 export const coreLabelOffset = (galaxyOffset: number, lanes: number, blend: number): number => galaxyOffset + (laneLabelLift(lanes) - galaxyOffset) * blend
@@ -1341,7 +1376,8 @@ export const layoutFlight = (before: LayoutName, after: LayoutName): 'timeline' 
 export const visualFade = (kind: VisualKind, galaxyFade: number, meaningWeight = 0): number => (kind === 'hub' ? galaxyFade : kind === 'core' ? 1 - clamp01(meaningWeight) : kind === 'cluster' ? clamp01(meaningWeight) : 1)
 
 /** A visual's drawn size: cores and the Claude core shrink with the blend; every one grows with its pulse. */
-export const visualScale = (kind: VisualKind, size: number, blend: number, pulse: number): number => size * (kind === 'core' || kind === 'claude' ? coreScale(blend) : 1) * (1 + pulse * 1.6)
+export const visualScale = (kind: VisualKind, size: number, blend: number, pulse: number): number =>
+  size * (kind === 'core' ? coreScale(blend) : kind === 'claude' ? claudeScale(blend) : kind === 'star' ? starScale(blend) : 1) * (1 + pulse * 1.6)
 
 /** An opacity this close to its target snaps onto it, so a faded-out thing really reaches 0 and the furniture can go idle. */
 export const FURNITURE_EPSILON = 0.003

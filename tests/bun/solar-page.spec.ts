@@ -469,6 +469,19 @@ describe('the Galaxy layout as a solar page', () => {
     expect(feed).toContain('demo')
   })
 
+  test('Simulate auto in the Demo row and in the LIVE panel drive one run: either starts it, both show it, either stops it', async () => {
+    const b = await boot()
+    const timeline = b.node('map-sim-auto')
+    const galaxy = b.node('solar-sim-auto')
+    timeline.fire('click')
+    expect(timeline.attributes.get('aria-pressed')).toBe('true')
+    expect(galaxy.attributes.get('aria-pressed')).toBe('true')
+    expect(b.scene().of('event').length).toBeGreaterThan(0)
+    galaxy.fire('click')
+    expect(timeline.attributes.get('aria-pressed')).toBe('false')
+    expect(galaxy.attributes.get('aria-pressed')).toBe('false')
+  })
+
   test('The Human (the monolith) answers every 10th event the map draws', async () => {
     const b = await boot()
     for (let i = 0; i < 9; i++) b.node('solar-sim-recall').fire('click')

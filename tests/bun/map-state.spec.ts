@@ -189,6 +189,10 @@ import {
   TIMELINE_POSE,
   timelineDays,
   timelinePlaces,
+  timelinePose,
+  timelineDim,
+  tickLabelY,
+  laneLabelFit,
   TICK_LABEL_Y,
   TICK_LABEL_HEIGHT,
   TICK_LABEL_COLOUR,
@@ -224,7 +228,7 @@ import {
   wantedTicks,
   type PlacesCache,
 } from '../../ui/map-state'
-import { laneY, rangeDays, tickStep, TICK_MIN_SPACING } from '../../ui/map-layout'
+import { laneSpan, laneY, rangeDays, tickStep, TICK_MIN_SPACING } from '../../ui/map-layout'
 import {
   clearKinds,
   CLICK_MAX_HELD_MS,
@@ -507,8 +511,8 @@ describe('the galaxy on a real /api/galaxy reply', () => {
     expect(sharedWith(galaxy, `${alpha}/Untagged`)).toEqual([])
   })
 
-  test('GAL.1.a7: bloom 0.95 / 0.55 / 0.12; labels shrink with distance, clamp(distance / 520, 0.2, 1)', () => {
-    expect(BLOOM).toEqual({ strength: 0.95, radius: 0.55, threshold: 0.12 })
+  test('GAL.1.a7: bloom 0.6 / 0.45 / 0.3 (calmed from 0.6.0\'s 0.95 / 0.55 / 0.12, which washed the Timeline white); labels shrink with distance, clamp(distance / 520, 0.2, 1)', () => {
+    expect(BLOOM).toEqual({ strength: 0.6, radius: 0.45, threshold: 0.3 })
     expect(labelScale(1000)).toBe(1)
     expect(labelScale(260)).toBe(0.5)
     expect(labelScale(10)).toBe(0.2)
@@ -2251,11 +2255,11 @@ describe('TIME: the Timeline layout', () => {
     expect(morphTarget('meaning')).toBe(0)
   })
 
-  test('TIME.1.a1: cores shrink to half in Timeline; hubs, threads, bridges and particles fade out', () => {
-    expect(TIMELINE_CORE_SCALE).toBe(0.5)
+  test('TIME.1.a1: cores shrink to a small lane head in Timeline; hubs, threads, bridges and particles fade out', () => {
+    expect(TIMELINE_CORE_SCALE).toBe(0.16)
     expect(coreScale(0)).toBe(1)
-    expect(coreScale(1)).toBe(0.5)
-    expect(coreScale(0.5)).toBeCloseTo(0.75)
+    expect(coreScale(1)).toBeCloseTo(0.16)
+    expect(coreScale(0.5)).toBeCloseTo(0.58)
     expect(galaxyOnlyFade(0)).toBe(1)
     expect(galaxyOnlyFade(1)).toBe(0)
     expect(galaxyOnlyFade(0.25)).toBeCloseTo(0.75)
@@ -2773,13 +2777,45 @@ describe('TIME: the Timeline layout', () => {
   test('R2.5: what is drawn each frame: hubs alone fade, cores and the Claude core shrink, every thing grows with its pulse', () => {
     expect(visualFade('hub', 0.25)).toBe(0.25)
     for (const kind of ['star', 'core', 'claude'] as const) expect(visualFade(kind, 0.25)).toBe(1)
-    expect(visualScale('core', 10, 1, 0)).toBe(5)
+    expect(visualScale('core', 10, 1, 0)).toBeCloseTo(1.6)
     expect(visualScale('claude', 10, 1, 0)).toBe(5)
-    expect(visualScale('core', 10, 0.5, 0)).toBeCloseTo(7.5)
-    expect(visualScale('star', 10, 1, 0)).toBe(10)
+    expect(visualScale('core', 10, 0.5, 0)).toBeCloseTo(5.8)
+    // Memories shrink to fit their lanes in Timeline, and are drawn fainter there.
+    expect(visualScale('star', 10, 1, 0)).toBeCloseTo(4.2)
+    expect(visualScale('star', 10, 0, 0)).toBe(10)
+    expect(timelineDim('star', 1)).toBeCloseTo(0.65)
+    expect(timelineDim('star', 0)).toBe(1)
+    expect(timelineDim('core', 1)).toBe(1)
     expect(visualScale('hub', 10, 1, 0)).toBe(10)
     expect(visualScale('star', 10, 0, 0.5)).toBeCloseTo(18)
     expect(visualScale('core', 10, 0, 0)).toBe(10)
+  })
+
+  test('many projects: the lanes spread taller, names fit their lanes, the grid and ticks follow, and the view fits the canvas', () => {
+    // A few lanes keep the mockup's 240; fifty spread LANE_GAP (10.6) apart, under the 520 cap.
+    expect(laneSpan(4)).toBe(240)
+    expect(laneSpan(50)).toBeCloseTo(49 * 10.6)
+    expect(laneSpan(80)).toBe(520)
+    expect(laneSpan(50) / 49).toBeCloseTo(10.6)
+    // A project name is shrunk to 85% of the gap between lanes, only in Timeline.
+    expect(laneLabelFit(4, 1)).toBe(1)
+    expect(laneLabelFit(50, 1)).toBeCloseTo((10.6 * 0.85) / 16.8)
+    expect(laneLabelFit(50, 0)).toBe(1)
+    // The grid reaches past the outer lanes; the tick labels sit under it.
+    expect(gridLine(0, 50)[1][1]).toBeGreaterThan(260)
+    expect(tickLabelY(50)).toBeLessThan(-260)
+    expect(tickLabelY(4)).toBe(TICK_LABEL_Y)
+    // The Claude core sits above the top lane.
+    const fifty = buildGalaxy(reply(Array.from({ length: 50 }, (_, i) => memory(`m${i}`, `project-p${i}-abc123`))))
+    expect(fifty.layout.cores.length).toBe(50)
+    expect(timelinePlaces(fifty, 30).claude[1]).toBeGreaterThan(260)
+    // The view: never nearer than the mockup's, and far enough back for the whole axis on a square canvas.
+    const square = timelinePose(1, 40, 50)
+    expect(square.position[2]).toBeGreaterThan(TIMELINE_POSE.position[2])
+    const halfWidth = square.position[2] * Math.tan((20 * Math.PI) / 180)
+    expect(square.target[0] - halfWidth).toBeLessThanOrEqual(-440)
+    expect(square.target[0] + halfWidth).toBeGreaterThanOrEqual(330)
+    expect(timelinePose(3, 40, 4).position[2]).toBe(TIMELINE_POSE.position[2])
   })
 
   test('R2.5: layout switches ask for the straight-on view into Timeline and the Galaxy view out of it', () => {
@@ -3004,8 +3040,8 @@ describe('QAMAP: timeline ticks, lane labels, moons, drag and strings, with the 
   test('QAMAP.R2.1: the Claude core has a tooltip in plain words and no click hint', () => {
     const none = tooltip(null as unknown as Galaxy, { kind: 'claude', id: '', sx: 702, sy: 425 })
     expect(none).toEqual(CLAUDE_TOOLTIP)
-    expect(none!.title).toBe('Claude')
-    expect(none!.sub).toBe('Recalls start here — gold sparks fly from this core to the memories a recall finds')
+    expect(none!.title).toBe('The Human')
+    expect(none!.sub).toBe('The monolith: recalls start here — gold sparks fly from it to the memories a recall finds')
     expect(none!.sub).not.toContain('Click')
     // At the 22 px core pick radius: the cursor on the Claude core at (702, 425) picks it.
     const hit = pickNearest([{ kind: 'claude', id: '', sx: 702, sy: 425, radius: PICK_RADIUS.claude, alpha: 1 }], 710, 430)
@@ -3095,8 +3131,8 @@ describe('GLOW: the bloom levels and the Glow control', () => {
     expect(soft).toEqual({ enabled: true, ...BLOOM_SOFT })
   })
 
-  test('full is exactly the 0.6.0 glow, and off switches the pass off', () => {
-    expect(bloomFor('full')).toEqual({ enabled: true, strength: 0.95, radius: 0.55, threshold: 0.12 })
+  test('full is the calmed strong glow, and off switches the pass off', () => {
+    expect(bloomFor('full')).toEqual({ enabled: true, ...BLOOM })
     expect(bloomFor('off').enabled).toBe(false)
   })
 
