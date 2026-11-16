@@ -54,6 +54,8 @@ import {
   SPARK_COLOURS,
   SPARK_POOL,
   SPARK_SECONDS,
+  sparkCaption,
+  SPARK_CAPTION_CHARS,
   SPARK_STAGGER,
   sparkAlpha,
   sparkAt,
@@ -1388,7 +1390,15 @@ describe('LIVE.2: sparks and pulses', () => {
   test('LIVE.2.a1/a2: colours and pulses by kind, and the flight takes 1.1 s on a curve from the Claude core', () => {
     expect(SPARK_COLOURS).toEqual({ recall: [1, 0.82, 0.45], save: [0.37, 0.95, 0.85], update: [0.37, 0.95, 0.85], forget: [1, 0.42, 0.42] })
     expect(PULSE).toEqual({ recall: 1.4, save: 2, update: 1.6, forget: 1.2 })
-    expect(SPARK_SECONDS).toBe(1.1)
+    expect(SPARK_SECONDS).toBe(2.6)
+    // A spark carries its memory's first line (cut to SPARK_CAPTION_CHARS, 48), or for a new memory its topic.
+    expect(SPARK_CAPTION_CHARS).toBe(48)
+    const g = freshGalaxy()
+    const star = g.layout.stars[0]!
+    const words = sparkCaption(g, { to: star.id, toKind: 'star' })
+    expect(words.length).toBeLessThanOrEqual(48)
+    expect(star.label.startsWith(words.replace(/…$/, ''))).toBe(true)
+    expect(sparkCaption(g, { to: 'project-x/deploys', toKind: 'hub' })).toBe('a new memory · deploys')
     expect(sparkAt([0, 0, 0], [100, 0, 0], 0, 0)).toEqual([0, 0, 0])
     const end = sparkAt([0, 0, 0], [100, 50, -20], 0.4, 1)
     expect(end.map(v => Math.round(v))).toEqual([100, 50, -20])
@@ -1399,13 +1409,13 @@ describe('LIVE.2: sparks and pulses', () => {
     expect(ease(0.5)).toBeCloseTo(0.5)
   })
 
-  test('LIVE.2.a2: a recall\'s sparks are staggered 0.12 s; none fly under prefers-reduced-motion', () => {
+  test('LIVE.2.a2: a recall\'s sparks are staggered 0.35 s (slowed to read their captions); none fly under prefers-reduced-motion', () => {
     const sparks = sparksFor(event('recall', ['m1', 'm2', 'm3']), targets, false, random)
     expect(sparks.map(spark => spark.delay)).toEqual([0, SPARK_STAGGER, SPARK_STAGGER * 2])
     expect(sparks.every(spark => spark.kind === 'recall' && spark.demo === false)).toBe(true)
     expect(sparksFor(event('recall', ['m1']), targets, true, random)).toEqual([])
     expect(sparksFor({ ...event('save', ['d']), demo: true }, targets.slice(0, 1), false, random)[0]!.demo).toBe(true)
-    expect(SPARK_STAGGER).toBe(0.12)
+    expect(SPARK_STAGGER).toBe(0.35)
   })
 
   test('LIVE.2.a3: a pool of 48; extra sparks wait in the queue and start as slots free up, none dropped', () => {
@@ -1437,10 +1447,10 @@ describe('LIVE.2: sparks and pulses', () => {
     const waiting = pool.active[1]!
     expect(sparkAlpha(waiting)).toBe(0)
     expect(sparkProgress(waiting)).toBe(0)
-    stepSparks(pool, 0.12 + 0.55)
+    stepSparks(pool, SPARK_STAGGER + SPARK_SECONDS / 2)
     expect(sparkProgress(pool.active[1]!)).toBeCloseTo(0.5, 1)
     expect(sparkAlpha(pool.active[1]!)).toBeCloseTo(0.85, 1)
-    const landed = stepSparks(pool, 1)
+    const landed = stepSparks(pool, SPARK_SECONDS)
     expect(landed.map(spark => spark.to)).toEqual(['m1', 'm2'])
   })
 })

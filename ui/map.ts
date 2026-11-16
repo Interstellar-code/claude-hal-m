@@ -102,6 +102,7 @@ import {
   shouldFlyToFound,
   slotOf,
   SPARK_COLOURS,
+  sparkCaption,
   sparkAlpha,
   sparkAt,
   sparkProgress,
@@ -2573,6 +2574,17 @@ export function createMap(host: MapHost): MapView {
       sprite.position.set(at[0], at[1], at[2])
       sprite.material.color.setRGB(r, g, b)
       sprite.material.opacity = sparkAlpha(spark)
+      // The memory's words ride with the spark.
+      const caption = sparkCaptionFor(i, spark)
+      if (caption) {
+        caption.position.set(at[0], at[1] + 9, at[2])
+        caption.material.opacity = Math.min(1, sparkAlpha(spark) * 1.4)
+      }
+    })
+    // A slot with no spark in flight hides its caption.
+    sparkCaptions.forEach((caption, i) => {
+      const spark = sparkPool.active[i]
+      if (caption && (!spark || spark.age < spark.delay)) caption.material.opacity = 0
     })
     if (needsHover(pointer.moved, pointer.inside, moonSpots.length > 0)) {
       pointer.moved = false
@@ -2585,6 +2597,31 @@ export function createMap(host: MapHost): MapView {
   const BADGE_CLASS = { recall: 'a-recall', save: 'a-remember', update: 'a-update', forget: 'a-forget' } as const
 
   const targetOf = (spark: Spark): Visual | undefined => (spark.toKind === 'star' ? starVisual.get(spark.to) : hubVisual.get(spark.to))
+
+  /** One caption per spark slot, made on first use; it is rewritten when its slot takes a new spark. */
+  const sparkCaptions: (Any | null)[] = []
+  const captionOf = new Map<number, Spark>()
+  function sparkCaptionFor(i: number, spark: Spark) {
+    if (galaxy === null) return null
+    if (captionOf.get(i) === spark) return sparkCaptions[i] ?? null
+    captionOf.set(i, spark)
+    const text = sparkCaption(galaxy, spark)
+    const rgb = SPARK_COLOURS[spark.kind].map(c => Math.round(155 + c * 100))
+    const colour = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
+    let label = sparkCaptions[i] ?? null
+    if (label === null) {
+      label = makeLabel(text || ' ', 8, colour)
+      const scene = (graph as unknown as Loose | null)?.scene?.() as Any
+      if (label === null || !scene) return null
+      label.renderOrder = 20
+      scene.add(label)
+      sparkCaptions[i] = label
+    } else {
+      label.text = text || ' '
+      label.color = colour
+    }
+    return label
+  }
 
   /** The spark pool: our own glow sprites in the library's scene, not links. */
   function makeSparkSprites() {
@@ -3309,6 +3346,9 @@ export function createMap(host: MapHost): MapView {
     graphLinks = []
     labelNudge.clear()
     sparkSprites = []
+    // The captions belonged to the old scene: let them go with it.
+    sparkCaptions.length = 0
+    captionOf.clear()
     moonSprites = []
     moonLines = []
     moonLabels = []

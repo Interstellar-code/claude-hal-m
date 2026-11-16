@@ -1722,8 +1722,16 @@ export const pushRow = (rows: readonly StripRow[], row: StripRow): StripRow[] =>
 // ---- Sparks: our own glow points, flying from the Claude core to a star ----
 
 export const SPARK_POOL = 48
-export const SPARK_SECONDS = 1.1
-export const SPARK_STAGGER = 0.12
+// Slow enough to read the caption a spark carries (the memory's first line).
+export const SPARK_SECONDS = 2.6
+export const SPARK_STAGGER = 0.35
+/** A spark's caption: the first line of the memory it flies to, or its topic for a new memory, cut to this many characters. */
+export const SPARK_CAPTION_CHARS = 48
+export function sparkCaption(galaxy: Galaxy, spark: Pick<Spark, 'to' | 'toKind'>): string {
+  const star = spark.toKind === 'star' ? galaxy.layout.stars[slotOf(galaxy.layout.starById, spark.to)] : undefined
+  const full = star !== undefined ? (star.label.split('\n')[0] ?? '').trim() : spark.toKind === 'hub' ? `a new memory · ${spark.to.split('/').slice(1).join('/') || 'untagged'}` : ''
+  return full.length > SPARK_CAPTION_CHARS ? `${full.slice(0, SPARK_CAPTION_CHARS - 1).trimEnd()}…` : full
+}
 export const SPARK_COLOURS: Record<MapEventKind, Vec3> = { recall: [1, 0.82, 0.45], save: [0.37, 0.95, 0.85], update: [0.37, 0.95, 0.85], forget: [1, 0.42, 0.42] }
 /** The pulse a star gets when a spark lands. */
 export const PULSE: Record<MapEventKind, number> = { recall: 1.4, save: 2, update: 1.6, forget: 1.2 }
