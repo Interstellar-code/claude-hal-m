@@ -469,6 +469,16 @@ describe('the Galaxy layout as a solar page', () => {
     expect(feed).toContain('demo')
   })
 
+  test('The Human (the monolith) answers every 10th event the map draws', async () => {
+    const b = await boot()
+    for (let i = 0; i < 9; i++) b.node('solar-sim-recall').fire('click')
+    expect(b.scene().of('monolith')).toHaveLength(0)
+    b.node('solar-sim-write').fire('click')
+    expect(b.scene().of('monolith')).toHaveLength(1)
+    for (let i = 0; i < 10; i++) b.node('solar-sim-recall').fire('click')
+    expect(b.scene().of('monolith')).toHaveLength(2)
+  })
+
   test('without a solar host the Galaxy layout is the page it was: nothing solar shows', async () => {
     const b = await boot({ solar: false })
     expect(b.factory.scenes.length).toBe(0)

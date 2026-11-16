@@ -11,6 +11,7 @@ export type SceneCall =
   | { call: 'showView'; name: SolarViewName }
   | { call: 'zoom'; factor: number }
   | { call: 'event'; event: MapEvent }
+  | { call: 'monolith' }
   | { call: 'dispose' }
 
 export type FakeScene = SolarSceneApi & {
@@ -38,6 +39,7 @@ export function fakeSceneFactory() {
       showView: name => void calls.push({ call: 'showView', name }),
       zoom: factor => void calls.push({ call: 'zoom', factor }),
       event: event => void calls.push({ call: 'event', event }),
+      monolith: () => void calls.push({ call: 'monolith' }),
       dispose: () => void calls.push({ call: 'dispose' }),
       of: call => calls.filter(entry => entry.call === call) as never,
       level: level => options.onLevel(level),

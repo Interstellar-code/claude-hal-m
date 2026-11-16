@@ -33,7 +33,7 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
 
 describe('sound effects', () => {
   test('each kind plays its own tones', () => {
-    for (const kind of ['recall', 'save', 'update', 'forget', 'land', 'storm'] as const) {
+    for (const kind of ['recall', 'save', 'update', 'forget', 'land', 'storm', 'monolith'] as const) {
       const ctx = fakeContext()
       createSoundPlayer(() => ctx, () => 0).play(kind)
       expect(ctx.started).toBe(oscillators(kind))

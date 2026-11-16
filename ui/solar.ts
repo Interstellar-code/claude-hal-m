@@ -132,7 +132,7 @@ export type SolarScene = {
 }
 
 /** The method names C13 fixes; a spec checks the returned object against this list. */
-export const SCENE_METHODS = ['setData', 'setView', 'flyTo', 'showView', 'zoom', 'event', 'dispose'] as const
+export const SCENE_METHODS = ['setData', 'setView', 'flyTo', 'showView', 'zoom', 'event', 'monolith', 'dispose'] as const
 
 export const DEFAULT_VIEW: SolarView = { arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: false, nebula: true, captions: true, legend: true }
 
@@ -161,6 +161,13 @@ const { comet: COMET_SECONDS, beam: BEAM_SECONDS, ping: PING_SECONDS } = EVENT_S
 const TAIL_SECONDS = 0.8
 // A travelling caption's longest first line, and the word under it per kind.
 const EVENT_CHARS = 48
+// The monolith: its height in sun radii, how far above the sun it hangs (share of the widest orbit), its answer's
+// colour and length in seconds, and the points of the ripple's circle.
+const MONOLITH_HEIGHT = 2.6
+const MONOLITH_LIFT = 0.48
+const MONOLITH_GOLD = '#ffe2a6'
+const MONOLITH_SECONDS = 3.2
+const RIPPLE_POINTS = 96
 // How much a body's name grows while a live event is bound for it.
 const LABEL_GROW = 0.8
 const EVENT_VERB = { recall: 'recalled', save: 'saved', update: 'updated', forget: 'forgotten' } as const
@@ -365,6 +372,7 @@ export function createSolarScene(options: SolarOptions): SolarScene {
     showView: name => impl.showView(name),
     zoom: factor => impl.zoom(factor),
     event: event => impl.event(event),
+    monolith: () => impl.monolith(),
     dispose: () => impl.dispose(),
   }
 }
@@ -389,6 +397,8 @@ class SolarImpl {
   /** Comets, beams, pulses and satellites: they outlive a rebuild. */
   private readonly fx: O3
   private pickables: O3[] = []
+  /** The Human: the monolith above the sun, its beam down to the sun, the sun's swell and the ripple across the orbits. */
+  private mono: { g: O3; edges: O3; label: O3; beam: O3; swell: O3; ripple: O3; at: number } | null = null
   private sats: O3[] = []
 
   private galaxy: SceneGalaxy | null = null
@@ -2047,6 +2057,7 @@ class SolarImpl {
     for (const owner in this.orbits.radius) this.maxR = Math.max(this.maxR, this.orbits.radius[owner] as number)
     this.P = {}
     this.makeSun()
+    this.buildMonolith()
     this.sunG.rotation.y = sunTurn
     for (const b of this.bodies) this.P[b.owner] = this.makePlanet(b, this.orbits.radius[b.owner] as number, before[b.owner])
     for (const owner in this.P) for (const m of (this.P[owner] as PlanetRec).moons) m.pivot.rotation.y = pivots.get(`${owner}|${m.kind}`) ?? m.pivot.rotation.y
@@ -2472,6 +2483,82 @@ class SolarImpl {
     const memory = e.ids.map(id => memories.find(m => m.id === id)).find(m => m !== undefined)
     const full = memory !== undefined ? this.firstLine(memory) : e.topic && e.topic !== 'Untagged' ? `topic: ${e.topic}` : 'a new memory'
     return full.length > EVENT_CHARS ? `${full.slice(0, EVENT_CHARS - 1).trimEnd()}…` : full
+  }
+
+  /** The Human answers: the beam drops to the sun, the sun swells and a ripple runs out across the orbits. */
+  monolith(): void {
+    if (this.disposed || this.mono === null) return
+    this.mono.at = this.clock
+  }
+
+  /** The monolith (2001's slab, 1:4:9), over the sun on the galaxy's axis, with its label and its (hidden) answer. */
+  private buildMonolith(): void {
+    const T = this.T
+    const g = new T.Group()
+    const geo = new T.BoxGeometry(4 / 9, 1, 1 / 9)
+    const slab = new T.Mesh(geo, new T.MeshBasicMaterial({ color: new T.Color('#030409') }))
+    slab.userData = { kind: 'monolith', tip: ['The Human (the monolith)', 'you: your own saves, edits and forgets in the dashboard wake it', 'it also answers every 10th memory event'] }
+    // The slab's edges as one line (the vendored bundle has no EdgesGeometry): front, back, then the four joins.
+    const X = 2 / 9
+    const Y = 0.5
+    const Z = 1 / 18
+    const corner = (i: number, back: boolean) => [i === 0 || i === 3 ? -X : X, i < 2 ? -Y : Y, back ? -Z : Z]
+    const walk: [number, boolean][] = [[0, false], [1, false], [2, false], [3, false], [0, false], [0, true], [1, true], [2, true], [3, true], [0, true], [1, true], [1, false], [2, false], [2, true], [3, true], [3, false]]
+    const eg = new T.BufferGeometry()
+    eg.setAttribute('position', new T.BufferAttribute(new Float32Array(walk.flatMap(([i, back]) => corner(i, back))), 3))
+    const edges = new T.Line(eg, new T.LineBasicMaterial({ color: new T.Color('#9fb4d6'), transparent: true, opacity: 0.45, depthWrite: false }))
+    g.add(slab, edges)
+    this.pickables.push(slab)
+    const label = this.label('The Human', null, '#d9e2f2', 14)
+    const bg = new T.BufferGeometry()
+    bg.setAttribute('position', new T.BufferAttribute(new Float32Array(6), 3))
+    const beam = new T.Line(bg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+    beam.frustumCulled = false
+    beam.userData = { kind: 'monolith-beam' }
+    const swell = this.glow(MONOLITH_GOLD, 1, 0)
+    swell.userData = { kind: 'monolith-swell' }
+    const ra = new Float32Array((RIPPLE_POINTS + 1) * 3)
+    for (let k = 0; k <= RIPPLE_POINTS; k++) {
+      const a = (k / RIPPLE_POINTS) * Math.PI * 2
+      ra[k * 3] = Math.cos(a)
+      ra[k * 3 + 2] = Math.sin(a)
+    }
+    const rg = new T.BufferGeometry()
+    rg.setAttribute('position', new T.BufferAttribute(ra, 3))
+    const ripple = new T.Line(rg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+    ripple.frustumCulled = false
+    ripple.userData = { kind: 'monolith-ripple' }
+    this.world.add(g, label, beam, swell, ripple)
+    this.mono = { g, edges, label, beam, swell, ripple, at: this.mono?.at ?? -99 }
+  }
+
+  private stepMonolith(dt: number, spin: number): void {
+    const M = this.mono
+    if (M === null) return
+    const m = this.maxR || 700
+    const h = this.sunR * MONOLITH_HEIGHT
+    const y = m * MONOLITH_LIFT
+    M.g.position.set(0, y, 0)
+    M.g.scale.setScalar(h)
+    M.g.rotation.y += dt * 0.05 * spin
+    M.label.position.set(0, y - h * 0.5 - 14, 0)
+    const t = this.clock - M.at
+    const on = t >= 0 && t < MONOLITH_SECONDS
+    // The answer: the beam comes down at once and fades; the sun swells a moment later; the ripple runs out to the edge.
+    const beamK = on ? (this.reduced ? 1 : Math.min(1, t / 0.25) * Math.exp(-Math.max(0, t - 0.25) / 1.2)) : 0
+    const arr = M.beam.geometry.attributes.position.array
+    arr[1] = y - h * 0.5
+    arr[4] = this.sunR
+    M.beam.geometry.attributes.position.needsUpdate = true
+    M.beam.material.opacity = beamK
+    M.edges.material.opacity = 0.45 + 0.55 * beamK
+    const swellK = on ? (this.reduced ? 0.7 : Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (t - 0.2) / 2))))) : 0
+    M.swell.scale.setScalar(this.sunR * (5 + 4 * swellK))
+    M.swell.material.opacity = 0.6 * swellK
+    const rippleU = this.reduced ? 0 : Math.max(0, (t - 0.4) / (MONOLITH_SECONDS - 0.4))
+    M.ripple.visible = on && !this.reduced && rippleU > 0
+    M.ripple.scale.setScalar(this.sunR + (m * 1.05 - this.sunR) * rippleU)
+    M.ripple.material.opacity = 0.55 * (1 - rippleU)
   }
 
   /** The dots of the listed ids, with the colour each has now (a forgotten memory fades out of it). */
@@ -2904,6 +2991,7 @@ class SolarImpl {
     }
 
     this.stepEvents()
+    this.stepMonolith(dt, spin)
     this.satellites()
 
     // Camera flight.

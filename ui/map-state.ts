@@ -1803,6 +1803,8 @@ export type SolarSceneApi = {
   showView: (name: SolarViewName) => void
   zoom: (factor: number) => void
   event: (event: MapEvent) => void
+  /** The Human (the monolith) answers: a beam to the sun and a ripple across the orbits. */
+  monolith?: () => void
   dispose: () => void
 }
 
@@ -2082,6 +2084,7 @@ export const LEGEND_LEFT: readonly LegendRow[] = legend([
   ['#e4d09c', 'Planet style', 'gas 30+, ice 10-29, rocky, dwarf <3'], ['#c3ccd8', 'Space station', 'plain folder, 50+ memories (setting)'], ['#6fb8ff', 'Starship', 'plain folder, fewer'],
   ['#8fb07a', 'Land, bands', 'tags; area = uses'], ['#eef2f8', 'Moon', 'a memory kind'], ['#56B4E9', 'Asteroid', 'a memory; colour = writer'],
   ['#ffffff', 'Brightness', 'recalls'], ['#9fb0c8', 'Asteroid size', 'importance'], ['#F0E442', 'Halo · satellite', 'pinned · knowledge item'],
+  ['#ffe2a6', 'The Human', 'monolith above the sun: your edits, every 10th event'],
 ])
 export const LEGEND_RIGHT: readonly LegendRow[] = legend([
   ['#7d8aa0', 'Orbit', 'thin slate ring; closer = busier'], ['#56B4E9', 'Planet ring', 'its memories, from afar'], ['#8b93a3', 'Grey asteroid', 'kind unknown (planet belt)'], ['#ffe3a3', 'Sun belt', 'global memories (gold)'],

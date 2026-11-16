@@ -752,12 +752,22 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
   const send = <T,>(call: (scene: SolarSceneApi) => T) => {
     if (scene !== null) call(scene)
   }
+  const MONOLITH_EVERY = 10
   // Sound effects (the Sound switch): one short sound per event the map draws.
   const sound = createSoundPlayer()
+  // The Human (the monolith) answers your own dashboard saves, edits and forgets, and every MONOLITH_EVERY-th event.
+  let drawn = 0
   const fire = (event: MapEvent) => {
     if (scene === null) return
     scene.event(event)
-    if (!page.sound || !drawsOnMap(event)) return
+    if (!drawsOnMap(event)) return
+    drawn += 1
+    const human = event.client === 'dashboard' && event.kind !== 'recall'
+    if (human || drawn % MONOLITH_EVERY === 0) {
+      scene.monolith?.()
+      if (page.sound) sound.play('monolith')
+    }
+    if (!page.sound) return
     // The launch sound starts with the comet; the landing tone comes as the event reaches its planet (the scene
     // flares the planet at the same moment). An event with no project of its own only gets the launch sound.
     sound.play(event.kind)

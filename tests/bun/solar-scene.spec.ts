@@ -174,10 +174,10 @@ const angleOf = (v: any): number => Math.atan2(v.z, v.x)
 // ---- C13: the interface ----
 
 describe('MAPX.5 the C13 interface', () => {
-  test('createSolarScene returns exactly the seven methods of C13', () => {
+  test('createSolarScene returns exactly the eight methods of C13 (with the monolith)', () => {
     const r = rig({ withData: false })
     expect(Object.keys(r.scene).sort()).toEqual([...SCENE_METHODS].sort())
-    expect([...SCENE_METHODS].sort()).toEqual(['dispose', 'event', 'flyTo', 'setData', 'setView', 'showView', 'zoom'])
+    expect([...SCENE_METHODS].sort()).toEqual(['dispose', 'event', 'flyTo', 'monolith', 'setData', 'setView', 'showView', 'zoom'])
     for (const name of SCENE_METHODS) expect(typeof r.scene[name]).toBe('function')
     r.scene.dispose()
   })
@@ -864,6 +864,31 @@ describe('MAPX.5 live events', () => {
     expect(lit()).toHaveLength(0)
     expect(label.scale.x).toBeCloseTo(label.userData.base.x, 5)
     expect(label.material.color.getHexString()).toBe('ffffff')
+    r.scene.dispose()
+  })
+
+  test('The Human: a monolith above the sun; when it answers, a beam drops to the sun and a ripple runs out', () => {
+    const r = rig({ reduced: false })
+    const slab = r.all(o => o.userData?.kind === 'monolith')[0]
+    expect(slab).toBeDefined()
+    const at = r.worldPos(slab)
+    expect(at.y).toBeGreaterThan(100)
+    expect(Math.hypot(at.x, at.z)).toBeLessThan(1)
+    const beam = r.all(o => o.userData?.kind === 'monolith-beam')[0]
+    const ripple = r.all(o => o.userData?.kind === 'monolith-ripple')[0]
+    expect(beam.material.opacity).toBe(0)
+    expect(ripple.visible).toBe(false)
+    r.scene.monolith()
+    r.run(0.3)
+    expect(beam.material.opacity).toBeGreaterThan(0.8)
+    r.run(1)
+    expect(ripple.visible).toBe(true)
+    const early = ripple.scale.x
+    r.run(1)
+    expect(ripple.scale.x).toBeGreaterThan(early)
+    r.run(2)
+    expect(beam.material.opacity).toBe(0)
+    expect(ripple.visible).toBe(false)
     r.scene.dispose()
   })
 

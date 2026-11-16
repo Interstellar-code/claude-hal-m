@@ -1,10 +1,11 @@
 // Sound effects for live map events (recall, save, update, forget), made with the Web Audio API: no sound files.
 // The palette is sci-fi console, not arcade: a tricorder scan for a recall, a phaser beam for a save, a tricorder
 // chirp for an update and a disruptor zap for a forget, all with a short space echo; a soft shimmer as it lands;
-// and an electric crackle with a low rumble when a nebula cloud's lightning flashes.
+// an electric crackle with a low rumble when a nebula cloud's lightning flashes; and a deep swelling chord when
+// the monolith (The Human) answers.
 // Off by default. A browser starts audio only after a click on the page, so the context is made (or resumed) then.
 
-export type SoundKind = 'recall' | 'save' | 'update' | 'forget' | 'land' | 'storm'
+export type SoundKind = 'recall' | 'save' | 'update' | 'forget' | 'land' | 'storm' | 'monolith'
 
 type Ctx = AudioContext
 /**
@@ -22,7 +23,14 @@ export type Tone = {
   filter?: { type: BiquadFilterType; freq: number; q: number }
   /** A burst of white noise instead of a tone (its `wave`, `from` and `to` are not used): the crackle of a spark. */
   noise?: true
+  /** Seconds to swell in (default 0.01): a slow attack for the monolith's chord. */
+  attack?: number
 }
+
+// The monolith: a deep chord of close, slowly beating low voices that swells in and dies away, with a faint high
+// shimmer. Our own cluster, in the mood of the film, not its music.
+const CHORD = [55, 58.3, 82.4, 87.3, 110, 116.5, 164.8]
+const chord: Tone[] = CHORD.map((hz, i) => ({ wave: i % 2 === 0 ? 'sine' : 'triangle', from: hz, to: hz * 0.995, at: i * 0.06, dur: 4.6, gain: 0.5 - i * 0.04, attack: 1.6, fm: { rate: 0.3 + i * 0.11, depth: hz * 0.006 }, filter: { type: 'lowpass', freq: 900, q: 0.5 } }))
 
 // A crackle: short noise snaps around the two strikes of a nebula flash (at 0 s and 0.25 s).
 const SNAPS = [0, 0.028, 0.061, 0.095, 0.25, 0.272, 0.31]
@@ -49,6 +57,10 @@ export const SOUND_SHAPES: Readonly<Record<SoundKind, readonly Tone[]>> = {
     { wave: 'sine', from: 660, to: 520, at: 0, dur: 0.38, gain: 0.45, fm: { rate: 6, depth: 12 } },
     { wave: 'triangle', from: 165, to: 140, at: 0, dur: 0.42, gain: 0.5, filter: { type: 'lowpass', freq: 900, q: 0.7 } },
   ],
+  monolith: [
+    ...chord,
+    { wave: 'sine', from: 1760, to: 1740, at: 0.5, dur: 3.6, gain: 0.06, attack: 1.4, fm: { rate: 4.5, depth: 6 } },
+  ],
   storm: [
     // The nebula's lightning: an electric crackle over a low hum and a soft distant rumble.
     ...crackle,
@@ -71,6 +83,8 @@ const LAND_LEVEL = 0.6
 // Lightning is quieter still, and at most one crackle every STORM_GAP_MS (many clouds flash).
 const STORM_LEVEL = 0.7
 const STORM_GAP_MS = 3500
+// The monolith's chord: never two at once.
+const MONOLITH_GAP_MS = 3000
 const ECHO_SECONDS = 0.14
 const ECHO_FEEDBACK = 0.3
 const ECHO_LEVEL = 0.35
@@ -97,8 +111,9 @@ export function createSoundPlayer(make: () => Ctx | null = defaultContext, now: 
     play(kind) {
       const t = now()
       // Launches, landings and lightning each keep their own spacing, so one never silences another.
-      const lane = kind === 'land' || kind === 'storm' ? kind : 'event'
-      if (t - (lasts[lane] ?? -Infinity) < (lane === 'storm' ? STORM_GAP_MS : MIN_GAP_MS)) return
+      const lane = kind === 'land' || kind === 'storm' || kind === 'monolith' ? kind : 'event'
+      const gap = lane === 'storm' ? STORM_GAP_MS : lane === 'monolith' ? MONOLITH_GAP_MS : MIN_GAP_MS
+      if (t - (lasts[lane] ?? -Infinity) < gap) return
       const c = context()
       if (c === null || master === null || c.state !== 'running') return
       lasts[lane] = t
@@ -165,9 +180,10 @@ function voice(c: Ctx, out: AudioNode, tone: Tone, start: number) {
   osc.frequency.setValueAtTime(tone.from, a)
   osc.frequency.exponentialRampToValueAtTime(Math.max(1, tone.to), b)
   const env = c.createGain()
+  const attack = tone.attack ?? 0.01
   env.gain.setValueAtTime(0.0001, a)
-  env.gain.exponentialRampToValueAtTime(tone.gain, a + 0.01)
-  env.gain.setValueAtTime(tone.gain, Math.max(a + 0.01, b - tone.dur * 0.35))
+  env.gain.exponentialRampToValueAtTime(tone.gain, a + attack)
+  env.gain.setValueAtTime(tone.gain, Math.max(a + attack, b - tone.dur * 0.35))
   env.gain.exponentialRampToValueAtTime(0.0001, b)
   osc.connect(env)
   if (tone.filter) {
