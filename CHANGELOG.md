@@ -2,6 +2,17 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.35.0 (the map comes alive: HAL-10000, The Human, sounds, a usable Timeline)
+
+1. The dashboard's name is HAL-10000 (header, tab title, About). Commands, tools and the plugin id keep the Mnemosyne name.
+2. Galaxy live events are easier to follow: comets scale with the sun and are tinted by kind; the caller (sun or writer) flashes first and the target planet flares when the event lands; a recall pings out to its planet before its gold comet carries the memory back; a comet lights its whole path; every event carries its memory's first line (or its topic, or "a new memory") and the target body's name grows and takes the event's colour.
+3. The Human: a 1:4:9 monolith with a green dot-matrix face hangs above the sun. It answers your own dashboard saves, edits and forgets, and every 10th event the map draws: a gold beam runs down to the sun, the sun swells and three ripples cross the galaxy, lighting each body's name as they pass. In Timeline it replaces the Claude core.
+4. Sound (off by default; a switch next to the view buttons): a soft cinematic set made in the browser with Web Audio, no sound files: a rising whoosh for a recall, a low settling thrum for a save, a glassy bell for an update, a sinking whoosh for a forget, a soft thud as an event lands, a crackle over a distant rumble for the nebula's lightning and a deep swelling chord for the monolith.
+5. Links and Ties switches hide the violet bond strands and the nebula's ties. Calmer motion: bond pulses glide once every 2 minutes, tie sparks and storms are slower. With Auto-rotate off the orbits, the sun, its belts and the monolith stand still. The picture sits a little higher in the frame.
+6. Simulate auto (LIVE panel in Galaxy, Demo row in Timeline, one shared run): one demo event every 3 seconds for a chosen number of seconds. Demo events still never reach the server.
+7. Timeline is usable with many projects: lanes spread taller (10.6 apart, up to 520), project names shrink to fit their lane, memories shrink and draw fainter, cores shrink, the grid and ticks follow, and the straight-on view backs off until the whole axis fits the canvas. The glow is calmer (Full 0.6/0.45/0.3, Soft 0.22/0.3/0.55). Sparks fly in 2.6 s, 0.35 s apart, and carry their memory's first line.
+8. The engine build is unchanged; no `/mnemosyne-setup` is needed. Run `/mnemosyne-ui` after updating to get the new dashboard.
+
 ## 0.34.0 (read a long memory in full: memory_get)
 
 1. New tool `memory_get` (GET.1), in Claude Code and in the outside-agent MCP server. It takes a memory's id (and, in Claude Code, the owner recall gave) and returns the whole text with its kind, tags, pinned flag, importance and timestamps. Until now recall cut every memory at 500 characters and nothing could read the rest, so a long memory was only ever seen cut mid-sentence. It reads only memories recall would show: the caller's own and live `global` ones; any other id (another project's private or retired memory, an unknown id) answers `not_found`. It can be switched off with `tools.memory_get` and is in the default `tools.externalAllow`. A `tools.externalAllow` list you saved before is kept as it was: add `memory_get` to it on the Settings tab to serve the tool to outside agents.
