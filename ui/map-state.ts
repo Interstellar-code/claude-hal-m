@@ -1791,6 +1791,8 @@ export type SolarSceneOptions = {
   onHover: (tip: string[] | null, x: number, y: number) => void
   onPick: (target: Target) => void
   onLevel: (level: Target) => void
+  /** A nebula cloud's lightning flashed (the page plays its crackle when Sound is on). */
+  onStorm?: () => void
 }
 
 /** The scene the page drives (C13): the page never reaches into its three.js objects. */

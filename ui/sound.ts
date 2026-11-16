@@ -1,9 +1,10 @@
 // Sound effects for live map events (recall, save, update, forget), made with the Web Audio API: no sound files.
 // The palette is sci-fi console, not arcade: a tricorder scan for a recall, a phaser beam for a save, a tricorder
-// chirp for an update and a disruptor zap for a forget, all with a short space echo; a soft shimmer as it lands.
+// chirp for an update and a disruptor zap for a forget, all with a short space echo; a soft shimmer as it lands;
+// and an electric crackle with a low rumble when a nebula cloud's lightning flashes.
 // Off by default. A browser starts audio only after a click on the page, so the context is made (or resumed) then.
 
-export type SoundKind = 'recall' | 'save' | 'update' | 'forget' | 'land'
+export type SoundKind = 'recall' | 'save' | 'update' | 'forget' | 'land' | 'storm'
 
 type Ctx = AudioContext
 /**
@@ -19,7 +20,13 @@ export type Tone = {
   gain: number
   fm?: { rate: number; depth: number }
   filter?: { type: BiquadFilterType; freq: number; q: number }
+  /** A burst of white noise instead of a tone (its `wave`, `from` and `to` are not used): the crackle of a spark. */
+  noise?: true
 }
+
+// A crackle: short noise snaps around the two strikes of a nebula flash (at 0 s and 0.25 s).
+const SNAPS = [0, 0.028, 0.061, 0.095, 0.25, 0.272, 0.31]
+const crackle: Tone[] = SNAPS.map((at, i) => ({ wave: 'sine', from: 1, to: 1, at, dur: 0.018 + (i % 3) * 0.012, gain: i === 0 || i === 4 ? 0.9 : 0.5, noise: true, filter: { type: 'bandpass', freq: 2600 + (i % 4) * 600, q: 1.4 } }))
 
 // A tricorder scan: quick soft beeps hopping between high pitches.
 const SCAN = [2100, 2650, 1900, 2950, 2300, 3150, 2700]
@@ -42,6 +49,12 @@ export const SOUND_SHAPES: Readonly<Record<SoundKind, readonly Tone[]>> = {
     { wave: 'sine', from: 660, to: 520, at: 0, dur: 0.38, gain: 0.45, fm: { rate: 6, depth: 12 } },
     { wave: 'triangle', from: 165, to: 140, at: 0, dur: 0.42, gain: 0.5, filter: { type: 'lowpass', freq: 900, q: 0.7 } },
   ],
+  storm: [
+    // The nebula's lightning: an electric crackle over a low hum and a soft distant rumble.
+    ...crackle,
+    { wave: 'sawtooth', from: 110, to: 92, at: 0, dur: 0.7, gain: 0.22, fm: { rate: 40, depth: 22 }, filter: { type: 'lowpass', freq: 650, q: 1 } },
+    { wave: 'sine', from: 72, to: 38, at: 0.05, dur: 1.1, gain: 0.6, fm: { rate: 9, depth: 8 } },
+  ],
   forget: [
     // The disruptor: a deep buzz falling fast through a resonant band, with a low body under it.
     { wave: 'sawtooth', from: 950, to: 70, at: 0, dur: 0.5, gain: 0.8, fm: { rate: 34, depth: 280 }, filter: { type: 'bandpass', freq: 850, q: 6 } },
@@ -55,6 +68,9 @@ const VOLUME = 0.08
 const MIN_GAP_MS = 110
 // The landing tone is quieter and has its own spacing, so a launch never silences a landing.
 const LAND_LEVEL = 0.6
+// Lightning is quieter still, and at most one crackle every STORM_GAP_MS (many clouds flash).
+const STORM_LEVEL = 0.7
+const STORM_GAP_MS = 3500
 const ECHO_SECONDS = 0.14
 const ECHO_FEEDBACK = 0.3
 const ECHO_LEVEL = 0.35
@@ -65,8 +81,7 @@ export function createSoundPlayer(make: () => Ctx | null = defaultContext, now: 
   let ctx: Ctx | null = null
   // The shared output: master → speakers, and master → echo → speakers. Made once with the context.
   let master: GainNode | null = null
-  let last = -Infinity
-  let lastLand = -Infinity
+  const lasts: Record<string, number> = {}
   const context = () => {
     if (ctx === null) {
       ctx = make()
@@ -81,14 +96,15 @@ export function createSoundPlayer(make: () => Ctx | null = defaultContext, now: 
     },
     play(kind) {
       const t = now()
-      const land = kind === 'land'
-      if (t - (land ? lastLand : last) < MIN_GAP_MS) return
+      // Launches, landings and lightning each keep their own spacing, so one never silences another.
+      const lane = kind === 'land' || kind === 'storm' ? kind : 'event'
+      if (t - (lasts[lane] ?? -Infinity) < (lane === 'storm' ? STORM_GAP_MS : MIN_GAP_MS)) return
       const c = context()
       if (c === null || master === null || c.state !== 'running') return
-      if (land) lastLand = t
-      else last = t
+      lasts[lane] = t
+      const level = kind === 'land' ? LAND_LEVEL : kind === 'storm' ? STORM_LEVEL : 1
       const start = c.currentTime + 0.01
-      for (const tone of SOUND_SHAPES[kind]) voice(c, master, land ? { ...tone, gain: tone.gain * LAND_LEVEL } : tone, start)
+      for (const tone of SOUND_SHAPES[kind]) voice(c, master, level === 1 ? tone : { ...tone, gain: tone.gain * level }, start)
     },
   }
 }
@@ -111,9 +127,39 @@ function wire(c: Ctx): GainNode {
   return master
 }
 
+// One second of white noise per audio context, shared by every crackle.
+const noiseOf = new WeakMap<object, AudioBuffer>()
+function noiseBuffer(c: Ctx): AudioBuffer {
+  let buffer = noiseOf.get(c)
+  if (buffer === undefined) {
+    buffer = c.createBuffer(1, c.sampleRate, c.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+    noiseOf.set(c, buffer)
+  }
+  return buffer
+}
+
 function voice(c: Ctx, out: AudioNode, tone: Tone, start: number) {
   const a = start + tone.at
   const b = a + tone.dur
+  if (tone.noise) {
+    const src = c.createBufferSource()
+    src.buffer = noiseBuffer(c)
+    const env = c.createGain()
+    env.gain.setValueAtTime(tone.gain, a)
+    env.gain.exponentialRampToValueAtTime(0.0001, b)
+    src.connect(env)
+    const f = c.createBiquadFilter()
+    f.type = tone.filter?.type ?? 'bandpass'
+    f.frequency.value = tone.filter?.freq ?? 3000
+    f.Q.value = tone.filter?.q ?? 1
+    env.connect(f)
+    f.connect(out)
+    src.start(a, Math.random() * 0.5)
+    src.stop(b + 0.01)
+    return
+  }
   const osc = c.createOscillator()
   osc.type = tone.wave
   osc.frequency.setValueAtTime(tone.from, a)

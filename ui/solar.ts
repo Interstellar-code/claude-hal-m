@@ -117,6 +117,8 @@ export type SolarOptions = {
   onHover?: (tip: string[] | null, x: number, y: number) => void
   onPick?: (target: Target) => void
   onLevel?: (level: Target) => void
+  /** A nebula cloud's lightning flashed where it can be seen (the page plays its crackle). */
+  onStorm?: () => void
 }
 
 export type SolarScene = {
@@ -267,6 +269,8 @@ const FLASH_SECONDS = 1.1
 // A storm's next flash comes FLASH_GAP_MIN to FLASH_GAP_MIN + FLASH_GAP_SPREAD seconds after the last.
 const FLASH_GAP_MIN = 15
 const FLASH_GAP_SPREAD = 20
+// A storm's first flash comes 1 to 1 + FIRST_FLASH_SPREAD seconds after the nebula is built.
+const FIRST_FLASH_SPREAD = 5
 // The current on a tie: ties per second a pulse travels, at rest and when lit.
 const TIE_FLOW = 0.035
 // The electric blob on a tie: one bright core and BLOB_CRACKLE sparks crackling around it (re-placed every
@@ -1607,7 +1611,7 @@ class SolarImpl {
       bolt.userData = { kind: 'nebula-bolt' }
       group.add(bolt)
       const members = neb.specks.flatMap((sp, i) => (sp.cloud === ci ? [i] : []))
-      storms.push({ cloud: ci, glow, bolt, members, base: new T.Color(colour), next: 1 + this.stormRng() * FLASH_GAP_MIN, flashAt: -99 })
+      storms.push({ cloud: ci, glow, bolt, members, base: new T.Color(colour), next: 1 + this.stormRng() * FIRST_FLASH_SPREAD, flashAt: -99 })
       if (cloud.name === '') return
       const label = this.label(cloud.name, `${cloud.count} memories`, colour, Math.max(18, builtR * 0.05))
       label.position.set(cloud.centre[0], cloud.centre[1] - 18, cloud.centre[2])
@@ -1780,6 +1784,7 @@ class SolarImpl {
         S.flashAt = this.clock
         S.next = this.clock + FLASH_GAP_MIN + this.stormRng() * FLASH_GAP_SPREAD
         this.shapeBolt(S)
+        if (light > 0.05) this.opts.onStorm?.()
       }
       const age = this.clock - S.flashAt
       const flash = age < 0 || age > FLASH_SECONDS ? 0 : Math.min(1, Math.max(Math.exp(-age / 0.12), age > 0.25 ? 0.85 * Math.exp(-(age - 0.25) / 0.18) : 0))

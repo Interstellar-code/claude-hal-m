@@ -3,7 +3,7 @@ import { createSoundPlayer, SOUND_SHAPES } from '../../ui/sound'
 import { initialSolarPage, readSolarPage, saveSolarPage, toggleShow, LINE_TOGGLES } from '../../ui/map-state'
 
 // The oscillators one sound starts: one per tone, and one more for each tone with a pitch wobble.
-const oscillators = (kind: keyof typeof SOUND_SHAPES) => SOUND_SHAPES[kind].reduce((n, tone) => n + (tone.fm ? 2 : 1), 0)
+const oscillators = (kind: keyof typeof SOUND_SHAPES) => SOUND_SHAPES[kind].reduce((n, tone) => n + (tone.fm && !tone.noise ? 2 : 1), 0)
 
 // A stand-in AudioContext that counts the oscillators started.
 function fakeContext(state: 'running' | 'suspended' = 'running') {
@@ -23,6 +23,9 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
     createGain: node,
     createBiquadFilter: node,
     createDelay: node,
+    sampleRate: 100,
+    createBuffer: (_c: number, length: number) => ({ getChannelData: () => new Float32Array(length) }),
+    createBufferSource: () => ({ ...node(), buffer: null, start() { ctx.started++ }, stop() {} }),
     createOscillator: () => ({ ...node(), start() { ctx.started++ }, stop() {} }),
   }
   return ctx
@@ -30,7 +33,7 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
 
 describe('sound effects', () => {
   test('each kind plays its own tones', () => {
-    for (const kind of ['recall', 'save', 'update', 'forget', 'land'] as const) {
+    for (const kind of ['recall', 'save', 'update', 'forget', 'land', 'storm'] as const) {
       const ctx = fakeContext()
       createSoundPlayer(() => ctx, () => 0).play(kind)
       expect(ctx.started).toBe(oscillators(kind))
@@ -56,6 +59,21 @@ describe('sound effects', () => {
     player.play('save')
     player.play('land')
     expect(ctx.started).toBe(oscillators('save') + oscillators('land'))
+  })
+
+  test('lightning crackles at most once every 3.5 s, and never silences an event', () => {
+    const ctx = fakeContext()
+    let t = 0
+    const player = createSoundPlayer(() => ctx, () => t)
+    player.play('storm')
+    player.play('recall')
+    expect(ctx.started).toBe(oscillators('storm') + oscillators('recall'))
+    t = 2000
+    player.play('storm')
+    expect(ctx.started).toBe(oscillators('storm') + oscillators('recall'))
+    t = 4000
+    player.play('storm')
+    expect(ctx.started).toBe(2 * oscillators('storm') + oscillators('recall'))
   })
 
   test('nothing plays until the page wakes the audio; no audio at all is quiet', () => {

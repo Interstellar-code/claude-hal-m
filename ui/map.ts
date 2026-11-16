@@ -1129,6 +1129,9 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
         onHover: hover,
         onPick: target => send(scene => scene.flyTo(target)),
         onLevel: applyLevel,
+        onStorm: () => {
+          if (page.sound) sound.play('storm')
+        },
       })
     } catch (err) {
       broken = true

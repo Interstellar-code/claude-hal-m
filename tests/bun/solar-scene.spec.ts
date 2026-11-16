@@ -46,6 +46,7 @@ function rig(options: { reduced?: boolean; data?: any; withData?: boolean; view?
   const hovers: { tip: Tip; x: number; y: number }[] = []
   const picks: any[] = []
   const levels: any[] = []
+  const storms: number[] = []
   let renderer!: FakeRenderer
   let composer!: MatrixComposer
   const scene = createSolarScene({
@@ -57,6 +58,7 @@ function rig(options: { reduced?: boolean; data?: any; withData?: boolean; view?
     onHover: (tip: Tip, x: number, y: number) => hovers.push({ tip, x, y }),
     onPick: (target: any) => picks.push(target),
     onLevel: (level: any) => levels.push(level),
+    onStorm: () => storms.push(clock.now),
   })
   if (options.view) scene.setView(options.view)
   if (options.withData !== false) scene.setData(options.data ?? galaxy())
@@ -82,6 +84,7 @@ function rig(options: { reduced?: boolean; data?: any; withData?: boolean; view?
     hovers,
     picks,
     levels,
+    storms,
     scene,
     camera,
     sceneRoot,
@@ -1941,6 +1944,21 @@ describe('0.30.0 storms', () => {
       still.clock.tick()
       expect(still.all(o => o.userData?.kind === 'nebula-bolt' && o.visible)).toHaveLength(0)
     }
+    still.scene.dispose()
+  })
+
+  test('a flash tells the page (for its crackle); none with the nebula off or under reduced motion', () => {
+    const r = rig({ data: tiedData(), reduced: false })
+    for (let k = 0; k < 8 / 0.016; k++) r.clock.tick()
+    expect(r.storms.length).toBeGreaterThan(0)
+    r.scene.setView({ nebula: false })
+    const before = r.storms.length
+    for (let k = 0; k < 40 / 0.016; k++) r.clock.tick()
+    expect(r.storms.length).toBe(before)
+    r.scene.dispose()
+    const still = rig({ data: tiedData(), reduced: true })
+    for (let k = 0; k < 8 / 0.016; k++) still.clock.tick()
+    expect(still.storms).toHaveLength(0)
     still.scene.dispose()
   })
 })
