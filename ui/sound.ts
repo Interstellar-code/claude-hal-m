@@ -1,8 +1,9 @@
 // Sound effects for live map events (recall, save, update, forget), made with the Web Audio API: no sound files.
-// The palette is sci-fi console, not arcade: a tricorder scan for a recall, a phaser beam for a save, a tricorder
-// chirp for an update and a disruptor zap for a forget, all with a short space echo; a soft shimmer as it lands;
-// an electric crackle with a low rumble when a nebula cloud's lightning flashes; and a deep swelling chord when
-// the monolith (The Human) answers.
+// One palette, cinematic rather than arcade, built like the monolith's chord: low warm tones that swell in and fade,
+// soft airy whooshes (filtered noise sweeping up or down), slow beating between close voices, and a long space echo.
+// No square waves or fast buzz. A recall rises like data surfacing, a save settles with a low thrum, an update is a
+// soft glassy two-note bell, a forget dissolves downwards; a deep soft thud as an event lands; a crackle over a
+// distant rumble for the nebula's lightning; and the monolith's deep swelling chord.
 // Off by default. A browser starts audio only after a click on the page, so the context is made (or resumed) then.
 
 export type SoundKind = 'recall' | 'save' | 'update' | 'forget' | 'land' | 'storm' | 'monolith'
@@ -20,7 +21,8 @@ export type Tone = {
   dur: number
   gain: number
   fm?: { rate: number; depth: number }
-  filter?: { type: BiquadFilterType; freq: number; q: number }
+  /** `sweep`: the filter's frequency glides to this over the voice (a whoosh rising or falling). */
+  filter?: { type: BiquadFilterType; freq: number; q: number; sweep?: number }
   /** A burst of white noise instead of a tone (its `wave`, `from` and `to` are not used): the crackle of a spark. */
   noise?: true
   /** Seconds to swell in (default 0.01): a slow attack for the monolith's chord. */
@@ -34,43 +36,52 @@ const chord: Tone[] = CHORD.map((hz, i) => ({ wave: i % 2 === 0 ? 'sine' : 'tria
 
 // A crackle: short noise snaps around the two strikes of a nebula flash (at 0 s and 0.25 s).
 const SNAPS = [0, 0.028, 0.061, 0.095, 0.25, 0.272, 0.31]
-const crackle: Tone[] = SNAPS.map((at, i) => ({ wave: 'sine', from: 1, to: 1, at, dur: 0.018 + (i % 3) * 0.012, gain: i === 0 || i === 4 ? 0.9 : 0.5, noise: true, filter: { type: 'bandpass', freq: 2600 + (i % 4) * 600, q: 1.4 } }))
+const crackle: Tone[] = SNAPS.map((at, i) => ({ wave: 'sine', from: 1, to: 1, at, dur: 0.018 + (i % 3) * 0.012, gain: i === 0 || i === 4 ? 0.55 : 0.3, noise: true, filter: { type: 'bandpass', freq: 2600 + (i % 4) * 600, q: 1.4 } }))
 
-// A tricorder scan: quick soft beeps hopping between high pitches.
-const SCAN = [2100, 2650, 1900, 2950, 2300, 3150, 2700]
-const scan: Tone[] = SCAN.map((hz, i) => ({ wave: 'sine', from: hz, to: hz * 1.04, at: i * 0.045, dur: 0.034, gain: 0.55, fm: { rate: 70, depth: 110 }, filter: { type: 'bandpass', freq: 2600, q: 0.9 } }))
+// A whoosh: filtered noise whose band sweeps from `from` to `to` Hz.
+const whoosh = (from: number, to: number, at: number, dur: number, gain: number, attack = 0.15): Tone => ({ wave: 'sine', from: 1, to: 1, at, dur, gain, attack, noise: true, filter: { type: 'bandpass', freq: from, q: 2.2, sweep: to } })
+// A warm low voice: a sine (or triangle) with a slow beat, softened.
+const warm = (from: number, to: number, at: number, dur: number, gain: number, attack: number, wave: OscillatorType = 'sine'): Tone => ({ wave, from, to, at, dur, gain, attack, fm: { rate: 0.6 + (from % 7) * 0.1, depth: from * 0.004 }, filter: { type: 'lowpass', freq: 1400, q: 0.5 } })
 
 export const SOUND_SHAPES: Readonly<Record<SoundKind, readonly Tone[]>> = {
-  recall: scan,
+  recall: [
+    // Data surfacing: a soft rising fifth over a whoosh sweeping up.
+    warm(196, 262, 0, 0.9, 0.5, 0.18),
+    warm(294, 392, 0.06, 0.85, 0.3, 0.2, 'triangle'),
+    whoosh(500, 3200, 0, 0.8, 0.5, 0.2),
+  ],
   save: [
-    // The phaser: a buzzing saw whine with a fast wobble, through a narrow band, sliding down a little.
-    { wave: 'sawtooth', from: 1550, to: 1280, at: 0, dur: 0.62, gain: 0.85, fm: { rate: 55, depth: 170 }, filter: { type: 'bandpass', freq: 1700, q: 4 } },
-    { wave: 'sine', from: 3100, to: 2650, at: 0, dur: 0.6, gain: 0.22, fm: { rate: 55, depth: 220 } },
+    // Committed: a low thrum settling on an octave, a whoosh falling into it.
+    warm(110, 98, 0, 1.1, 0.6, 0.08),
+    warm(196, 147, 0.02, 1.0, 0.3, 0.1, 'triangle'),
+    whoosh(2600, 400, 0, 0.7, 0.45, 0.1),
   ],
   update: [
-    // A tricorder chirp: two soft rising notes with a little warble.
-    { wave: 'sine', from: 1750, to: 1900, at: 0, dur: 0.07, gain: 0.55, fm: { rate: 90, depth: 70 }, filter: { type: 'lowpass', freq: 5200, q: 0.7 } },
-    { wave: 'sine', from: 2350, to: 2550, at: 0.085, dur: 0.11, gain: 0.55, fm: { rate: 90, depth: 70 }, filter: { type: 'lowpass', freq: 5200, q: 0.7 } },
+    // A soft glassy two-note bell, low and slow to fade.
+    warm(392, 392, 0, 0.9, 0.35, 0.02),
+    warm(587, 587, 0.14, 1.0, 0.3, 0.02),
+    warm(784, 784, 0.14, 0.6, 0.08, 0.02),
+  ],
+  forget: [
+    // Dissolving: a low tone sinking away under a whoosh that falls and thins out.
+    warm(147, 73, 0, 1.4, 0.5, 0.06),
+    warm(220, 104, 0.05, 1.3, 0.22, 0.08, 'triangle'),
+    whoosh(1800, 160, 0, 1.2, 0.5, 0.05),
   ],
   land: [
-    // The landing: a soft low shimmer as the event reaches its planet.
-    { wave: 'sine', from: 660, to: 520, at: 0, dur: 0.38, gain: 0.45, fm: { rate: 6, depth: 12 } },
-    { wave: 'triangle', from: 165, to: 140, at: 0, dur: 0.42, gain: 0.5, filter: { type: 'lowpass', freq: 900, q: 0.7 } },
+    // The landing: a deep soft thud with a breath of air.
+    { wave: 'sine', from: 82, to: 55, at: 0, dur: 0.6, gain: 0.7, attack: 0.01 },
+    whoosh(900, 300, 0, 0.35, 0.18, 0.02),
   ],
   monolith: [
     ...chord,
     { wave: 'sine', from: 1760, to: 1740, at: 0.5, dur: 3.6, gain: 0.06, attack: 1.4, fm: { rate: 4.5, depth: 6 } },
   ],
   storm: [
-    // The nebula's lightning: an electric crackle over a low hum and a soft distant rumble.
+    // The nebula's lightning: a soft crackle over a distant rolling rumble.
     ...crackle,
-    { wave: 'sawtooth', from: 110, to: 92, at: 0, dur: 0.7, gain: 0.22, fm: { rate: 40, depth: 22 }, filter: { type: 'lowpass', freq: 650, q: 1 } },
-    { wave: 'sine', from: 72, to: 38, at: 0.05, dur: 1.1, gain: 0.6, fm: { rate: 9, depth: 8 } },
-  ],
-  forget: [
-    // The disruptor: a deep buzz falling fast through a resonant band, with a low body under it.
-    { wave: 'sawtooth', from: 950, to: 70, at: 0, dur: 0.5, gain: 0.8, fm: { rate: 34, depth: 280 }, filter: { type: 'bandpass', freq: 850, q: 6 } },
-    { wave: 'sine', from: 320, to: 42, at: 0, dur: 0.5, gain: 0.55 },
+    { wave: 'sine', from: 64, to: 40, at: 0.05, dur: 1.6, gain: 0.6, attack: 0.15, fm: { rate: 7, depth: 6 } },
+    whoosh(700, 120, 0.05, 1.4, 0.25, 0.2),
   ],
 }
 
@@ -85,9 +96,9 @@ const STORM_LEVEL = 0.7
 const STORM_GAP_MS = 3500
 // The monolith's chord: never two at once.
 const MONOLITH_GAP_MS = 3000
-const ECHO_SECONDS = 0.14
-const ECHO_FEEDBACK = 0.3
-const ECHO_LEVEL = 0.35
+const ECHO_SECONDS = 0.29
+const ECHO_FEEDBACK = 0.38
+const ECHO_LEVEL = 0.42
 
 export type SoundPlayer = { play: (kind: SoundKind) => void; wake: () => void }
 
@@ -142,12 +153,12 @@ function wire(c: Ctx): GainNode {
   return master
 }
 
-// One second of white noise per audio context, shared by every crackle.
+// Two seconds of white noise per audio context, shared by every crackle and whoosh (looped, so none runs out).
 const noiseOf = new WeakMap<object, AudioBuffer>()
 function noiseBuffer(c: Ctx): AudioBuffer {
   let buffer = noiseOf.get(c)
   if (buffer === undefined) {
-    buffer = c.createBuffer(1, c.sampleRate, c.sampleRate)
+    buffer = c.createBuffer(1, c.sampleRate * 2, c.sampleRate)
     const data = buffer.getChannelData(0)
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
     noiseOf.set(c, buffer)
@@ -161,13 +172,17 @@ function voice(c: Ctx, out: AudioNode, tone: Tone, start: number) {
   if (tone.noise) {
     const src = c.createBufferSource()
     src.buffer = noiseBuffer(c)
+    src.loop = true
     const env = c.createGain()
-    env.gain.setValueAtTime(tone.gain, a)
+    const rise = tone.attack ?? 0.001
+    env.gain.setValueAtTime(0.0001, a)
+    env.gain.exponentialRampToValueAtTime(tone.gain, a + rise)
     env.gain.exponentialRampToValueAtTime(0.0001, b)
     src.connect(env)
     const f = c.createBiquadFilter()
     f.type = tone.filter?.type ?? 'bandpass'
-    f.frequency.value = tone.filter?.freq ?? 3000
+    f.frequency.setValueAtTime(tone.filter?.freq ?? 3000, a)
+    if (tone.filter?.sweep) f.frequency.exponentialRampToValueAtTime(tone.filter.sweep, b)
     f.Q.value = tone.filter?.q ?? 1
     env.connect(f)
     f.connect(out)
@@ -189,7 +204,8 @@ function voice(c: Ctx, out: AudioNode, tone: Tone, start: number) {
   if (tone.filter) {
     const f = c.createBiquadFilter()
     f.type = tone.filter.type
-    f.frequency.value = tone.filter.freq
+    f.frequency.setValueAtTime(tone.filter.freq, a)
+    if (tone.filter.sweep) f.frequency.exponentialRampToValueAtTime(tone.filter.sweep, b)
     f.Q.value = tone.filter.q
     env.connect(f)
     f.connect(out)

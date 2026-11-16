@@ -164,10 +164,21 @@ const EVENT_CHARS = 48
 // The monolith: its height in sun radii, how far above the sun it hangs (share of the widest orbit), its answer's
 // colour and length in seconds, and the points of the ripple's circle.
 const MONOLITH_HEIGHT = 2.6
-const MONOLITH_LIFT = 0.48
+const MONOLITH_LIFT = 0.24
 const MONOLITH_GOLD = '#ffe2a6'
-const MONOLITH_SECONDS = 3.2
+const MONOLITH_SECONDS = 4.6
 const RIPPLE_POINTS = 96
+// The monolith's screen (a green dot matrix, cells of SCREEN_CELL pixels), the beam's string of glows and how long
+// its head takes to reach the sun, and the ripples: how many, how far apart and how long each takes to cross.
+const MATRIX_GREEN = '#3dff8a'
+const SCREEN_COLS = 9
+const SCREEN_ROWS = 20
+const SCREEN_CELL = 8
+const BEAM_GLOWS = 14
+const BEAM_DROP = 0.55
+const RIPPLES = 3
+const RIPPLE_GAP = 0.35
+const RIPPLE_SECONDS = 2.8
 // How much a body's name grows while a live event is bound for it.
 const LABEL_GROW = 0.8
 const EVENT_VERB = { recall: 'recalled', save: 'saved', update: 'updated', forget: 'forgotten' } as const
@@ -398,7 +409,7 @@ class SolarImpl {
   private readonly fx: O3
   private pickables: O3[] = []
   /** The Human: the monolith above the sun, its beam down to the sun, the sun's swell and the ripple across the orbits. */
-  private mono: { g: O3; edges: O3; label: O3; beam: O3; swell: O3; ripple: O3; at: number } | null = null
+  private mono: { g: O3; edges: O3; halo: O3; label: O3; beam: O3; glows: O3[]; head: O3; swell: O3; ripples: O3[]; screen: { c: O3; tex: O3; drops: number[]; speeds: number[]; drawn: number }; at: number } | null = null
   private sats: O3[] = []
 
   private galaxy: SceneGalaxy | null = null
@@ -2467,6 +2478,15 @@ class SolarImpl {
    */
   private eventLight(): Map<string, { k: number; colour: string }> {
     const out = new Map<string, { k: number; colour: string }>()
+    // The monolith's ripple: each body lights in gold as the wave passes its orbit.
+    const wave = this.waveRadius()
+    if (wave !== null) {
+      const band = (this.maxR || 700) * 0.09
+      for (const id in this.P) {
+        const d = Math.abs((this.P[id] as PlanetRec).r - wave)
+        if (d < band) out.set(id, { k: 0.75 * (1 - d / band), colour: MONOLITH_GOLD })
+      }
+    }
     for (const ev of this.events) {
       if (ev.owner === null || ev.type === 'pulse') continue
       const t = this.clock - ev.start
@@ -2485,18 +2505,26 @@ class SolarImpl {
     return full.length > EVENT_CHARS ? `${full.slice(0, EVENT_CHARS - 1).trimEnd()}…` : full
   }
 
-  /** The Human answers: the beam drops to the sun, the sun swells and a ripple runs out across the orbits. */
+  /** The Human answers: a glowing beam drops to the sun, the sun swells and ripples run out across the whole galaxy. */
   monolith(): void {
     if (this.disposed || this.mono === null) return
     this.mono.at = this.clock
   }
 
-  /** The monolith (2001's slab, 1:4:9), over the sun on the galaxy's axis, with its label and its (hidden) answer. */
+  /**
+   * The monolith (2001's slab, 1:4:9) over the sun on the galaxy's axis. Its two broad faces are a green dot-matrix
+   * screen, like a rack of server lights, with columns of light running down it; its edges glow green.
+   */
   private buildMonolith(): void {
     const T = this.T
     const g = new T.Group()
     const geo = new T.BoxGeometry(4 / 9, 1, 1 / 9)
-    const slab = new T.Mesh(geo, new T.MeshBasicMaterial({ color: new T.Color('#030409') }))
+    const c = this.canvas2d(SCREEN_COLS * SCREEN_CELL, SCREEN_ROWS * SCREEN_CELL)
+    const tex = this.texture(c)
+    const side = new T.MeshBasicMaterial({ color: new T.Color('#030409') })
+    const face = new T.MeshBasicMaterial({ map: tex, color: new T.Color('#ffffff') })
+    // BoxGeometry's faces: +x, -x, +y, -y, +z (front), -z (back).
+    const slab = new T.Mesh(geo, [side, side, side, side, face, face])
     slab.userData = { kind: 'monolith', tip: ['The Human (the monolith)', 'you: your own saves, edits and forgets in the dashboard wake it', 'it also answers every 10th memory event'] }
     // The slab's edges as one line (the vendored bundle has no EdgesGeometry): front, back, then the four joins.
     const X = 2 / 9
@@ -2506,15 +2534,22 @@ class SolarImpl {
     const walk: [number, boolean][] = [[0, false], [1, false], [2, false], [3, false], [0, false], [0, true], [1, true], [2, true], [3, true], [0, true], [1, true], [1, false], [2, false], [2, true], [3, true], [3, false]]
     const eg = new T.BufferGeometry()
     eg.setAttribute('position', new T.BufferAttribute(new Float32Array(walk.flatMap(([i, back]) => corner(i, back))), 3))
-    const edges = new T.Line(eg, new T.LineBasicMaterial({ color: new T.Color('#9fb4d6'), transparent: true, opacity: 0.45, depthWrite: false }))
+    const edges = new T.Line(eg, new T.LineBasicMaterial({ color: new T.Color(MATRIX_GREEN), transparent: true, opacity: 0.55, depthWrite: false, blending: T.AdditiveBlending }))
     g.add(slab, edges)
     this.pickables.push(slab)
-    const label = this.label('The Human', null, '#d9e2f2', 14)
+    // A soft green halo around the slab.
+    const halo = this.glow(MATRIX_GREEN, 1, 0.16)
+    const label = this.label('The Human', null, '#bfffd6', 14)
     const bg = new T.BufferGeometry()
     bg.setAttribute('position', new T.BufferAttribute(new Float32Array(6), 3))
     const beam = new T.Line(bg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
     beam.frustumCulled = false
     beam.userData = { kind: 'monolith-beam' }
+    // The beam's glow: soft lights strung along it, and a bright head that runs down to the sun.
+    const glows: O3[] = []
+    for (let k = 0; k < BEAM_GLOWS; k++) glows.push(this.glow(MONOLITH_GOLD, 1, 0))
+    const head = this.glow('#fff6dc', 1, 0)
+    head.userData = { kind: 'monolith-head' }
     const swell = this.glow(MONOLITH_GOLD, 1, 0)
     swell.userData = { kind: 'monolith-swell' }
     const ra = new Float32Array((RIPPLE_POINTS + 1) * 3)
@@ -2523,13 +2558,45 @@ class SolarImpl {
       ra[k * 3] = Math.cos(a)
       ra[k * 3 + 2] = Math.sin(a)
     }
-    const rg = new T.BufferGeometry()
-    rg.setAttribute('position', new T.BufferAttribute(ra, 3))
-    const ripple = new T.Line(rg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
-    ripple.frustumCulled = false
-    ripple.userData = { kind: 'monolith-ripple' }
-    this.world.add(g, label, beam, swell, ripple)
-    this.mono = { g, edges, label, beam, swell, ripple, at: this.mono?.at ?? -99 }
+    const ripples: O3[] = []
+    for (let k = 0; k < RIPPLES; k++) {
+      const rg = new T.BufferGeometry()
+      rg.setAttribute('position', new T.BufferAttribute(ra.slice(), 3))
+      const ring = new T.Line(rg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+      ring.frustumCulled = false
+      ring.visible = false
+      ring.userData = { kind: 'monolith-ripple' }
+      ripples.push(ring)
+    }
+    this.world.add(g, halo, label, beam, ...glows, head, swell, ...ripples)
+    const drops = Array.from({ length: SCREEN_COLS }, () => Math.random() * SCREEN_ROWS)
+    const speeds = Array.from({ length: SCREEN_COLS }, () => 4 + Math.random() * 7)
+    this.mono = { g, edges, halo, label, beam, glows, head, swell, ripples, screen: { c, tex, drops, speeds, drawn: -1 }, at: this.mono?.at ?? -99 }
+    this.drawScreen(0, 0)
+  }
+
+  /** The dot-matrix face: dim green cells, columns of light falling at their own speeds, now and then a blinking cell. */
+  private drawScreen(dt: number, boost: number): void {
+    const M = this.mono
+    if (M === null) return
+    const { c, tex, drops, speeds } = M.screen
+    const g = c.getContext('2d')
+    if (!g) return
+    const n = SCREEN_CELL
+    g.fillStyle = '#010603'
+    g.fillRect(0, 0, c.width, c.height)
+    for (let x = 0; x < SCREEN_COLS; x++) {
+      drops[x] = ((drops[x] as number) + dt * (speeds[x] as number) * (1 + boost)) % (SCREEN_ROWS + 6)
+      for (let y = 0; y < SCREEN_ROWS; y++) {
+        const behind = (drops[x] as number) - y
+        const trail = behind >= 0 && behind < 6 ? 1 - behind / 6 : 0
+        const blink = Math.random() < 0.012 ? 0.8 : 0
+        const lit = Math.min(1, 0.1 + 0.9 * Math.max(trail, blink) + 0.35 * boost)
+        g.fillStyle = `rgba(61, 255, 138, ${lit.toFixed(3)})`
+        g.fillRect(x * n + 1, y * n + 1, n - 2, n - 2)
+      }
+    }
+    tex.needsUpdate = true
   }
 
   private stepMonolith(dt: number, spin: number): void {
@@ -2541,24 +2608,61 @@ class SolarImpl {
     M.g.position.set(0, y, 0)
     M.g.scale.setScalar(h)
     M.g.rotation.y += dt * 0.05 * spin
+    M.halo.position.set(0, y, 0)
+    M.halo.scale.setScalar(h * 1.5)
     M.label.position.set(0, y - h * 0.5 - 14, 0)
     const t = this.clock - M.at
     const on = t >= 0 && t < MONOLITH_SECONDS
-    // The answer: the beam comes down at once and fades; the sun swells a moment later; the ripple runs out to the edge.
-    const beamK = on ? (this.reduced ? 1 : Math.min(1, t / 0.25) * Math.exp(-Math.max(0, t - 0.25) / 1.2)) : 0
+    // The screen redraws about 12 times a second (its columns stand still under reduced motion), faster while it answers.
+    const answering = on ? Math.max(0, 1 - t / 2) : 0
+    if (!this.reduced && this.clock - M.screen.drawn >= 1 / 12) {
+      this.drawScreen(M.screen.drawn < 0 ? 0 : this.clock - M.screen.drawn, answering)
+      M.screen.drawn = this.clock
+    }
+    M.halo.material.opacity = 0.16 + 0.3 * answering
+    // The answer: the beam lights at once, its head runs down to the sun in BEAM_DROP s, then it fades.
+    const top = y - h * 0.5
+    const bottom = this.sunR
+    const beamK = on ? (this.reduced ? 1 : Math.min(1, t / 0.15) * Math.exp(-Math.max(0, t - BEAM_DROP) / 1.4)) : 0
     const arr = M.beam.geometry.attributes.position.array
-    arr[1] = y - h * 0.5
-    arr[4] = this.sunR
+    arr[1] = top
+    arr[4] = bottom
     M.beam.geometry.attributes.position.needsUpdate = true
     M.beam.material.opacity = beamK
-    M.edges.material.opacity = 0.45 + 0.55 * beamK
-    const swellK = on ? (this.reduced ? 0.7 : Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (t - 0.2) / 2))))) : 0
-    M.swell.scale.setScalar(this.sunR * (5 + 4 * swellK))
-    M.swell.material.opacity = 0.6 * swellK
-    const rippleU = this.reduced ? 0 : Math.max(0, (t - 0.4) / (MONOLITH_SECONDS - 0.4))
-    M.ripple.visible = on && !this.reduced && rippleU > 0
-    M.ripple.scale.setScalar(this.sunR + (m * 1.05 - this.sunR) * rippleU)
-    M.ripple.material.opacity = 0.55 * (1 - rippleU)
+    M.edges.material.opacity = 0.55 + 0.45 * Math.max(beamK, answering)
+    const drop = this.reduced ? 1 : Math.min(1, Math.max(0, t / BEAM_DROP))
+    for (let k = 0; k < M.glows.length; k++) {
+      const f = k / (M.glows.length - 1)
+      const gl = M.glows[k] as O3
+      gl.position.set(0, top + (bottom - top) * f, 0)
+      gl.scale.setScalar(this.sunR * (0.9 + 0.5 * Math.sin(this.clock * 9 + k)))
+      // A glow lights once the head has passed it.
+      gl.material.opacity = f <= drop ? 0.55 * beamK : 0
+    }
+    M.head.position.set(0, top + (bottom - top) * drop, 0)
+    M.head.scale.setScalar(this.sunR * 1.6)
+    M.head.material.opacity = on && !this.reduced && t < BEAM_DROP + 0.2 ? 1 - Math.max(0, t - BEAM_DROP) / 0.2 : 0
+    // At the sun: it swells, and ripples run out across the whole galaxy, one after another.
+    const swellK = on ? (this.reduced ? 0.7 : Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (t - BEAM_DROP) / 2.2))))) : 0
+    M.swell.scale.setScalar(this.sunR * (5 + 8 * swellK))
+    M.swell.material.opacity = 0.75 * swellK
+    for (let k = 0; k < M.ripples.length; k++) {
+      const ring = M.ripples[k] as O3
+      const u = (t - BEAM_DROP - k * RIPPLE_GAP) / RIPPLE_SECONDS
+      ring.visible = on && !this.reduced && u > 0 && u < 1
+      ring.scale.setScalar(this.sunR + (m * 1.12 - this.sunR) * Math.max(0, u))
+      ring.material.opacity = 0.85 * (1 - Math.max(0, u)) * (k === 0 ? 1 : 0.6)
+    }
+  }
+
+  /** Where the first ripple is now (its radius), or null when none is running: the bodies it passes light up. */
+  private waveRadius(): number | null {
+    const M = this.mono
+    if (M === null || this.reduced) return null
+    const u = (this.clock - M.at - BEAM_DROP) / RIPPLE_SECONDS
+    if (u <= 0 || u >= 1) return null
+    const m = this.maxR || 700
+    return this.sunR + (m * 1.12 - this.sunR) * u
   }
 
   /** The dots of the listed ids, with the colour each has now (a forgotten memory fades out of it). */
@@ -2771,11 +2875,14 @@ class SolarImpl {
     if (this.tipShown) this.holdUntil = this.clock + HOVER_HOLD_SECONDS
     this.held = this.tipShown || this.clock < this.holdUntil
     const spin = motion * MOTION_SCALE * (this.held ? 0 : 1)
+    // `orbit` drives what makes the whole galaxy turn (orbits, the sun, its belts, the monolith): Auto-rotate off
+    // holds them all still, so the galaxy stops turning; planets still spin in place and moons still circle.
+    const orbit = s.rotate === false ? 0 : spin
     // Focus (0.16.0): the hovered project while held, else the project opened (planet, moon or memory level).
     if (!this.held) this.hoverOwner = null
     const focus = this.hoverOwner ?? (this.S.level !== 'galaxy' ? this.S.planet : null)
     const lit = this.eventLight()
-    if (this.sunG) this.sunG.rotation.y += dt * 0.12 * spin
+    if (this.sunG) this.sunG.rotation.y += dt * 0.12 * orbit
     for (const [source, mesh] of this.nodules) {
       const at = this.flares.get(source)
       mesh.scale.setScalar(1 + (at === undefined || this.reduced ? 0 : Math.max(0, 1 - (this.clock - at) * 1.5)) * 0.8)
@@ -2789,7 +2896,7 @@ class SolarImpl {
       const lead = members[0]
       if (!lead) continue
       const speed = ring.speed
-      if (S.level === 'galaxy') lead.angle += dt * speed * spin
+      if (S.level === 'galaxy') lead.angle += dt * speed * orbit
       members.forEach((member, mi) => {
         const og = member.orbitG
         og.rotation.x += (ring.tilt.x - og.rotation.x) * Math.min(1, dt * 3)
@@ -2856,10 +2963,10 @@ class SolarImpl {
     const outerR = this.maxR + 70
     if (this.outer) {
       this.outer.scale.set(outerR, 1, outerR)
-      this.outer.rotation.y += dt * 0.004 * spin
+      this.outer.rotation.y += dt * 0.004 * orbit
       this.outerLabel.position.set(0, 30, -outerR)
     }
-    if (this.sunBeltObj) this.sunBeltObj.rotation.y += dt * 0.06 * spin
+    if (this.sunBeltObj) this.sunBeltObj.rotation.y += dt * 0.06 * orbit
     if (this.neb) this.stepNebula(focus, dt)
 
     // Sun-belt tethers: each true global dot (it turns with the belt) to the planet it is close to (it orbits).
@@ -2991,7 +3098,7 @@ class SolarImpl {
     }
 
     this.stepEvents()
-    this.stepMonolith(dt, spin)
+    this.stepMonolith(dt, s.rotate === false ? 0 : spin)
     this.satellites()
 
     // Camera flight.

@@ -407,16 +407,32 @@ describe('MAPX.5 hover', () => {
     r.scene.dispose()
   })
 
+  test('Auto-rotate off holds the galaxy still: the orbits and the sun stop; on, they move', () => {
+    const lead = (r: ReturnType<typeof rig>) => angleOf(r.worldPos(r.planet(MATRIX)))
+    const still = rig({ reduced: false, view: { rotate: false } })
+    const sun = still.all(o => o.userData?.kind === 'sun')[0]
+    const a0 = lead(still)
+    const s0 = sun.parent.rotation.y
+    still.run(4)
+    expect(Math.abs(lead(still) - a0)).toBeLessThan(1e-9)
+    expect(sun.parent.rotation.y).toBe(s0)
+    still.scene.setView({ rotate: true })
+    const a1 = lead(still)
+    still.run(4)
+    expect(Math.abs(lead(still) - a1)).toBeGreaterThan(0.01)
+    still.scene.dispose()
+  })
+
   test('0.16.0 hovering holds the map still, and for 2 s after the tooltip closes; free motion is half the old speed', () => {
     const lead = (r: ReturnType<typeof rig>) => angleOf(r.worldPos(r.planet(MATRIX)))
-    const free = rig({ reduced: false })
+    const free = rig({ reduced: false, view: { rotate: true } })
     const a0 = lead(free)
     free.run(4)
     const freeMove = Math.abs(lead(free) - a0)
     // half of the 0.11.0 speed: 4 s used to move this planet a little over 0.04 rad
     expect(freeMove).toBeGreaterThan(0.015)
     expect(freeMove).toBeLessThan(0.03)
-    const held = rig({ reduced: false })
+    const held = rig({ reduced: false, view: { rotate: true } })
     const sun = held.screen(held.all(o => o.userData?.kind === 'sun')[0])
     expect(held.locate(t => kindOf(t) === 'sun' || kindOf(t) === 'nodule', { x0: sun.x - 6, y0: sun.y - 6, x1: sun.x + 6, y1: sun.y + 6 }, 2)).not.toBeNull()
     const b0 = lead(held)
@@ -871,6 +887,9 @@ describe('MAPX.5 live events', () => {
     const r = rig({ reduced: false })
     const slab = r.all(o => o.userData?.kind === 'monolith')[0]
     expect(slab).toBeDefined()
+    // Its broad faces are the green dot-matrix screen.
+    expect(slab.material[4].map).toBeDefined()
+    expect(slab.material[5].map).toBe(slab.material[4].map)
     const at = r.worldPos(slab)
     expect(at.y).toBeGreaterThan(100)
     expect(Math.hypot(at.x, at.z)).toBeLessThan(1)
@@ -884,9 +903,15 @@ describe('MAPX.5 live events', () => {
     r.run(1)
     expect(ripple.visible).toBe(true)
     const early = ripple.scale.x
-    r.run(1)
+    // The bodies the wave passes light their names in gold.
+    let lit = false
+    for (let k = 0; k < 60 && !lit; k++) {
+      r.run(0.05)
+      lit = r.all(o => o.isSprite && o.renderOrder === 12).length > 0
+    }
+    expect(lit).toBe(true)
     expect(ripple.scale.x).toBeGreaterThan(early)
-    r.run(2)
+    r.run(4)
     expect(beam.material.opacity).toBe(0)
     expect(ripple.visible).toBe(false)
     r.scene.dispose()
@@ -1571,13 +1596,13 @@ describe('MAPX.5 review R5 fixes', () => {
 
   test('F5 setData and dispose hide the tooltip, so the orbits leave the 15% slow-down', () => {
     const lead = (r: ReturnType<typeof rig>) => angleOf(r.worldPos(r.planet(MATRIX)))
-    const free = rig({ reduced: false })
+    const free = rig({ reduced: false, view: { rotate: true } })
     const f0 = lead(free)
     free.run(4)
     const freeMove = Math.abs(lead(free) - f0)
     free.scene.dispose()
 
-    const held = rig({ reduced: false })
+    const held = rig({ reduced: false, view: { rotate: true } })
     const sun = held.screen(held.all(o => o.userData?.kind === 'sun')[0])
     const found = held.locate(t => kindOf(t) === 'sun' || kindOf(t) === 'nodule', { x0: sun.x - 6, y0: sun.y - 6, x1: sun.x + 6, y1: sun.y + 6 }, 2)
     expect(found).not.toBeNull()
