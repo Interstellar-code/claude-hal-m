@@ -482,6 +482,25 @@ describe('the Galaxy layout as a solar page', () => {
     expect(galaxy.attributes.get('aria-pressed')).toBe('false')
   })
 
+  test('Links, Ties and Sound keep their own button (and so keyboard focus) when pressed; only aria-pressed changes', async () => {
+    const b = await boot()
+    const sound = byText(b.node('solar-views'), 'Sound')
+    expect(sound.attributes.get('aria-pressed')).toBe('false')
+    sound.fire('click')
+    expect(byText(b.node('solar-views'), 'Sound')).toBe(sound)
+    expect(sound.attributes.get('aria-pressed')).toBe('true')
+    const links = byText(b.node('solar-views'), 'Links')
+    links.fire('click')
+    expect(byText(b.node('solar-views'), 'Links')).toBe(links)
+    expect(links.attributes.get('aria-pressed')).toBe('false')
+    expect(lastView(b).bonds).toBe(false)
+  })
+
+  test('the app hands the scene every callback, the lightning one included', () => {
+    const app = readFileSync(join(ROOT, 'ui', 'app.ts'), 'utf8')
+    expect(app).toContain('onStorm: options.onStorm')
+  })
+
   test('The Human (the monolith) answers every 10th event the map draws', async () => {
     const b = await boot()
     for (let i = 0; i < 9; i++) b.node('solar-sim-recall').fire('click')

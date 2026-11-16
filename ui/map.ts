@@ -720,7 +720,7 @@ export function memoryTarget(memories: readonly Pick<SolarMemory, 'id' | 'owner'
 }
 
 /** What the solar page needs from the map around it: the library (null when there is no WebGL, and the stage has said so) and the stage message. */
-type SolarShell = { library: () => Promise<MapLib | null>; loaded: () => MapLib | null; notice: (text: string) => void; clear: () => void }
+type SolarShell = { library: () => Promise<MapLib | null>; loaded: () => MapLib | null; notice: (text: string) => void; clear: () => void; shown?: () => boolean }
 
 function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, storage: Storage | undefined, reducedMotion: boolean): SolarMount {
   const root = byId('view-map')
@@ -768,13 +768,18 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
     const human = event.client === 'dashboard' && event.kind !== 'recall'
     if (human || drawn % MONOLITH_EVERY === 0) {
       scene.monolith?.()
-      if (page.sound) sound.play('monolith')
+      if (page.sound && shell.shown?.() !== false) sound.play('monolith')
     }
-    if (!page.sound) return
+    // Sounds only while the Map tab is shown.
+    const audible = () => page.sound && shell.shown?.() !== false
+    if (!audible()) return
     // The launch sound starts with the comet; the landing tone comes as the event reaches its planet (the scene
     // flares the planet at the same moment). An event with no project of its own only gets the launch sound.
     sound.play(event.kind)
-    if (event.owner !== undefined && event.owner !== 'global') window.setTimeout(() => sound.play('land'), arrivalSeconds(event.kind) * 1000)
+    if (event.owner !== undefined && event.owner !== 'global')
+      window.setTimeout(() => {
+        if (audible()) sound.play('land')
+      }, arrivalSeconds(event.kind) * 1000)
   }
   // A browser only starts audio after a click on the page: a remembered Sound: on wakes on the first one.
   root.ownerDocument?.addEventListener?.('pointerdown', () => {
@@ -904,7 +909,8 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
         item.addEventListener('click', () => {
           changeView(toggleShow(page, toggle.key))
           if (toggle.key === 'sound' && page.sound) sound.wake()
-          renderViews()
+          // The button stays (and keeps keyboard focus); only its pressed state changes.
+          item.setAttribute('aria-pressed', String(page[toggle.key]))
         })
         return item
       }),
@@ -1143,7 +1149,7 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
         onPick: target => send(scene => scene.flyTo(target)),
         onLevel: applyLevel,
         onStorm: () => {
-          if (page.sound) sound.play('storm')
+          if (page.sound && shell.shown?.() !== false) sound.play('storm')
         },
       })
     } catch (err) {
@@ -1405,7 +1411,7 @@ export function createMap(host: MapHost): MapView {
   const rotate = byId<HTMLButtonElement>('map-rotate')
   const find$ = byId<HTMLInputElement>('map-find')
   // The solar-system Galaxy page, when the host brings a scene; it takes over the Galaxy layout's page and leaves the others alone.
-  const solarPage = host.solar ? mountSolarPage(host, host.solar, { library, loaded: () => libraryReady, notice, clear: clearNotice }, storage, reducedMotion) : null
+  const solarPage = host.solar ? mountSolarPage(host, host.solar, { library, loaded: () => libraryReady, notice, clear: clearNotice, shown: () => shown }, storage, reducedMotion) : null
   // Only one renderer lives at a time (one WebGL context): the solar scene in Galaxy, the force graph in the other layouts.
   let graphTicket = 0
   // The layout whose force graph could not start: it is tried again only when the layout changes, not on every state change (a Find keystroke).
@@ -3390,6 +3396,8 @@ export function createMap(host: MapHost): MapView {
   return {
     visible(next: boolean) {
       shown = next
+      // Leaving the Map tab ends a Simulate auto run: its Stop button is out of view.
+      if (!next) stopAuto()
       if (!next && raf !== 0) {
         cancelAnimationFrame(raf)
         raf = 0

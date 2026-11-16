@@ -2571,7 +2571,14 @@ class SolarImpl {
     this.world.add(g, halo, label, beam, ...glows, head, swell, ...ripples)
     const drops = Array.from({ length: SCREEN_COLS }, () => Math.random() * SCREEN_ROWS)
     const speeds = Array.from({ length: SCREEN_COLS }, () => 4 + Math.random() * 7)
-    this.mono = { g, edges, halo, label, beam, glows, head, swell, ripples, screen: { c, tex, drops, speeds, drawn: -1 }, at: this.mono?.at ?? -99 }
+    // A rebuild keeps the slab's turn and its screen's columns, as it keeps the sun's turn.
+    const before = this.mono
+    if (before !== null) {
+      g.rotation.y = before.g.rotation.y
+      drops.splice(0, drops.length, ...before.screen.drops)
+      speeds.splice(0, speeds.length, ...before.screen.speeds)
+    }
+    this.mono = { g, edges, halo, label, beam, glows, head, swell, ripples, screen: { c, tex, drops, speeds, drawn: -1 }, at: before?.at ?? -99 }
     this.drawScreen(0, 0)
   }
 
@@ -2777,7 +2784,7 @@ class SolarImpl {
         const pinging = ev.ping !== undefined && t < ev.delay
         const at = this.reduced ? pp : pinging ? (ev.ping as O3).position : trail[0].position
         ev.caption.position.set(at.x, at.y + this.sunR * 0.9, at.z)
-        ev.caption.material.opacity = this.reduced ? 1 : pinging ? 0.85 : flying ? Math.min(1, 0.3 + u * 5) : burst(t, ev.delay + ev.flight, 0.6)
+        ev.caption.material.opacity = this.reduced ? 1 : pinging ? 0.85 : flying ? Math.min(1, (ev.ping ? 0.85 : 0.3) + u * 5) : burst(t, ev.delay + ev.flight, 0.6)
       }
       if (ev.path) {
         const pa = ev.path.geometry.attributes.position.array
