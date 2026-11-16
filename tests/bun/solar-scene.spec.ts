@@ -735,8 +735,8 @@ describe('MAPX.5 live events', () => {
   test('a recall is a gold comet from the planet towards the caller\'s nodule', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall'))
-    // 14 comet sprites, the planet's flash, its lit path, the ping out, the planet's flare and the caller's flash.
-    expect(r.fx().children).toHaveLength(19)
+    // 14 comet sprites, the planet's flash, its lit path, the ping out, the caption, the planet's flare and the caller's flash.
+    expect(r.fx().children).toHaveLength(20)
     r.clock.tick()
     const head = r.fx().children[0]
     expect(hex(r.fx().children[1])).toBe('f0e442')
@@ -752,7 +752,7 @@ describe('MAPX.5 live events', () => {
   test('a save is a blue comet from the writer\'s nodule to the planet', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('save', { ids: ['m-new'] }))
-    expect(r.fx().children).toHaveLength(18)
+    expect(r.fx().children).toHaveLength(19)
     // The path between the writer and the planet is lit in the save's colour.
     const path = r.fx().children.find((o: any) => o.userData?.kind === 'event-path')
     expect(hex(path)).toBe('56b4e9')
@@ -829,6 +829,44 @@ describe('MAPX.5 live events', () => {
     }
   })
 
+  test('a moving event carries its memory\'s first line, or its topic, or "a new memory"', () => {
+    const data = galaxy()
+    const known = data.memories.find((m: any) => m.owner === MATRIX && m.label)
+    const caption = (extra: Record<string, unknown>) => {
+      const r = rig({ reduced: false, data })
+      r.scene.event(ev('update', extra))
+      const c = r.fx().children.find((o: any) => o.userData?.kind === 'event-caption')
+      r.run(0.5)
+      const seen = { text: c.userData.text as string, opacity: c.material.opacity as number }
+      r.scene.dispose()
+      return seen
+    }
+    const first = caption({ ids: [known.id] })
+    expect(known.label.startsWith(first.text.replace(/…$/, ''))).toBe(true)
+    expect(first.text.length).toBeLessThanOrEqual(48)
+    expect(first.opacity).toBeGreaterThan(0.8)
+    expect(caption({ ids: ['not-on-the-map'], topic: 'deploys' }).text).toBe('topic: deploys')
+    expect(caption({ ids: ['not-on-the-map'] }).text).toBe('a new memory')
+  })
+
+  test('the body an event is bound for lights its name: bigger, in the event\'s colour, back to normal after', () => {
+    const r = rig({ reduced: false })
+    const lit = () => r.all(o => o.isSprite && o.renderOrder === 12)
+    expect(lit()).toHaveLength(0)
+    r.scene.event(ev('save'))
+    r.run(2.45)
+    const [label] = lit()
+    expect(label).toBeDefined()
+    expect(label.scale.x).toBeGreaterThan(label.userData.base.x * 1.5)
+    expect(label.material.opacity).toBe(1)
+    expect(label.material.color.getHexString()).not.toBe('ffffff')
+    r.run(1.5)
+    expect(lit()).toHaveLength(0)
+    expect(label.scale.x).toBeCloseTo(label.userData.base.x, 5)
+    expect(label.material.color.getHexString()).toBe('ffffff')
+    r.scene.dispose()
+  })
+
   test('a recall pings out to the planet before the comet comes back', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall'))
@@ -897,7 +935,7 @@ describe('MAPX.5 live events', () => {
   test('demo events from Simulate draw like any other', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall', { client: 'demo', demo: true }))
-    expect(r.fx().children).toHaveLength(19)
+    expect(r.fx().children).toHaveLength(20)
     r.scene.dispose()
   })
 
@@ -907,8 +945,8 @@ describe('MAPX.5 live events', () => {
     expect(r.fx().children).toHaveLength(0)
     r.scene.setView({ hidden: {} })
     for (let i = 0; i < 100; i++) r.scene.event(ev('update'))
-    // 40 events at most, 5 objects each (beam, flash, head, the planet's flare, the caller's flash).
-    expect(r.fx().children.length).toBeLessThanOrEqual(200)
+    // 40 events at most, 6 objects each (beam, flash, head, caption, the planet's flare, the caller's flash).
+    expect(r.fx().children.length).toBeLessThanOrEqual(240)
     r.run(3)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
@@ -919,8 +957,8 @@ describe('MAPX.5 live events', () => {
     r.scene.event(ev('save'))
     r.clock.tick()
     const planet = r.worldPos(r.planet(MATRIX))
-    // Every glow sits on the planet (the lit path is a line along the route, not a glow).
-    for (const sprite of r.fx().children.filter((o: any) => o.userData?.kind !== 'event-path' && o.userData?.kind !== 'event-origin')) expect(sprite.position.distanceTo(planet)).toBeLessThan(1)
+    // Every glow sits on the planet (the lit path runs along the route, the caller's flash is at the caller, the caption above).
+    for (const sprite of r.fx().children.filter((o: any) => !['event-path', 'event-origin', 'event-caption'].includes(o.userData?.kind))) expect(sprite.position.distanceTo(planet)).toBeLessThan(1)
     r.scene.dispose()
   })
 

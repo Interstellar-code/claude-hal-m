@@ -159,6 +159,11 @@ const COMET_TAIL = 0.42
 // the page reads the same numbers to time the landing tone). TAIL_SECONDS: the planet's flare fades after the flight.
 const { comet: COMET_SECONDS, beam: BEAM_SECONDS, ping: PING_SECONDS } = EVENT_SECONDS
 const TAIL_SECONDS = 0.8
+// A travelling caption's longest first line, and the word under it per kind.
+const EVENT_CHARS = 48
+// How much a body's name grows while a live event is bound for it.
+const LABEL_GROW = 0.8
+const EVENT_VERB = { recall: 'recalled', save: 'saved', update: 'updated', forget: 'forgotten' } as const
 // The points on a comet's lit path.
 const PATH_POINTS = 32
 // A port choice, not in the mockup: an opened memory shows at most this many knowledge satellites.
@@ -320,6 +325,8 @@ type EventRec = {
   /** The caller's flash (writer nodule or sun) at the start, and a recall's ping out to the planet. */
   origin?: O3
   ping?: O3
+  /** The memory's first line (or its topic), riding with the ping, the comet or the beam's head. */
+  caption?: O3
   /** Seconds before the comet or beam leaves (a recall's ping), how long it flies, and when it reaches the planet. */
   delay: number
   flight: number
@@ -2422,6 +2429,13 @@ class SolarImpl {
       }
     }
     if (P !== null) {
+      // The memory travels with its words: its first line (or its topic) and what is happening to it, where.
+      const words = this.eventWords(e)
+      ev.caption = this.label(words, `${EVENT_VERB[e.kind]} · ${labelName(P.body)}`, new T.Color(col).lerp(new T.Color('#ffffff'), 0.35).getStyle(), Math.max(12, this.sunR * 0.55))
+      ev.caption.material.opacity = 0
+      ev.caption.userData = { kind: 'event-caption', text: words }
+      this.fx.add(ev.caption)
+      ev.objs.push(ev.caption)
       // The planet flares in the event's colour when the event reaches it.
       ev.ring = this.glow(col, P.R * 9, 0)
       ev.ring.userData = { kind: 'event-ring' }
@@ -2434,6 +2448,30 @@ class SolarImpl {
     this.events.push(ev)
     while (this.events.length > MAX_EVENTS) this.endEvent(this.events.shift() as EventRec)
     if (e.kind !== 'recall') this.flares.set(source ?? '', this.clock)
+  }
+
+  /**
+   * How strongly each body is lit by the live events bound for it (0 to 1, the strongest event wins) and in which
+   * colour: half as the event starts, rising to full as it reaches the body, then fading out.
+   */
+  private eventLight(): Map<string, { k: number; colour: string }> {
+    const out = new Map<string, { k: number; colour: string }>()
+    for (const ev of this.events) {
+      if (ev.owner === null || ev.type === 'pulse') continue
+      const t = this.clock - ev.start
+      const k = this.reduced ? 1 : t < ev.arrive ? 0.5 + (0.5 * t) / Math.max(0.01, ev.arrive) : Math.max(0, 1 - (t - ev.arrive) / Math.max(0.3, ev.dur - ev.arrive))
+      const was = out.get(ev.owner)
+      if (was === undefined || k > was.k) out.set(ev.owner, { k, colour: EVENT_COLOUR[ev.type] })
+    }
+    return out
+  }
+
+  /** What a moving event says: the first listed memory's first line when the map has it, else its topic, else "a new memory". */
+  private eventWords(e: MapEvent): string {
+    const memories = this.galaxy?.memories ?? []
+    const memory = e.ids.map(id => memories.find(m => m.id === id)).find(m => m !== undefined)
+    const full = memory !== undefined ? this.firstLine(memory) : e.topic && e.topic !== 'Untagged' ? `topic: ${e.topic}` : 'a new memory'
+    return full.length > EVENT_CHARS ? `${full.slice(0, EVENT_CHARS - 1).trimEnd()}…` : full
   }
 
   /** The dots of the listed ids, with the colour each has now (a forgotten memory fades out of it). */
@@ -2520,6 +2558,12 @@ class SolarImpl {
           ev.head.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : u))
           ev.head.material.opacity = al
         }
+        if (ev.caption) {
+          // With the beam's head; it lingers on the planet while the planet flares.
+          const at = ev.head ? ev.head.position : pp
+          ev.caption.position.set(at.x, at.y + this.sunR * 0.9, at.z)
+          ev.caption.material.opacity = this.reduced ? 1 : flying ? Math.min(1, 0.3 + u * 5) : burst(t, ev.arrive, 0.6)
+        }
         if (ev.fade) this.setFade(ev.fade, this.reduced ? 1 : u)
         continue
       }
@@ -2536,6 +2580,13 @@ class SolarImpl {
       if (ev.flash) {
         ev.flash.position.copy(pp)
         ev.flash.material.opacity = 0.7 * al
+      }
+      if (ev.caption) {
+        // With the ping on its way out, then with the comet's head; it fades as the comet lands.
+        const pinging = ev.ping !== undefined && t < ev.delay
+        const at = this.reduced ? pp : pinging ? (ev.ping as O3).position : trail[0].position
+        ev.caption.position.set(at.x, at.y + this.sunR * 0.9, at.z)
+        ev.caption.material.opacity = this.reduced ? 1 : pinging ? 0.85 : flying ? Math.min(1, 0.3 + u * 5) : burst(t, ev.delay + ev.flight, 0.6)
       }
       if (ev.path) {
         const pa = ev.path.geometry.attributes.position.array
@@ -2636,6 +2687,7 @@ class SolarImpl {
     // Focus (0.16.0): the hovered project while held, else the project opened (planet, moon or memory level).
     if (!this.held) this.hoverOwner = null
     const focus = this.hoverOwner ?? (this.S.level !== 'galaxy' ? this.S.planet : null)
+    const lit = this.eventLight()
     if (this.sunG) this.sunG.rotation.y += dt * 0.12 * spin
     for (const [source, mesh] of this.nodules) {
       const at = this.flares.get(source)
@@ -2679,6 +2731,20 @@ class SolarImpl {
       P.label.visible = !here && !s.hidden[id]
       // Focus (0.16.0): other projects' labels step back.
       P.label.material.opacity = focus !== null && focus !== id ? 0.35 : 1
+      // A live event bound for this body (planet, ship or station): its name grows, takes the event's colour and
+      // comes to full strength while the event is on its way and as it lands.
+      const base: O3 = P.label.userData.base ?? (P.label.userData.base = P.label.scale.clone())
+      const live = lit.get(id)
+      if (live !== undefined) {
+        P.label.scale.copy(base).multiplyScalar(1 + LABEL_GROW * live.k)
+        P.label.material.color.set('#ffffff').lerp(new T.Color(live.colour), 0.55 * live.k)
+        P.label.material.opacity = Math.max(P.label.material.opacity, live.k)
+        P.label.renderOrder = 12
+      } else if (P.label.renderOrder === 12) {
+        P.label.scale.copy(base)
+        P.label.material.color.set('#ffffff')
+        P.label.renderOrder = 10
+      }
       // Probes circle slowly the other way to the moons; they stand still while you look at one memory.
       if (P.probes && !(here && S.level === 'memory')) P.probes.rotation.y -= dt * 0.18 * spin
       for (const mo of P.moons) {
