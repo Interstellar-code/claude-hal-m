@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Mnemosyne</title>
+<title>HAL 10,000</title>
 <link rel="stylesheet" href="/style.css">
 <script type="module" src="/app.js"></script>
 </head>
@@ -13,7 +13,7 @@
   <header class="top">
     <div class="brand">
       <svg class="logo" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="12" cy="20" r="2"></circle><path d="M6.5 7.5l3.5 3M17.5 7.5l-3.5 3M12 15v3"></path></svg>
-      <span class="name">Mnemosyne</span>
+      <span class="name">HAL 10,000</span>
     </div>
     <nav class="tabs" aria-label="Dashboard" id="tabs"></nav>
     <div class="meta">
@@ -23,7 +23,7 @@
       <details class="about">
         <summary class="about-btn" aria-label="About this dashboard" title="About">i</summary>
         <div class="about-pop">
-          <p class="about-title">Mnemosyne dashboard</p>
+          <p class="about-title">HAL 10,000 dashboard</p>
           <p id="engine" class="mono"></p>
           <p class="about-note">Runs on this computer only; nothing is sent anywhere.</p>
         </div>
@@ -199,6 +199,10 @@
         <div id="solar-sim" class="solar-sim solar-only" role="group" aria-label="Demo events" hidden>
           <button id="solar-sim-recall" type="button" class="stage-btn sim-recall">Simulate a recall</button>
           <button id="solar-sim-write" type="button" class="stage-btn sim-write">Simulate a write</button>
+          <span class="sim-auto">
+            <button id="solar-sim-auto" type="button" class="stage-btn sim-auto-btn" aria-pressed="false">Simulate auto</button>
+            <label class="sim-secs"><input id="solar-sim-secs" type="number" min="5" max="3600" step="5" value="120" aria-label="Duration in seconds"> sec</label>
+          </span>
         </div>
         <ol id="map-feed" class="mini-feed">
           <li class="mini-empty">No activity yet.</li>

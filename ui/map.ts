@@ -2953,6 +2953,35 @@ export function createMap(host: MapHost): MapView {
   byId<HTMLButtonElement>('map-sim-write').addEventListener('click', () => simulateOnce('write'))
   byId<HTMLButtonElement>('solar-sim-recall').addEventListener('click', () => simulateOnce('recall'))
   byId<HTMLButtonElement>('solar-sim-write').addEventListener('click', () => simulateOnce('write'))
+  // Simulate auto: about one demo event a second (mostly recalls, now and then a write or a double burst) for the chosen
+  // number of seconds, then it stops by itself. Same demo events as the buttons above: nothing reaches the server.
+  const autoBtn = byId<HTMLButtonElement>('solar-sim-auto')
+  const autoSecs = byId<HTMLInputElement>('solar-sim-secs')
+  let autoTimer: number | undefined
+  const stopAuto = () => {
+    if (autoTimer !== undefined) window.clearInterval(autoTimer)
+    autoTimer = undefined
+    autoBtn.setAttribute('aria-pressed', 'false')
+    autoBtn.textContent = 'Simulate auto'
+    autoSecs.disabled = false
+  }
+  autoBtn.addEventListener('click', () => {
+    if (autoTimer !== undefined) return stopAuto()
+    const seconds = Math.min(3600, Math.max(5, Math.round(Number(autoSecs.value)) || 120))
+    autoSecs.value = String(seconds)
+    const endAt = Date.now() + seconds * 1000
+    autoBtn.setAttribute('aria-pressed', 'true')
+    autoSecs.disabled = true
+    const tick = () => {
+      const left = Math.ceil((endAt - Date.now()) / 1000)
+      if (left <= 0) return stopAuto()
+      autoBtn.textContent = `Stop (${left}s)`
+      simulateOnce(Math.random() < 0.7 ? 'recall' : 'write')
+      if (Math.random() < 0.2) window.setTimeout(() => simulateOnce('recall'), 350)
+    }
+    tick()
+    autoTimer = window.setInterval(tick, 1000)
+  })
   // The two Simulate buttons hide behind a Demo toggle, closed at the start.
   const demo = byId<HTMLButtonElement>('map-demo')
   demo.addEventListener('click', () => {

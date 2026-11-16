@@ -1208,6 +1208,9 @@ button.toggle-name:focus-visible { outline: 2px solid var(--accent); outline-off
   .solar-on .live-strip { grid-area: live; align-self: stretch; padding: 16px 18px; }
 }
 .solar-sim { display: flex; flex-wrap: wrap; gap: 6px; }
+.solar-sim .sim-auto { display: inline-flex; align-items: center; gap: 8px; }
+.solar-sim .sim-secs { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text); }
+.solar-sim .sim-secs input { width: 64px; min-height: 34px; padding: 0 6px; font: inherit; color: var(--text); background: transparent; border: 1px solid var(--line-strong); border-radius: 6px; }
 .solar-sim .stage-btn { min-height: 34px; padding: 0 12px; font-size: 13px; background: transparent; color: var(--text); border-color: var(--line-strong); }
 .solar-sim .sim-recall { border-color: var(--data-recall); }
 .solar-sim .sim-write { border-color: var(--data-blue); }
