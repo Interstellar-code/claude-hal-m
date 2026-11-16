@@ -13,7 +13,7 @@
 // Renderer and composer are injected (`createRenderer`, `createComposer`) and so is the
 // frame clock, so a spec can run the scene on the vendored three.js without WebGL.
 
-import { drawsOnMap, noduleFor } from './map-live'
+import { arrivalSeconds, drawsOnMap, EVENT_SECONDS, noduleFor } from './map-live'
 import type { MapEvent } from './map-live'
 import {
   buildBodies,
@@ -80,6 +80,10 @@ export type SolarView = {
   /** 0.30.0: when the map is left alone, specks show their memory's first line now and then. */
   captions: boolean
   legend: boolean
+  /** The twin violet strands of the black-hole pairs (off: the holes stay, their lines, chip and pulse go). Default on. */
+  bonds?: boolean
+  /** The nebula's ties to the projects, with their sparks. Default on. */
+  ties?: boolean
 }
 
 export type ViewName = 'top' | 'below' | 'side' | 'reset'
@@ -113,6 +117,8 @@ export type SolarOptions = {
   onHover?: (tip: string[] | null, x: number, y: number) => void
   onPick?: (target: Target) => void
   onLevel?: (level: Target) => void
+  /** A nebula cloud's lightning flashed where it can be seen (the page plays its crackle). */
+  onStorm?: () => void
 }
 
 export type SolarScene = {
@@ -126,7 +132,7 @@ export type SolarScene = {
 }
 
 /** The method names C13 fixes; a spec checks the returned object against this list. */
-export const SCENE_METHODS = ['setData', 'setView', 'flyTo', 'showView', 'zoom', 'event', 'dispose'] as const
+export const SCENE_METHODS = ['setData', 'setView', 'flyTo', 'showView', 'zoom', 'event', 'monolith', 'dispose'] as const
 
 export const DEFAULT_VIEW: SolarView = { arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: false, nebula: true, captions: true, legend: true }
 
@@ -144,13 +150,49 @@ const MOTION_SCALE = 0.5
 const HOVER_HOLD_SECONDS = 2
 // A port choice, not in the mockup: at most this many live events are drawn at once; the oldest end early.
 const MAX_EVENTS = 40
+// The share of the canvas height the whole picture is moved up by.
+const VIEW_LIFT = 0.09
+// A live comet's head and tail, in units of the sun's radius, so a comet stays visible however big the map is.
+const COMET_HEAD = 0.55
+const COMET_TAIL = 0.42
+// How long a comet (recall, save) and a beam (update, forget) take, and a recall's ping, in seconds (map-live.ts:
+// the page reads the same numbers to time the landing tone). TAIL_SECONDS: the planet's flare fades after the flight.
+const { comet: COMET_SECONDS, beam: BEAM_SECONDS, ping: PING_SECONDS } = EVENT_SECONDS
+const TAIL_SECONDS = 0.8
+// A travelling caption's longest first line, and the word under it per kind.
+const EVENT_CHARS = 48
+// The monolith: its height in sun radii, how far above the sun it hangs (share of the widest orbit), its answer's
+// colour and length in seconds, and the points of the ripple's circle.
+const MONOLITH_HEIGHT = 2.6
+const MONOLITH_LIFT = 0.24
+const MONOLITH_GOLD = '#ffe2a6'
+const MONOLITH_SECONDS = 4.6
+const RIPPLE_POINTS = 96
+// The monolith's screen (a green dot matrix, cells of SCREEN_CELL pixels), the beam's string of glows and how long
+// its head takes to reach the sun, and the ripples: how many, how far apart and how long each takes to cross.
+const MATRIX_GREEN = '#3dff8a'
+const SCREEN_COLS = 9
+const SCREEN_ROWS = 20
+const SCREEN_CELL = 8
+const BEAM_GLOWS = 14
+const BEAM_DROP = 0.55
+const RIPPLES = 3
+const RIPPLE_GAP = 0.35
+const RIPPLE_SECONDS = 2.8
+// How much a body's name grows while a live event is bound for it.
+const LABEL_GROW = 0.8
+const EVENT_VERB = { recall: 'recalled', save: 'saved', update: 'updated', forget: 'forgotten' } as const
+// The points on a comet's lit path.
+const PATH_POINTS = 32
 // A port choice, not in the mockup: an opened memory shows at most this many knowledge satellites.
 const MAX_SATELLITES = 12
 const FADE_DAYS = 7
 // A forgotten memory's dot keeps this share of its colour.
 const FORGET_DIM = 0.1
 const DAY_MS = 86400000
-const PULSE_EVERY = 30
+// A bond's pulse: one every PULSE_EVERY seconds per bond, PULSE_TRAVEL seconds from end to end (slow, so it glides).
+const PULSE_EVERY = 120
+const PULSE_TRAVEL = 14
 
 // ---- What a memory looks like (beyond the mockup, items 1 to 5) -------------------------
 
@@ -248,17 +290,19 @@ type StormRec = { cloud: number; glow: O3; bolt: O3; members: number[]; base: O3
 const BOLT_POINTS = 10
 const FLASH_SECONDS = 1.1
 // A storm's next flash comes FLASH_GAP_MIN to FLASH_GAP_MIN + FLASH_GAP_SPREAD seconds after the last.
-const FLASH_GAP_MIN = 5
-const FLASH_GAP_SPREAD = 9
+const FLASH_GAP_MIN = 15
+const FLASH_GAP_SPREAD = 20
+// A storm's first flash comes 1 to 1 + FIRST_FLASH_SPREAD seconds after the nebula is built.
+const FIRST_FLASH_SPREAD = 5
 // The current on a tie: ties per second a pulse travels, at rest and when lit.
-const TIE_FLOW = 0.12
+const TIE_FLOW = 0.035
 // The electric blob on a tie: one bright core and BLOB_CRACKLE sparks crackling around it (re-placed every
 // BLOB_RESHAPE s), plus a tiny jagged arc of BLOB_ARC points through it; its radius is BLOB_R of the orbit radius.
 const BLOB_CRACKLE = 6
 const BLOB_ARC = 7
-const BLOB_RESHAPE = 0.09
+const BLOB_RESHAPE = 0.5
 const BLOB_R = 0.014
-const TIE_FLOW_LIT = 0.25
+const TIE_FLOW_LIT = 0.07
 /** 0.30.0: one cloud-to-project tie: a curve from the cloud's middle up to the planet (or the sun for global). */
 type TieRec = { tie: CloudTie; line: O3; phase: number }
 /** 0.30.0: one idle caption: a speck's first line, fading in, holding and fading out. */
@@ -289,7 +333,22 @@ type EventRec = {
   objs: O3[]
   trail?: O3[]
   beam?: O3
+  /** A beam's travelling head, so an update or forget is seen as more than a thin line. */
+  head?: O3
   flash?: O3
+  /** The ring of light the planet sends out while the event lasts. */
+  ring?: O3
+  /** A comet's whole path, lit in the event's colour while it lasts: the link between the writer (or sun) and the planet. */
+  path?: O3
+  /** The caller's flash (writer nodule or sun) at the start, and a recall's ping out to the planet. */
+  origin?: O3
+  ping?: O3
+  /** The memory's first line (or its topic), riding with the ping, the comet or the beam's head. */
+  caption?: O3
+  /** Seconds before the comet or beam leaves (a recall's ping), how long it flies, and when it reaches the planet. */
+  delay: number
+  flight: number
+  arrive: number
   fade?: Fade[]
 }
 
@@ -324,6 +383,7 @@ export function createSolarScene(options: SolarOptions): SolarScene {
     showView: name => impl.showView(name),
     zoom: factor => impl.zoom(factor),
     event: event => impl.event(event),
+    monolith: () => impl.monolith(),
     dispose: () => impl.dispose(),
   }
 }
@@ -348,6 +408,8 @@ class SolarImpl {
   /** Comets, beams, pulses and satellites: they outlive a rebuild. */
   private readonly fx: O3
   private pickables: O3[] = []
+  /** The Human: the monolith above the sun, its beam down to the sun, the sun's swell and the ripple across the orbits. */
+  private mono: { g: O3; edges: O3; halo: O3; label: O3; beam: O3; glows: O3[]; head: O3; swell: O3; ripples: O3[]; screen: { c: O3; tex: O3; drops: number[]; speeds: number[]; drawn: number }; at: number } | null = null
   private sats: O3[] = []
 
   private galaxy: SceneGalaxy | null = null
@@ -1379,7 +1441,7 @@ class SolarImpl {
       this.world.add(sp)
       pulse.push(sp)
     }
-    this.holes.push({ L, pair, line, line2, chip, pulse, phase: 26 - i * 8 })
+    this.holes.push({ L, pair, line, line2, chip, pulse, phase: PULSE_EVERY - 4 - i * 16 })
   }
 
   private makeSun(): void {
@@ -1577,7 +1639,7 @@ class SolarImpl {
       bolt.userData = { kind: 'nebula-bolt' }
       group.add(bolt)
       const members = neb.specks.flatMap((sp, i) => (sp.cloud === ci ? [i] : []))
-      storms.push({ cloud: ci, glow, bolt, members, base: new T.Color(colour), next: 1 + this.stormRng() * FLASH_GAP_MIN, flashAt: -99 })
+      storms.push({ cloud: ci, glow, bolt, members, base: new T.Color(colour), next: 1 + this.stormRng() * FIRST_FLASH_SPREAD, flashAt: -99 })
       if (cloud.name === '') return
       const label = this.label(cloud.name, `${cloud.count} memories`, colour, Math.max(18, builtR * 0.05))
       label.position.set(cloud.centre[0], cloud.centre[1] - 18, cloud.centre[2])
@@ -1750,6 +1812,7 @@ class SolarImpl {
         S.flashAt = this.clock
         S.next = this.clock + FLASH_GAP_MIN + this.stormRng() * FLASH_GAP_SPREAD
         this.shapeBolt(S)
+        if (light > 0.05) this.opts.onStorm?.()
       }
       const age = this.clock - S.flashAt
       const flash = age < 0 || age > FLASH_SECONDS ? 0 : Math.min(1, Math.max(Math.exp(-age / 0.12), age > 0.25 ? 0.85 * Math.exp(-(age - 0.25) / 0.18) : 0))
@@ -1800,7 +1863,7 @@ class SolarImpl {
       const P = this.P[tie.owner]
       const to = P ? this.worldOf(P.pG) : tie.owner === 'global' && this.sunG ? this.worldOf(this.sunG) : null
       const cloud = N.clouds[tie.cloud]
-      if (to === null || cloud === undefined || s.hidden[tie.owner]) {
+      if (to === null || cloud === undefined || s.hidden[tie.owner] || s.ties === false) {
         line.visible = false
         continue
       }
@@ -2005,6 +2068,7 @@ class SolarImpl {
     for (const owner in this.orbits.radius) this.maxR = Math.max(this.maxR, this.orbits.radius[owner] as number)
     this.P = {}
     this.makeSun()
+    this.buildMonolith()
     this.sunG.rotation.y = sunTurn
     for (const b of this.bodies) this.P[b.owner] = this.makePlanet(b, this.orbits.radius[b.owner] as number, before[b.owner])
     for (const owner in this.P) for (const m of (this.P[owner] as PlanetRec).moons) m.pivot.rotation.y = pivots.get(`${owner}|${m.kind}`) ?? m.pivot.rotation.y
@@ -2315,15 +2379,25 @@ class SolarImpl {
     const T = this.T
     const owner = e.owner !== undefined && e.owner !== 'global' && this.P[e.owner] ? e.owner : null
     if (owner !== null && this.hiddenOwner(owner)) return
-    const source = noduleFor(e.client, this.writers.map(w => w.source))
+    const sources = this.writers.map(w => w.source)
+    // A demo event (Simulate) has no writer of its own: it is drawn from one of the real writers, so the sparks spread out.
+    const source = e.demo === true && sources.length > 0 && noduleFor(e.client, sources) === null ? (sources[Math.floor(Math.random() * sources.length)] as string) : noduleFor(e.client, sources)
     const col = EVENT_COLOUR[e.kind]
     const P = owner === null ? null : (this.P[owner] as PlanetRec)
+    const beam = e.kind === 'update' || e.kind === 'forget'
+    // Call, then answer: the caller (sun or writer) flashes as the event starts, and the planet flares when it is
+    // reached. A recall first sends a faint ping out to the planet, then the gold comet carries the memory back.
+    const delay = P !== null && e.kind === 'recall' ? PING_SECONDS : 0
+    const flight = P === null ? 1.1 : beam ? BEAM_SECONDS : COMET_SECONDS
     const ev: EventRec = {
       type: P === null ? 'pulse' : e.kind,
       owner,
       source,
       start: this.clock,
-      dur: P === null || e.kind === 'update' || e.kind === 'forget' ? 1.1 : 1.8,
+      delay,
+      flight,
+      arrive: arrivalSeconds(e.kind),
+      dur: P === null ? flight : delay + flight + TAIL_SECONDS,
       bend: Math.random() < 0.5 ? 1 : -1,
       objs: [],
     }
@@ -2335,7 +2409,7 @@ class SolarImpl {
       ev.objs.push(sun, nod)
       ev.flash = sun
       ev.trail = [nod]
-    } else if (e.kind === 'update' || e.kind === 'forget') {
+    } else if (beam) {
       const geo = new T.BufferGeometry()
       geo.setAttribute('position', new T.BufferAttribute(new Float32Array(6), 3))
       ev.beam = new T.Line(geo, new T.LineBasicMaterial({ color: new T.Color(col), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
@@ -2343,19 +2417,259 @@ class SolarImpl {
       ev.flash = this.glow(col, P.R * 4, 0)
       this.fx.add(ev.beam, ev.flash)
       ev.objs.push(ev.beam, ev.flash)
+      ev.head = this.glow(col, this.sunR * COMET_HEAD, 0)
+      this.fx.add(ev.head)
+      ev.objs.push(ev.head)
       if (e.kind === 'forget') ev.fade = this.fadesOf(e.ids)
     } else {
       ev.trail = []
+      // The head is a pale tint of the event's colour (gold recall, blue save), so the two read apart at a glance.
+      const tint = new T.Color(col).lerp(new T.Color('#ffffff'), 0.45).getStyle()
+      const head = this.sunR * COMET_HEAD
+      const tail = this.sunR * COMET_TAIL
       for (let k = 0; k < 14; k++) {
-        const sp = this.glow(k === 0 ? '#ffffff' : col, k === 0 ? 9 : 7 * (1 - k / 14) + 2, k === 0 ? 1 : 0.8 * (1 - k / 14))
+        const sp = this.glow(k === 0 ? tint : col, k === 0 ? head : tail * (1 - k / 14) + 2, k === 0 ? 1 : 0.85 * (1 - k / 14))
         this.fx.add(sp)
         ev.trail.push(sp)
         ev.objs.push(sp)
       }
+      ev.flash = this.glow(col, P.R * 4, 0)
+      this.fx.add(ev.flash)
+      ev.objs.push(ev.flash)
+      const pg = new T.BufferGeometry()
+      pg.setAttribute('position', new T.BufferAttribute(new Float32Array((PATH_POINTS + 1) * 3), 3))
+      ev.path = new T.Line(pg, new T.LineBasicMaterial({ color: new T.Color(col), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+      ev.path.frustumCulled = false
+      ev.path.userData = { kind: 'event-path' }
+      this.fx.add(ev.path)
+      ev.objs.push(ev.path)
+      if (delay > 0) {
+        ev.ping = this.glow(col, this.sunR * COMET_HEAD * 0.7, 0)
+        ev.ping.userData = { kind: 'event-ping' }
+        this.fx.add(ev.ping)
+        ev.objs.push(ev.ping)
+      }
+    }
+    if (P !== null) {
+      // The memory travels with its words: its first line (or its topic) and what is happening to it, where.
+      const words = this.eventWords(e)
+      ev.caption = this.label(words, `${EVENT_VERB[e.kind]} · ${labelName(P.body)}`, new T.Color(col).lerp(new T.Color('#ffffff'), 0.35).getStyle(), Math.max(12, this.sunR * 0.55))
+      ev.caption.material.opacity = 0
+      ev.caption.userData = { kind: 'event-caption', text: words }
+      this.fx.add(ev.caption)
+      ev.objs.push(ev.caption)
+      // The planet flares in the event's colour when the event reaches it.
+      ev.ring = this.glow(col, P.R * 9, 0)
+      ev.ring.userData = { kind: 'event-ring' }
+      // The caller (the writer's nodule, or the sun) flashes as the event starts.
+      ev.origin = this.glow(col, source === null ? this.sunR * 4 : this.sunR * 1.6, 0)
+      ev.origin.userData = { kind: 'event-origin' }
+      this.fx.add(ev.ring, ev.origin)
+      ev.objs.push(ev.ring, ev.origin)
     }
     this.events.push(ev)
     while (this.events.length > MAX_EVENTS) this.endEvent(this.events.shift() as EventRec)
     if (e.kind !== 'recall') this.flares.set(source ?? '', this.clock)
+  }
+
+  /**
+   * How strongly each body is lit by the live events bound for it (0 to 1, the strongest event wins) and in which
+   * colour: half as the event starts, rising to full as it reaches the body, then fading out.
+   */
+  private eventLight(): Map<string, { k: number; colour: string }> {
+    const out = new Map<string, { k: number; colour: string }>()
+    // The monolith's ripple: each body lights in gold as the wave passes its orbit.
+    const wave = this.waveRadius()
+    if (wave !== null) {
+      const band = (this.maxR || 700) * 0.09
+      for (const id in this.P) {
+        const d = Math.abs((this.P[id] as PlanetRec).r - wave)
+        if (d < band) out.set(id, { k: 0.75 * (1 - d / band), colour: MONOLITH_GOLD })
+      }
+    }
+    for (const ev of this.events) {
+      if (ev.owner === null || ev.type === 'pulse') continue
+      const t = this.clock - ev.start
+      const k = this.reduced ? 1 : t < ev.arrive ? 0.5 + (0.5 * t) / Math.max(0.01, ev.arrive) : Math.max(0, 1 - (t - ev.arrive) / Math.max(0.3, ev.dur - ev.arrive))
+      const was = out.get(ev.owner)
+      if (was === undefined || k > was.k) out.set(ev.owner, { k, colour: EVENT_COLOUR[ev.type] })
+    }
+    return out
+  }
+
+  /** What a moving event says: the first listed memory's first line when the map has it, else its topic, else "a new memory". */
+  private eventWords(e: MapEvent): string {
+    const memories = this.galaxy?.memories ?? []
+    const memory = e.ids.map(id => memories.find(m => m.id === id)).find(m => m !== undefined)
+    const full = memory !== undefined ? this.firstLine(memory) : e.topic && e.topic !== 'Untagged' ? `topic: ${e.topic}` : 'a new memory'
+    return full.length > EVENT_CHARS ? `${full.slice(0, EVENT_CHARS - 1).trimEnd()}…` : full
+  }
+
+  /** The Human answers: a glowing beam drops to the sun, the sun swells and ripples run out across the whole galaxy. */
+  monolith(): void {
+    if (this.disposed || this.mono === null) return
+    this.mono.at = this.clock
+  }
+
+  /**
+   * The monolith (2001's slab, 1:4:9) over the sun on the galaxy's axis. Its two broad faces are a green dot-matrix
+   * screen, like a rack of server lights, with columns of light running down it; its edges glow green.
+   */
+  private buildMonolith(): void {
+    const T = this.T
+    const g = new T.Group()
+    const geo = new T.BoxGeometry(4 / 9, 1, 1 / 9)
+    const c = this.canvas2d(SCREEN_COLS * SCREEN_CELL, SCREEN_ROWS * SCREEN_CELL)
+    const tex = this.texture(c)
+    const side = new T.MeshBasicMaterial({ color: new T.Color('#030409') })
+    const face = new T.MeshBasicMaterial({ map: tex, color: new T.Color('#ffffff') })
+    // BoxGeometry's faces: +x, -x, +y, -y, +z (front), -z (back).
+    const slab = new T.Mesh(geo, [side, side, side, side, face, face])
+    slab.userData = { kind: 'monolith', tip: ['The Human (the monolith)', 'you: your own saves, edits and forgets in the dashboard wake it', 'it also answers every 10th memory event'] }
+    // The slab's edges as one line (the vendored bundle has no EdgesGeometry): front, back, then the four joins.
+    const X = 2 / 9
+    const Y = 0.5
+    const Z = 1 / 18
+    const corner = (i: number, back: boolean) => [i === 0 || i === 3 ? -X : X, i < 2 ? -Y : Y, back ? -Z : Z]
+    const walk: [number, boolean][] = [[0, false], [1, false], [2, false], [3, false], [0, false], [0, true], [1, true], [2, true], [3, true], [0, true], [1, true], [1, false], [2, false], [2, true], [3, true], [3, false]]
+    const eg = new T.BufferGeometry()
+    eg.setAttribute('position', new T.BufferAttribute(new Float32Array(walk.flatMap(([i, back]) => corner(i, back))), 3))
+    const edges = new T.Line(eg, new T.LineBasicMaterial({ color: new T.Color(MATRIX_GREEN), transparent: true, opacity: 0.55, depthWrite: false, blending: T.AdditiveBlending }))
+    g.add(slab, edges)
+    this.pickables.push(slab)
+    // A soft green halo around the slab.
+    const halo = this.glow(MATRIX_GREEN, 1, 0.16)
+    const label = this.label('The Human', null, '#bfffd6', 14)
+    const bg = new T.BufferGeometry()
+    bg.setAttribute('position', new T.BufferAttribute(new Float32Array(6), 3))
+    const beam = new T.Line(bg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+    beam.frustumCulled = false
+    beam.userData = { kind: 'monolith-beam' }
+    // The beam's glow: soft lights strung along it, and a bright head that runs down to the sun.
+    const glows: O3[] = []
+    for (let k = 0; k < BEAM_GLOWS; k++) glows.push(this.glow(MONOLITH_GOLD, 1, 0))
+    const head = this.glow('#fff6dc', 1, 0)
+    head.userData = { kind: 'monolith-head' }
+    const swell = this.glow(MONOLITH_GOLD, 1, 0)
+    swell.userData = { kind: 'monolith-swell' }
+    const ra = new Float32Array((RIPPLE_POINTS + 1) * 3)
+    for (let k = 0; k <= RIPPLE_POINTS; k++) {
+      const a = (k / RIPPLE_POINTS) * Math.PI * 2
+      ra[k * 3] = Math.cos(a)
+      ra[k * 3 + 2] = Math.sin(a)
+    }
+    const ripples: O3[] = []
+    for (let k = 0; k < RIPPLES; k++) {
+      const rg = new T.BufferGeometry()
+      rg.setAttribute('position', new T.BufferAttribute(ra.slice(), 3))
+      const ring = new T.Line(rg, new T.LineBasicMaterial({ color: new T.Color(MONOLITH_GOLD), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+      ring.frustumCulled = false
+      ring.visible = false
+      ring.userData = { kind: 'monolith-ripple' }
+      ripples.push(ring)
+    }
+    this.world.add(g, halo, label, beam, ...glows, head, swell, ...ripples)
+    const drops = Array.from({ length: SCREEN_COLS }, () => Math.random() * SCREEN_ROWS)
+    const speeds = Array.from({ length: SCREEN_COLS }, () => 4 + Math.random() * 7)
+    // A rebuild keeps the slab's turn and its screen's columns, as it keeps the sun's turn.
+    const before = this.mono
+    if (before !== null) {
+      g.rotation.y = before.g.rotation.y
+      drops.splice(0, drops.length, ...before.screen.drops)
+      speeds.splice(0, speeds.length, ...before.screen.speeds)
+    }
+    this.mono = { g, edges, halo, label, beam, glows, head, swell, ripples, screen: { c, tex, drops, speeds, drawn: -1 }, at: before?.at ?? -99 }
+    this.drawScreen(0, 0)
+  }
+
+  /** The dot-matrix face: dim green cells, columns of light falling at their own speeds, now and then a blinking cell. */
+  private drawScreen(dt: number, boost: number): void {
+    const M = this.mono
+    if (M === null) return
+    const { c, tex, drops, speeds } = M.screen
+    const g = c.getContext('2d')
+    if (!g) return
+    const n = SCREEN_CELL
+    g.fillStyle = '#010603'
+    g.fillRect(0, 0, c.width, c.height)
+    for (let x = 0; x < SCREEN_COLS; x++) {
+      drops[x] = ((drops[x] as number) + dt * (speeds[x] as number) * (1 + boost)) % (SCREEN_ROWS + 6)
+      for (let y = 0; y < SCREEN_ROWS; y++) {
+        const behind = (drops[x] as number) - y
+        const trail = behind >= 0 && behind < 6 ? 1 - behind / 6 : 0
+        const blink = Math.random() < 0.012 ? 0.8 : 0
+        const lit = Math.min(1, 0.1 + 0.9 * Math.max(trail, blink) + 0.35 * boost)
+        g.fillStyle = `rgba(61, 255, 138, ${lit.toFixed(3)})`
+        g.fillRect(x * n + 1, y * n + 1, n - 2, n - 2)
+      }
+    }
+    tex.needsUpdate = true
+  }
+
+  private stepMonolith(dt: number, spin: number): void {
+    const M = this.mono
+    if (M === null) return
+    const m = this.maxR || 700
+    const h = this.sunR * MONOLITH_HEIGHT
+    const y = m * MONOLITH_LIFT
+    M.g.position.set(0, y, 0)
+    M.g.scale.setScalar(h)
+    M.g.rotation.y += dt * 0.05 * spin
+    M.halo.position.set(0, y, 0)
+    M.halo.scale.setScalar(h * 1.5)
+    M.label.position.set(0, y - h * 0.5 - 14, 0)
+    const t = this.clock - M.at
+    const on = t >= 0 && t < MONOLITH_SECONDS
+    // The screen redraws about 12 times a second (its columns stand still under reduced motion), faster while it answers.
+    const answering = on ? Math.max(0, 1 - t / 2) : 0
+    if (!this.reduced && this.clock - M.screen.drawn >= 1 / 12) {
+      this.drawScreen(M.screen.drawn < 0 ? 0 : this.clock - M.screen.drawn, answering)
+      M.screen.drawn = this.clock
+    }
+    M.halo.material.opacity = 0.16 + 0.3 * answering
+    // The answer: the beam lights at once, its head runs down to the sun in BEAM_DROP s, then it fades.
+    const top = y - h * 0.5
+    const bottom = this.sunR
+    const beamK = on ? (this.reduced ? 1 : Math.min(1, t / 0.15) * Math.exp(-Math.max(0, t - BEAM_DROP) / 1.4)) : 0
+    const arr = M.beam.geometry.attributes.position.array
+    arr[1] = top
+    arr[4] = bottom
+    M.beam.geometry.attributes.position.needsUpdate = true
+    M.beam.material.opacity = beamK
+    M.edges.material.opacity = 0.55 + 0.45 * Math.max(beamK, answering)
+    const drop = this.reduced ? 1 : Math.min(1, Math.max(0, t / BEAM_DROP))
+    for (let k = 0; k < M.glows.length; k++) {
+      const f = k / (M.glows.length - 1)
+      const gl = M.glows[k] as O3
+      gl.position.set(0, top + (bottom - top) * f, 0)
+      gl.scale.setScalar(this.sunR * (0.9 + 0.5 * Math.sin(this.clock * 9 + k)))
+      // A glow lights once the head has passed it.
+      gl.material.opacity = f <= drop ? 0.55 * beamK : 0
+    }
+    M.head.position.set(0, top + (bottom - top) * drop, 0)
+    M.head.scale.setScalar(this.sunR * 1.6)
+    M.head.material.opacity = on && !this.reduced && t < BEAM_DROP + 0.2 ? 1 - Math.max(0, t - BEAM_DROP) / 0.2 : 0
+    // At the sun: it swells, and ripples run out across the whole galaxy, one after another.
+    const swellK = on ? (this.reduced ? 0.7 : Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (t - BEAM_DROP) / 2.2))))) : 0
+    M.swell.scale.setScalar(this.sunR * (5 + 8 * swellK))
+    M.swell.material.opacity = 0.75 * swellK
+    for (let k = 0; k < M.ripples.length; k++) {
+      const ring = M.ripples[k] as O3
+      const u = (t - BEAM_DROP - k * RIPPLE_GAP) / RIPPLE_SECONDS
+      ring.visible = on && !this.reduced && u > 0 && u < 1
+      ring.scale.setScalar(this.sunR + (m * 1.12 - this.sunR) * Math.max(0, u))
+      ring.material.opacity = 0.85 * (1 - Math.max(0, u)) * (k === 0 ? 1 : 0.6)
+    }
+  }
+
+  /** Where the first ripple is now (its radius), or null when none is running: the bodies it passes light up. */
+  private waveRadius(): number | null {
+    const M = this.mono
+    if (M === null || this.reduced) return null
+    const u = (this.clock - M.at - BEAM_DROP) / RIPPLE_SECONDS
+    if (u <= 0 || u >= 1) return null
+    const m = this.maxR || 700
+    return this.sunR + (m * 1.12 - this.sunR) * u
   }
 
   /** The dots of the listed ids, with the colour each has now (a forgotten memory fades out of it). */
@@ -2381,18 +2695,24 @@ class SolarImpl {
   private stepEvents(): void {
     const T = this.T
     const keep: EventRec[] = []
+    // A flash that starts at `at` seconds and dies away.
+    const burst = (t: number, at: number, fall: number) => (t < at ? 0 : Math.exp(-(t - at) / fall))
     for (const ev of this.events) {
-      const u = (this.clock - ev.start) / ev.dur
+      const t = this.clock - ev.start
+      const done = t >= ev.dur
       const P = ev.owner === null ? undefined : this.P[ev.owner]
       // An event bound for a body that is gone or hidden since it started stops drawing.
-      if (u >= 1 || (ev.owner !== null && (!P || this.hiddenOwner(ev.owner)))) {
+      if (done || (ev.owner !== null && (!P || this.hiddenOwner(ev.owner)))) {
         this.endEvent(ev)
-        if (u >= 1 && ev.type === 'recall') this.flares.set(ev.source ?? '', this.clock)
+        if (done && ev.type === 'recall') this.flares.set(ev.source ?? '', this.clock)
         continue
       }
       keep.push(ev)
+      // u: how far the comet or beam is along its flight (0 before it leaves, 1 once it has landed).
+      const u = Math.max(0, Math.min(1, (t - ev.delay) / ev.flight))
+      const flying = t >= ev.delay && t < ev.delay + ev.flight
       // Reduced motion: beams, pulses and flashes are drawn at full strength for their time, not faded in and out.
-      const al = this.reduced ? 1 : Math.sin(Math.PI * u)
+      const al = this.reduced ? 1 : flying ? Math.sin(Math.PI * u) : 0
       const nod = this.noduleAt(ev.source)
       if (ev.type === 'pulse') {
         ;(ev.flash as O3).position.set(0, 0, 0)
@@ -2403,6 +2723,23 @@ class SolarImpl {
         continue
       }
       const pp = this.worldOf((P as PlanetRec).pG)
+      if (ev.origin) {
+        // The caller flashes at the start; for a recall it flashes again as the memory comes home.
+        const home = ev.type === 'recall' ? burst(t, ev.delay + ev.flight, 0.35) : 0
+        ev.origin.position.copy(nod)
+        ev.origin.material.opacity = this.reduced ? 0.6 : 0.85 * Math.max(burst(t, 0, 0.4), home)
+      }
+      if (ev.ring) {
+        // The planet: a faint glow while it waits, then a bright flare when the event reaches it.
+        ev.ring.position.copy(pp)
+        ev.ring.material.opacity = this.reduced ? 0.55 : t < ev.arrive ? 0.12 * (t / Math.max(0.01, ev.arrive)) : 0.9 * burst(t, ev.arrive, 0.6)
+      }
+      if (ev.ping) {
+        // The recall's ping: out from the caller to the planet before the comet comes back.
+        const k = Math.min(1, t / Math.max(0.01, ev.delay))
+        ev.ping.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : k))
+        ev.ping.material.opacity = this.reduced || t >= ev.delay ? 0 : 0.7 * Math.sin(Math.PI * k)
+      }
       if (ev.type === 'update' || ev.type === 'forget') {
         const ba = ev.beam.geometry.attributes.position.array
         ba[0] = nod.x
@@ -2415,6 +2752,16 @@ class SolarImpl {
         ev.beam.material.opacity = al
         ev.flash.position.copy(pp)
         ev.flash.material.opacity = 0.7 * al
+        if (ev.head) {
+          ev.head.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : u))
+          ev.head.material.opacity = al
+        }
+        if (ev.caption) {
+          // With the beam's head; it lingers on the planet while the planet flares.
+          const at = ev.head ? ev.head.position : pp
+          ev.caption.position.set(at.x, at.y + this.sunR * 0.9, at.z)
+          ev.caption.material.opacity = this.reduced ? 1 : flying ? Math.min(1, 0.3 + u * 5) : burst(t, ev.arrive, 0.6)
+        }
         if (ev.fade) this.setFade(ev.fade, this.reduced ? 1 : u)
         continue
       }
@@ -2425,6 +2772,31 @@ class SolarImpl {
       for (let k = 0; k < trail.length; k++) {
         const v = this.reduced ? 1 : Math.max(0, u - k * 0.016)
         trail[k].position.copy(from.clone().multiplyScalar((1 - v) * (1 - v)).add(mid.clone().multiplyScalar(2 * (1 - v) * v)).add(to.clone().multiplyScalar(v * v)))
+        // The comet shows only while it flies (before a recall's ping lands, and after it has landed, it is gone).
+        trail[k].visible = this.reduced || flying
+      }
+      if (ev.flash) {
+        ev.flash.position.copy(pp)
+        ev.flash.material.opacity = 0.7 * al
+      }
+      if (ev.caption) {
+        // With the ping on its way out, then with the comet's head; it fades as the comet lands.
+        const pinging = ev.ping !== undefined && t < ev.delay
+        const at = this.reduced ? pp : pinging ? (ev.ping as O3).position : trail[0].position
+        ev.caption.position.set(at.x, at.y + this.sunR * 0.9, at.z)
+        ev.caption.material.opacity = this.reduced ? 1 : pinging ? 0.85 : flying ? Math.min(1, (ev.ping ? 0.85 : 0.3) + u * 5) : burst(t, ev.delay + ev.flight, 0.6)
+      }
+      if (ev.path) {
+        const pa = ev.path.geometry.attributes.position.array
+        for (let k = 0; k <= PATH_POINTS; k++) {
+          const v = k / PATH_POINTS
+          const q = from.clone().multiplyScalar((1 - v) * (1 - v)).add(mid.clone().multiplyScalar(2 * (1 - v) * v)).add(to.clone().multiplyScalar(v * v))
+          pa[k * 3] = q.x
+          pa[k * 3 + 1] = q.y
+          pa[k * 3 + 2] = q.z
+        }
+        ev.path.geometry.attributes.position.needsUpdate = true
+        ev.path.material.opacity = 0.75 * al
       }
     }
     this.events = keep
@@ -2501,6 +2873,8 @@ class SolarImpl {
       this.renderer.setSize(w, h, false)
       this.composer.setSize(w, h)
       this.camera.aspect = w / h
+      // The galaxy sits a little above the middle: the empty sky at the top is used and the nebula below fits.
+      this.camera.setViewOffset?.(w, h, 0, Math.round(h * VIEW_LIFT), w, h)
       this.camera.updateProjectionMatrix()
     }
     const motion = this.reduced ? 0 : 1
@@ -2508,10 +2882,14 @@ class SolarImpl {
     if (this.tipShown) this.holdUntil = this.clock + HOVER_HOLD_SECONDS
     this.held = this.tipShown || this.clock < this.holdUntil
     const spin = motion * MOTION_SCALE * (this.held ? 0 : 1)
+    // `orbit` drives what makes the whole galaxy turn (orbits, the sun, its belts, the monolith): Auto-rotate off
+    // holds them all still, so the galaxy stops turning; planets still spin in place and moons still circle.
+    const orbit = s.rotate === false ? 0 : spin
     // Focus (0.16.0): the hovered project while held, else the project opened (planet, moon or memory level).
     if (!this.held) this.hoverOwner = null
     const focus = this.hoverOwner ?? (this.S.level !== 'galaxy' ? this.S.planet : null)
-    if (this.sunG) this.sunG.rotation.y += dt * 0.12 * spin
+    const lit = this.eventLight()
+    if (this.sunG) this.sunG.rotation.y += dt * 0.12 * orbit
     for (const [source, mesh] of this.nodules) {
       const at = this.flares.get(source)
       mesh.scale.setScalar(1 + (at === undefined || this.reduced ? 0 : Math.max(0, 1 - (this.clock - at) * 1.5)) * 0.8)
@@ -2525,7 +2903,7 @@ class SolarImpl {
       const lead = members[0]
       if (!lead) continue
       const speed = ring.speed
-      if (S.level === 'galaxy') lead.angle += dt * speed * spin
+      if (S.level === 'galaxy') lead.angle += dt * speed * orbit
       members.forEach((member, mi) => {
         const og = member.orbitG
         og.rotation.x += (ring.tilt.x - og.rotation.x) * Math.min(1, dt * 3)
@@ -2554,6 +2932,20 @@ class SolarImpl {
       P.label.visible = !here && !s.hidden[id]
       // Focus (0.16.0): other projects' labels step back.
       P.label.material.opacity = focus !== null && focus !== id ? 0.35 : 1
+      // A live event bound for this body (planet, ship or station): its name grows, takes the event's colour and
+      // comes to full strength while the event is on its way and as it lands.
+      const base: O3 = P.label.userData.base ?? (P.label.userData.base = P.label.scale.clone())
+      const live = lit.get(id)
+      if (live !== undefined) {
+        P.label.scale.copy(base).multiplyScalar(1 + LABEL_GROW * live.k)
+        P.label.material.color.set('#ffffff').lerp(new T.Color(live.colour), 0.55 * live.k)
+        P.label.material.opacity = Math.max(P.label.material.opacity, live.k)
+        P.label.renderOrder = 12
+      } else if (P.label.renderOrder === 12) {
+        P.label.scale.copy(base)
+        P.label.material.color.set('#ffffff')
+        P.label.renderOrder = 10
+      }
       // Probes circle slowly the other way to the moons; they stand still while you look at one memory.
       if (P.probes && !(here && S.level === 'memory')) P.probes.rotation.y -= dt * 0.18 * spin
       for (const mo of P.moons) {
@@ -2578,10 +2970,10 @@ class SolarImpl {
     const outerR = this.maxR + 70
     if (this.outer) {
       this.outer.scale.set(outerR, 1, outerR)
-      this.outer.rotation.y += dt * 0.004 * spin
+      this.outer.rotation.y += dt * 0.004 * orbit
       this.outerLabel.position.set(0, 30, -outerR)
     }
-    if (this.sunBeltObj) this.sunBeltObj.rotation.y += dt * 0.06 * spin
+    if (this.sunBeltObj) this.sunBeltObj.rotation.y += dt * 0.06 * orbit
     if (this.neb) this.stepNebula(focus, dt)
 
     // Sun-belt tethers: each true global dot (it turns with the belt) to the planet it is close to (it orbits).
@@ -2649,8 +3041,10 @@ class SolarImpl {
       // Focus (0.16.0): the focused project's bonds are brighter with their chip; others' fade and lose the chip.
       const touches = focus !== null && (H.L.older === focus || H.L.newer === focus)
       const faded = focus !== null && !touches
-      H.pair[0]!.g.visible = H.pair[1]!.g.visible = H.line.visible = H.line2.visible = !gone
-      H.chip.visible = !gone && !faded
+      const strands = !gone && s.bonds !== false
+      H.pair[0]!.g.visible = H.pair[1]!.g.visible = !gone
+      H.line.visible = H.line2.visible = strands
+      H.chip.visible = strands && !faded
       const a = this.worldOf(A.pG)
       const b = this.worldOf(B.pG)
       const dir = b.clone().sub(a)
@@ -2699,11 +3093,11 @@ class SolarImpl {
       const mid = pts[30] as O3
       H.chip.position.set(mid.x, mid.y + 6, mid.z)
       const local = (((this.clock + H.phase) % PULSE_EVERY) + PULSE_EVERY) % PULSE_EVERY
-      const on = local < 7 && !this.reduced && !gone
+      const on = local < PULSE_TRAVEL && !this.reduced && strands
       for (let k = 0; k < H.pulse.length; k++) {
         H.pulse[k].visible = on
         if (on) {
-          const e = ease(local / 7)
+          const e = ease(local / PULSE_TRAVEL)
           const idx = Math.max(0, Math.min(60, Math.round((e - k * 0.012) * 60)))
           H.pulse[k].position.copy(pts[idx])
         }
@@ -2711,6 +3105,7 @@ class SolarImpl {
     }
 
     this.stepEvents()
+    this.stepMonolith(dt, s.rotate === false ? 0 : spin)
     this.satellites()
 
     // Camera flight.

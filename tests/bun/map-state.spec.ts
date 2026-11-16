@@ -54,6 +54,8 @@ import {
   SPARK_COLOURS,
   SPARK_POOL,
   SPARK_SECONDS,
+  sparkCaption,
+  SPARK_CAPTION_CHARS,
   SPARK_STAGGER,
   sparkAlpha,
   sparkAt,
@@ -189,6 +191,10 @@ import {
   TIMELINE_POSE,
   timelineDays,
   timelinePlaces,
+  timelinePose,
+  timelineDim,
+  tickLabelY,
+  laneLabelFit,
   TICK_LABEL_Y,
   TICK_LABEL_HEIGHT,
   TICK_LABEL_COLOUR,
@@ -224,7 +230,7 @@ import {
   wantedTicks,
   type PlacesCache,
 } from '../../ui/map-state'
-import { laneY, rangeDays, tickStep, TICK_MIN_SPACING } from '../../ui/map-layout'
+import { laneSpan, laneY, rangeDays, tickStep, TICK_MIN_SPACING } from '../../ui/map-layout'
 import {
   clearKinds,
   CLICK_MAX_HELD_MS,
@@ -507,8 +513,8 @@ describe('the galaxy on a real /api/galaxy reply', () => {
     expect(sharedWith(galaxy, `${alpha}/Untagged`)).toEqual([])
   })
 
-  test('GAL.1.a7: bloom 0.95 / 0.55 / 0.12; labels shrink with distance, clamp(distance / 520, 0.2, 1)', () => {
-    expect(BLOOM).toEqual({ strength: 0.95, radius: 0.55, threshold: 0.12 })
+  test('GAL.1.a7: bloom 0.6 / 0.45 / 0.3 (calmed from 0.6.0\'s 0.95 / 0.55 / 0.12, which washed the Timeline white); labels shrink with distance, clamp(distance / 520, 0.2, 1)', () => {
+    expect(BLOOM).toEqual({ strength: 0.6, radius: 0.45, threshold: 0.3 })
     expect(labelScale(1000)).toBe(1)
     expect(labelScale(260)).toBe(0.5)
     expect(labelScale(10)).toBe(0.2)
@@ -1384,7 +1390,15 @@ describe('LIVE.2: sparks and pulses', () => {
   test('LIVE.2.a1/a2: colours and pulses by kind, and the flight takes 1.1 s on a curve from the Claude core', () => {
     expect(SPARK_COLOURS).toEqual({ recall: [1, 0.82, 0.45], save: [0.37, 0.95, 0.85], update: [0.37, 0.95, 0.85], forget: [1, 0.42, 0.42] })
     expect(PULSE).toEqual({ recall: 1.4, save: 2, update: 1.6, forget: 1.2 })
-    expect(SPARK_SECONDS).toBe(1.1)
+    expect(SPARK_SECONDS).toBe(2.6)
+    // A spark carries its memory's first line (cut to SPARK_CAPTION_CHARS, 48), or for a new memory its topic.
+    expect(SPARK_CAPTION_CHARS).toBe(48)
+    const g = freshGalaxy()
+    const star = g.layout.stars[0]!
+    const words = sparkCaption(g, { to: star.id, toKind: 'star' })
+    expect(words.length).toBeLessThanOrEqual(48)
+    expect(star.label.startsWith(words.replace(/…$/, ''))).toBe(true)
+    expect(sparkCaption(g, { to: 'project-x/deploys', toKind: 'hub' })).toBe('a new memory · deploys')
     expect(sparkAt([0, 0, 0], [100, 0, 0], 0, 0)).toEqual([0, 0, 0])
     const end = sparkAt([0, 0, 0], [100, 50, -20], 0.4, 1)
     expect(end.map(v => Math.round(v))).toEqual([100, 50, -20])
@@ -1395,13 +1409,13 @@ describe('LIVE.2: sparks and pulses', () => {
     expect(ease(0.5)).toBeCloseTo(0.5)
   })
 
-  test('LIVE.2.a2: a recall\'s sparks are staggered 0.12 s; none fly under prefers-reduced-motion', () => {
+  test('LIVE.2.a2: a recall\'s sparks are staggered 0.35 s (slowed to read their captions); none fly under prefers-reduced-motion', () => {
     const sparks = sparksFor(event('recall', ['m1', 'm2', 'm3']), targets, false, random)
     expect(sparks.map(spark => spark.delay)).toEqual([0, SPARK_STAGGER, SPARK_STAGGER * 2])
     expect(sparks.every(spark => spark.kind === 'recall' && spark.demo === false)).toBe(true)
     expect(sparksFor(event('recall', ['m1']), targets, true, random)).toEqual([])
     expect(sparksFor({ ...event('save', ['d']), demo: true }, targets.slice(0, 1), false, random)[0]!.demo).toBe(true)
-    expect(SPARK_STAGGER).toBe(0.12)
+    expect(SPARK_STAGGER).toBe(0.35)
   })
 
   test('LIVE.2.a3: a pool of 48; extra sparks wait in the queue and start as slots free up, none dropped', () => {
@@ -1433,10 +1447,10 @@ describe('LIVE.2: sparks and pulses', () => {
     const waiting = pool.active[1]!
     expect(sparkAlpha(waiting)).toBe(0)
     expect(sparkProgress(waiting)).toBe(0)
-    stepSparks(pool, 0.12 + 0.55)
+    stepSparks(pool, SPARK_STAGGER + SPARK_SECONDS / 2)
     expect(sparkProgress(pool.active[1]!)).toBeCloseTo(0.5, 1)
     expect(sparkAlpha(pool.active[1]!)).toBeCloseTo(0.85, 1)
-    const landed = stepSparks(pool, 1)
+    const landed = stepSparks(pool, SPARK_SECONDS)
     expect(landed.map(spark => spark.to)).toEqual(['m1', 'm2'])
   })
 })
@@ -2251,11 +2265,11 @@ describe('TIME: the Timeline layout', () => {
     expect(morphTarget('meaning')).toBe(0)
   })
 
-  test('TIME.1.a1: cores shrink to half in Timeline; hubs, threads, bridges and particles fade out', () => {
-    expect(TIMELINE_CORE_SCALE).toBe(0.5)
+  test('TIME.1.a1: cores shrink to a small lane head in Timeline; hubs, threads, bridges and particles fade out', () => {
+    expect(TIMELINE_CORE_SCALE).toBe(0.16)
     expect(coreScale(0)).toBe(1)
-    expect(coreScale(1)).toBe(0.5)
-    expect(coreScale(0.5)).toBeCloseTo(0.75)
+    expect(coreScale(1)).toBeCloseTo(0.16)
+    expect(coreScale(0.5)).toBeCloseTo(0.58)
     expect(galaxyOnlyFade(0)).toBe(1)
     expect(galaxyOnlyFade(1)).toBe(0)
     expect(galaxyOnlyFade(0.25)).toBeCloseTo(0.75)
@@ -2773,13 +2787,45 @@ describe('TIME: the Timeline layout', () => {
   test('R2.5: what is drawn each frame: hubs alone fade, cores and the Claude core shrink, every thing grows with its pulse', () => {
     expect(visualFade('hub', 0.25)).toBe(0.25)
     for (const kind of ['star', 'core', 'claude'] as const) expect(visualFade(kind, 0.25)).toBe(1)
-    expect(visualScale('core', 10, 1, 0)).toBe(5)
+    expect(visualScale('core', 10, 1, 0)).toBeCloseTo(1.6)
     expect(visualScale('claude', 10, 1, 0)).toBe(5)
-    expect(visualScale('core', 10, 0.5, 0)).toBeCloseTo(7.5)
-    expect(visualScale('star', 10, 1, 0)).toBe(10)
+    expect(visualScale('core', 10, 0.5, 0)).toBeCloseTo(5.8)
+    // Memories shrink to fit their lanes in Timeline, and are drawn fainter there.
+    expect(visualScale('star', 10, 1, 0)).toBeCloseTo(4.2)
+    expect(visualScale('star', 10, 0, 0)).toBe(10)
+    expect(timelineDim('star', 1)).toBeCloseTo(0.65)
+    expect(timelineDim('star', 0)).toBe(1)
+    expect(timelineDim('core', 1)).toBe(1)
     expect(visualScale('hub', 10, 1, 0)).toBe(10)
     expect(visualScale('star', 10, 0, 0.5)).toBeCloseTo(18)
     expect(visualScale('core', 10, 0, 0)).toBe(10)
+  })
+
+  test('many projects: the lanes spread taller, names fit their lanes, the grid and ticks follow, and the view fits the canvas', () => {
+    // A few lanes keep the mockup's 240; fifty spread LANE_GAP (10.6) apart, under the 520 cap.
+    expect(laneSpan(4)).toBe(240)
+    expect(laneSpan(50)).toBeCloseTo(49 * 10.6)
+    expect(laneSpan(80)).toBe(520)
+    expect(laneSpan(50) / 49).toBeCloseTo(10.6)
+    // A project name is shrunk to 85% of the gap between lanes, only in Timeline.
+    expect(laneLabelFit(4, 1)).toBe(1)
+    expect(laneLabelFit(50, 1)).toBeCloseTo((10.6 * 0.85) / 16.8)
+    expect(laneLabelFit(50, 0)).toBe(1)
+    // The grid reaches past the outer lanes; the tick labels sit under it.
+    expect(gridLine(0, 50)[1][1]).toBeGreaterThan(260)
+    expect(tickLabelY(50)).toBeLessThan(-260)
+    expect(tickLabelY(4)).toBe(TICK_LABEL_Y)
+    // The Claude core sits above the top lane.
+    const fifty = buildGalaxy(reply(Array.from({ length: 50 }, (_, i) => memory(`m${i}`, `project-p${i}-abc123`))))
+    expect(fifty.layout.cores.length).toBe(50)
+    expect(timelinePlaces(fifty, 30).claude[1]).toBeGreaterThan(260)
+    // The view: never nearer than the mockup's, and far enough back for the whole axis on a square canvas.
+    const square = timelinePose(1, 40, 50)
+    expect(square.position[2]).toBeGreaterThan(TIMELINE_POSE.position[2])
+    const halfWidth = square.position[2] * Math.tan((20 * Math.PI) / 180)
+    expect(square.target[0] - halfWidth).toBeLessThanOrEqual(-440)
+    expect(square.target[0] + halfWidth).toBeGreaterThanOrEqual(330)
+    expect(timelinePose(3, 40, 4).position[2]).toBe(TIMELINE_POSE.position[2])
   })
 
   test('R2.5: layout switches ask for the straight-on view into Timeline and the Galaxy view out of it', () => {
@@ -3004,8 +3050,8 @@ describe('QAMAP: timeline ticks, lane labels, moons, drag and strings, with the 
   test('QAMAP.R2.1: the Claude core has a tooltip in plain words and no click hint', () => {
     const none = tooltip(null as unknown as Galaxy, { kind: 'claude', id: '', sx: 702, sy: 425 })
     expect(none).toEqual(CLAUDE_TOOLTIP)
-    expect(none!.title).toBe('Claude')
-    expect(none!.sub).toBe('Recalls start here — gold sparks fly from this core to the memories a recall finds')
+    expect(none!.title).toBe('The Human')
+    expect(none!.sub).toBe('The monolith: recalls start here — gold sparks fly from it to the memories a recall finds')
     expect(none!.sub).not.toContain('Click')
     // At the 22 px core pick radius: the cursor on the Claude core at (702, 425) picks it.
     const hit = pickNearest([{ kind: 'claude', id: '', sx: 702, sy: 425, radius: PICK_RADIUS.claude, alpha: 1 }], 710, 430)
@@ -3095,8 +3141,8 @@ describe('GLOW: the bloom levels and the Glow control', () => {
     expect(soft).toEqual({ enabled: true, ...BLOOM_SOFT })
   })
 
-  test('full is exactly the 0.6.0 glow, and off switches the pass off', () => {
-    expect(bloomFor('full')).toEqual({ enabled: true, strength: 0.95, radius: 0.55, threshold: 0.12 })
+  test('full is the calmed strong glow, and off switches the pass off', () => {
+    expect(bloomFor('full')).toEqual({ enabled: true, ...BLOOM })
     expect(bloomFor('off').enabled).toBe(false)
   })
 
@@ -3686,7 +3732,7 @@ describe('the solar page state (MAPX.11)', () => {
     expect(hidden.hidden).toEqual({ a: true })
     // 0.29.0: the view carries the Meaning nebula toggle too.
     // 0.30.0: ... and the Nebula captions toggle.
-    expect(Object.keys(viewOf(initialSolarPage())).sort()).toEqual(['arrange', 'captions', 'colour', 'hidden', 'legend', 'nebula', 'query', 'rotate'])
+    expect(Object.keys(viewOf(initialSolarPage())).sort()).toEqual(['arrange', 'bonds', 'captions', 'colour', 'hidden', 'legend', 'nebula', 'query', 'rotate', 'ties'])
     expect(setSolarQuery(hidden, 'ab').findOpen).toBe(true)
     expect(setSolarQuery(hidden, 'a').findOpen).toBe(false)
     expect(closeFind(setSolarQuery(hidden, 'abc'))).toMatchObject({ query: '', findOpen: false })

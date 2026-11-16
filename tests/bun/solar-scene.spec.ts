@@ -46,6 +46,7 @@ function rig(options: { reduced?: boolean; data?: any; withData?: boolean; view?
   const hovers: { tip: Tip; x: number; y: number }[] = []
   const picks: any[] = []
   const levels: any[] = []
+  const storms: number[] = []
   let renderer!: FakeRenderer
   let composer!: MatrixComposer
   const scene = createSolarScene({
@@ -57,6 +58,7 @@ function rig(options: { reduced?: boolean; data?: any; withData?: boolean; view?
     onHover: (tip: Tip, x: number, y: number) => hovers.push({ tip, x, y }),
     onPick: (target: any) => picks.push(target),
     onLevel: (level: any) => levels.push(level),
+    onStorm: () => storms.push(clock.now),
   })
   if (options.view) scene.setView(options.view)
   if (options.withData !== false) scene.setData(options.data ?? galaxy())
@@ -82,6 +84,7 @@ function rig(options: { reduced?: boolean; data?: any; withData?: boolean; view?
     hovers,
     picks,
     levels,
+    storms,
     scene,
     camera,
     sceneRoot,
@@ -171,10 +174,10 @@ const angleOf = (v: any): number => Math.atan2(v.z, v.x)
 // ---- C13: the interface ----
 
 describe('MAPX.5 the C13 interface', () => {
-  test('createSolarScene returns exactly the seven methods of C13', () => {
+  test('createSolarScene returns exactly the eight methods of C13 (with the monolith)', () => {
     const r = rig({ withData: false })
     expect(Object.keys(r.scene).sort()).toEqual([...SCENE_METHODS].sort())
-    expect([...SCENE_METHODS].sort()).toEqual(['dispose', 'event', 'flyTo', 'setData', 'setView', 'showView', 'zoom'])
+    expect([...SCENE_METHODS].sort()).toEqual(['dispose', 'event', 'flyTo', 'monolith', 'setData', 'setView', 'showView', 'zoom'])
     for (const name of SCENE_METHODS) expect(typeof r.scene[name]).toBe('function')
     r.scene.dispose()
   })
@@ -241,6 +244,14 @@ describe('MAPX.5 hover', () => {
     const p1 = s1.geometry.attributes.position.array
     const p2 = s2.geometry.attributes.position.array
     expect(Math.hypot(p1[90] - p2[90], p1[91] - p2[91], p1[92] - p2[92])).toBeGreaterThan(1)
+    // the Links switch hides the strands and chips but keeps the black holes
+    r.scene.setView({ bonds: false })
+    r.run(0.1)
+    for (const strand of strands) expect(strand.visible).toBe(false)
+    for (const chip of r.all(o => o.userData?.kind === 'hole-chip')) expect(chip.visible).toBe(false)
+    r.scene.setView({ bonds: true })
+    r.run(0.1)
+    for (const strand of strands) expect(strand.visible).toBe(true)
     // the tether: one string of 16 gold beads, its middle lifted above the straight line between its ends
     const beads = r.all(o => o.userData?.kind === 'tether')
     expect(beads).toHaveLength(1)
@@ -396,16 +407,32 @@ describe('MAPX.5 hover', () => {
     r.scene.dispose()
   })
 
+  test('Auto-rotate off holds the galaxy still: the orbits and the sun stop; on, they move', () => {
+    const lead = (r: ReturnType<typeof rig>) => angleOf(r.worldPos(r.planet(MATRIX)))
+    const still = rig({ reduced: false, view: { rotate: false } })
+    const sun = still.all(o => o.userData?.kind === 'sun')[0]
+    const a0 = lead(still)
+    const s0 = sun.parent.rotation.y
+    still.run(4)
+    expect(Math.abs(lead(still) - a0)).toBeLessThan(1e-9)
+    expect(sun.parent.rotation.y).toBe(s0)
+    still.scene.setView({ rotate: true })
+    const a1 = lead(still)
+    still.run(4)
+    expect(Math.abs(lead(still) - a1)).toBeGreaterThan(0.01)
+    still.scene.dispose()
+  })
+
   test('0.16.0 hovering holds the map still, and for 2 s after the tooltip closes; free motion is half the old speed', () => {
     const lead = (r: ReturnType<typeof rig>) => angleOf(r.worldPos(r.planet(MATRIX)))
-    const free = rig({ reduced: false })
+    const free = rig({ reduced: false, view: { rotate: true } })
     const a0 = lead(free)
     free.run(4)
     const freeMove = Math.abs(lead(free) - a0)
     // half of the 0.11.0 speed: 4 s used to move this planet a little over 0.04 rad
     expect(freeMove).toBeGreaterThan(0.015)
     expect(freeMove).toBeLessThan(0.03)
-    const held = rig({ reduced: false })
+    const held = rig({ reduced: false, view: { rotate: true } })
     const sun = held.screen(held.all(o => o.userData?.kind === 'sun')[0])
     expect(held.locate(t => kindOf(t) === 'sun' || kindOf(t) === 'nodule', { x0: sun.x - 6, y0: sun.y - 6, x1: sun.x + 6, y1: sun.y + 6 }, 2)).not.toBeNull()
     const b0 = lead(held)
@@ -724,7 +751,8 @@ describe('MAPX.5 live events', () => {
   test('a recall is a gold comet from the planet towards the caller\'s nodule', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall'))
-    expect(r.fx().children).toHaveLength(14)
+    // 14 comet sprites, the planet's flash, its lit path, the ping out, the caption, the planet's flare and the caller's flash.
+    expect(r.fx().children).toHaveLength(20)
     r.clock.tick()
     const head = r.fx().children[0]
     expect(hex(r.fx().children[1])).toBe('f0e442')
@@ -732,7 +760,7 @@ describe('MAPX.5 live events', () => {
     const nodule = nodulePos(r, 'claude-code')
     const here = head.position
     expect(here.distanceTo(planet)).toBeLessThan(here.distanceTo(nodule))
-    r.run(2.2)
+    r.run(4.2)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
   })
@@ -740,14 +768,23 @@ describe('MAPX.5 live events', () => {
   test('a save is a blue comet from the writer\'s nodule to the planet', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('save', { ids: ['m-new'] }))
-    expect(r.fx().children).toHaveLength(14)
+    expect(r.fx().children).toHaveLength(19)
+    // The path between the writer and the planet is lit in the save's colour.
+    const path = r.fx().children.find((o: any) => o.userData?.kind === 'event-path')
+    expect(hex(path)).toBe('56b4e9')
+    r.run(1)
+    expect(path.material.opacity).toBeGreaterThan(0.5)
+    const pa = path.geometry.attributes.position.array
+    const end = { x: pa[pa.length - 3], y: pa[pa.length - 2], z: pa[pa.length - 1] }
+    const at = r.worldPos(r.planet(MATRIX))
+    expect(Math.hypot(end.x - at.x, end.y - at.y, end.z - at.z)).toBeLessThan(4)
     r.clock.tick()
     expect(hex(r.fx().children[1])).toBe('56b4e9')
     const head = r.fx().children[0].position
     const planet = r.worldPos(r.planet(MATRIX))
     const nodule = nodulePos(r, 'claude-code')
     expect(head.distanceTo(nodule)).toBeLessThan(head.distanceTo(planet))
-    r.run(2.2)
+    r.run(2.8)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
   })
@@ -786,6 +823,111 @@ describe('MAPX.5 live events', () => {
     // Another dot of the same swarm is untouched.
     const other = at === 0 ? 1 : 0
     expect(col.getX(other)).toBeGreaterThan(after[0] as number)
+    r.scene.dispose()
+  })
+
+  test('call, then answer: the caller flashes first, the planet flares when the event reaches it', () => {
+    for (const [kind, arrive] of [['save', 2.4], ['recall', 0.6], ['update', 1.1]] as const) {
+      const r = rig({ reduced: false })
+      r.scene.event(ev(kind, { ids: ['mem-001'] }))
+      const origin = r.fx().children.find((o: any) => o.userData?.kind === 'event-origin')
+      const ring = r.fx().children.find((o: any) => o.userData?.kind === 'event-ring')
+      r.clock.tick()
+      // At the start the caller is bright and the planet only faint.
+      expect(origin.material.opacity).toBeGreaterThan(0.6)
+      expect(origin.position.distanceTo(nodulePos(r, 'claude-code'))).toBeLessThan(1)
+      expect(ring.material.opacity).toBeLessThan(0.15)
+      // Just after the event reaches the planet, the planet flares.
+      r.run(arrive + 0.05)
+      expect(ring.material.opacity).toBeGreaterThan(0.7)
+      expect(ring.position.distanceTo(r.worldPos(r.planet(MATRIX)))).toBeLessThan(1)
+      r.scene.dispose()
+    }
+  })
+
+  test('a moving event carries its memory\'s first line, or its topic, or "a new memory"', () => {
+    const data = galaxy()
+    const known = data.memories.find((m: any) => m.owner === MATRIX && m.label)
+    const caption = (extra: Record<string, unknown>) => {
+      const r = rig({ reduced: false, data })
+      r.scene.event(ev('update', extra))
+      const c = r.fx().children.find((o: any) => o.userData?.kind === 'event-caption')
+      r.run(0.5)
+      const seen = { text: c.userData.text as string, opacity: c.material.opacity as number }
+      r.scene.dispose()
+      return seen
+    }
+    const first = caption({ ids: [known.id] })
+    expect(known.label.startsWith(first.text.replace(/…$/, ''))).toBe(true)
+    expect(first.text.length).toBeLessThanOrEqual(48)
+    expect(first.opacity).toBeGreaterThan(0.8)
+    expect(caption({ ids: ['not-on-the-map'], topic: 'deploys' }).text).toBe('topic: deploys')
+    expect(caption({ ids: ['not-on-the-map'] }).text).toBe('a new memory')
+  })
+
+  test('the body an event is bound for lights its name: bigger, in the event\'s colour, back to normal after', () => {
+    const r = rig({ reduced: false })
+    const lit = () => r.all(o => o.isSprite && o.renderOrder === 12)
+    expect(lit()).toHaveLength(0)
+    r.scene.event(ev('save'))
+    r.run(2.45)
+    const [label] = lit()
+    expect(label).toBeDefined()
+    expect(label.scale.x).toBeGreaterThan(label.userData.base.x * 1.5)
+    expect(label.material.opacity).toBe(1)
+    expect(label.material.color.getHexString()).not.toBe('ffffff')
+    r.run(1.5)
+    expect(lit()).toHaveLength(0)
+    expect(label.scale.x).toBeCloseTo(label.userData.base.x, 5)
+    expect(label.material.color.getHexString()).toBe('ffffff')
+    r.scene.dispose()
+  })
+
+  test('The Human: a monolith above the sun; when it answers, a beam drops to the sun and a ripple runs out', () => {
+    const r = rig({ reduced: false })
+    const slab = r.all(o => o.userData?.kind === 'monolith')[0]
+    expect(slab).toBeDefined()
+    // Its broad faces are the green dot-matrix screen.
+    expect(slab.material[4].map).toBeDefined()
+    expect(slab.material[5].map).toBe(slab.material[4].map)
+    const at = r.worldPos(slab)
+    expect(at.y).toBeGreaterThan(100)
+    expect(Math.hypot(at.x, at.z)).toBeLessThan(1)
+    const beam = r.all(o => o.userData?.kind === 'monolith-beam')[0]
+    const ripple = r.all(o => o.userData?.kind === 'monolith-ripple')[0]
+    expect(beam.material.opacity).toBe(0)
+    expect(ripple.visible).toBe(false)
+    r.scene.monolith()
+    r.run(0.3)
+    expect(beam.material.opacity).toBeGreaterThan(0.8)
+    r.run(1)
+    expect(ripple.visible).toBe(true)
+    const early = ripple.scale.x
+    // The bodies the wave passes light their names in gold.
+    let lit = false
+    for (let k = 0; k < 60 && !lit; k++) {
+      r.run(0.05)
+      lit = r.all(o => o.isSprite && o.renderOrder === 12).length > 0
+    }
+    expect(lit).toBe(true)
+    expect(ripple.scale.x).toBeGreaterThan(early)
+    r.run(4)
+    expect(beam.material.opacity).toBe(0)
+    expect(ripple.visible).toBe(false)
+    r.scene.dispose()
+  })
+
+  test('a recall pings out to the planet before the comet comes back', () => {
+    const r = rig({ reduced: false })
+    r.scene.event(ev('recall'))
+    const ping = r.fx().children.find((o: any) => o.userData?.kind === 'event-ping')
+    const head = r.fx().children[0]
+    r.run(0.3)
+    expect(ping.material.opacity).toBeGreaterThan(0.3)
+    expect(head.visible).toBe(false)
+    r.run(0.5)
+    expect(ping.material.opacity).toBe(0)
+    expect(head.visible).toBe(true)
     r.scene.dispose()
   })
 
@@ -843,7 +985,7 @@ describe('MAPX.5 live events', () => {
   test('demo events from Simulate draw like any other', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall', { client: 'demo', demo: true }))
-    expect(r.fx().children).toHaveLength(14)
+    expect(r.fx().children).toHaveLength(20)
     r.scene.dispose()
   })
 
@@ -853,7 +995,8 @@ describe('MAPX.5 live events', () => {
     expect(r.fx().children).toHaveLength(0)
     r.scene.setView({ hidden: {} })
     for (let i = 0; i < 100; i++) r.scene.event(ev('update'))
-    expect(r.fx().children.length).toBeLessThanOrEqual(80)
+    // 40 events at most, 6 objects each (beam, flash, head, caption, the planet's flare, the caller's flash).
+    expect(r.fx().children.length).toBeLessThanOrEqual(240)
     r.run(3)
     expect(r.fx().children).toHaveLength(0)
     r.scene.dispose()
@@ -864,7 +1007,8 @@ describe('MAPX.5 live events', () => {
     r.scene.event(ev('save'))
     r.clock.tick()
     const planet = r.worldPos(r.planet(MATRIX))
-    for (const sprite of r.fx().children) expect(sprite.position.distanceTo(planet)).toBeLessThan(1)
+    // Every glow sits on the planet (the lit path runs along the route, the caller's flash is at the caller, the caption above).
+    for (const sprite of r.fx().children.filter((o: any) => !['event-path', 'event-origin', 'event-caption'].includes(o.userData?.kind))) expect(sprite.position.distanceTo(planet)).toBeLessThan(1)
     r.scene.dispose()
   })
 
@@ -1124,7 +1268,7 @@ describe('MAPX.5 motion and dispose', () => {
     r.scene.dispose()
   })
 
-  test('one pulse of energy runs along each black-hole line every 30 seconds', () => {
+  test('one slow pulse of energy runs along each black-hole line every 120 seconds', () => {
     const r = rig({ reduced: false })
     const shown = () => r.all(o => o.userData?.kind === 'pulse' && o.visible)
     expect(r.all(o => o.userData?.kind === 'pulse')).toHaveLength(24)
@@ -1135,8 +1279,8 @@ describe('MAPX.5 motion and dispose', () => {
     const head = shown()[0].position.clone()
     r.run(1)
     expect(shown()[0].position.distanceTo(head)).toBeGreaterThan(5)
-    // Between the first pulse (ends at 11 s) and the second (starts at 12 s) nothing runs.
-    r.run(5.3)
+    // Between the first pulse (ends at 18 s) and the second (starts at 20 s) nothing runs.
+    r.run(12.8)
     expect(shown()).toHaveLength(0)
     r.run(2)
     expect(shown()).toHaveLength(8)
@@ -1169,7 +1313,7 @@ describe('MAPX.5 motion and dispose', () => {
     }
     expect(r.clock.frames).toBeGreaterThanOrEqual(35 / 0.016)
     expect(r.clock.now).toBeGreaterThanOrEqual(35_000)
-    // One pulse of energy runs along each black-hole line every 30 s: seen at least once in 35 s.
+    // The first bond's pulse starts 4 s in: seen at least once in 35 s.
     expect(pulses).toBeGreaterThan(0)
     r.scene.dispose()
   })
@@ -1351,7 +1495,7 @@ describe('MAPX.5 review R5 fixes', () => {
         r.run(0.25)
         beamSeen.push(beam.material.opacity)
       }
-      r.run(1)
+      r.run(1.5)
       r.scene.event(ev('save', { owner: 'global' }))
       const glow = r.fx().children[0]
       const pulseSeen: number[] = []
@@ -1452,13 +1596,13 @@ describe('MAPX.5 review R5 fixes', () => {
 
   test('F5 setData and dispose hide the tooltip, so the orbits leave the 15% slow-down', () => {
     const lead = (r: ReturnType<typeof rig>) => angleOf(r.worldPos(r.planet(MATRIX)))
-    const free = rig({ reduced: false })
+    const free = rig({ reduced: false, view: { rotate: true } })
     const f0 = lead(free)
     free.run(4)
     const freeMove = Math.abs(lead(free) - f0)
     free.scene.dispose()
 
-    const held = rig({ reduced: false })
+    const held = rig({ reduced: false, view: { rotate: true } })
     const sun = held.screen(held.all(o => o.userData?.kind === 'sun')[0])
     const found = held.locate(t => kindOf(t) === 'sun' || kindOf(t) === 'nodule', { x0: sun.x - 6, y0: sun.y - 6, x1: sun.x + 6, y1: sun.y + 6 }, 2)
     expect(found).not.toBeNull()
@@ -1752,6 +1896,19 @@ describe('0.30.0 nebula ties in the scene', () => {
     r.scene.dispose()
   })
 
+  test('the Ties switch hides every tie and brings them back; the nebula stays', () => {
+    const r = rig({ data: tiedData() })
+    r.run(0.5)
+    expect(ties(r).some(l => l.visible)).toBe(true)
+    r.scene.setView({ ties: false })
+    r.run(0.1)
+    for (const line of ties(r)) expect(line.visible).toBe(false)
+    r.scene.setView({ ties: true })
+    r.run(0.1)
+    expect(ties(r).some(l => l.visible)).toBe(true)
+    r.scene.dispose()
+  })
+
   test('a hidden project\'s ties are hidden; the others stay', () => {
     const r = rig({ data: tiedData() })
     r.run(0.5)
@@ -1875,6 +2032,21 @@ describe('0.30.0 storms', () => {
       still.clock.tick()
       expect(still.all(o => o.userData?.kind === 'nebula-bolt' && o.visible)).toHaveLength(0)
     }
+    still.scene.dispose()
+  })
+
+  test('a flash tells the page (for its crackle); none with the nebula off or under reduced motion', () => {
+    const r = rig({ data: tiedData(), reduced: false })
+    for (let k = 0; k < 8 / 0.016; k++) r.clock.tick()
+    expect(r.storms.length).toBeGreaterThan(0)
+    r.scene.setView({ nebula: false })
+    const before = r.storms.length
+    for (let k = 0; k < 40 / 0.016; k++) r.clock.tick()
+    expect(r.storms.length).toBe(before)
+    r.scene.dispose()
+    const still = rig({ data: tiedData(), reduced: true })
+    for (let k = 0; k < 8 / 0.016; k++) still.clock.tick()
+    expect(still.storms).toHaveLength(0)
     still.scene.dispose()
   })
 })

@@ -1162,7 +1162,7 @@ export function show(view: View) {
     if (view === 'activity') startActivity()
     if (view === 'search') byId<HTMLInputElement>('search-query').focus()
     // The map (and its library, under /vendor/) loads only when the Map tab first opens.
-    if (view === 'map') map = createMap({ api: path => api(path), openMemory: openInMemories, status: setStatus, events: listener => useEvents().subscribe(listener), streamStatus: watcher => useEvents().onStatus(status => watcher(status)), solar: { createScene: options => createSolarScene({ canvas: options.canvas, three: options.three as Parameters<typeof createSolarScene>[0]['three'], onHover: options.onHover, onPick: options.onPick, onLevel: options.onLevel }), post: (path, body) => api(path, { method: 'POST', body }), embeddings: () => embeddingsOn, searchMode: () => searchMode } })
+    if (view === 'map') map = createMap({ api: path => api(path), openMemory: openInMemories, status: setStatus, events: listener => useEvents().subscribe(listener), streamStatus: watcher => useEvents().onStatus(status => watcher(status)), solar: { createScene: options => createSolarScene({ canvas: options.canvas, three: options.three as Parameters<typeof createSolarScene>[0]['three'], onHover: options.onHover, onPick: options.onPick, onLevel: options.onLevel, onStorm: options.onStorm }), post: (path, body) => api(path, { method: 'POST', body }), embeddings: () => embeddingsOn, searchMode: () => searchMode } })
   }
   if (view === 'activity' && feedDirty) {
     feedDirty = false

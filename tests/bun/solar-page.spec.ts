@@ -441,7 +441,8 @@ describe('the Galaxy layout as a solar page', () => {
     expect(b.scene().of('setData')[0]!.galaxy.projects.length).toBe(FIXTURE.projects.length)
     // 0.29.0: the view carries the Meaning nebula toggle (on by default).
     // 0.30.0: and the Nebula captions toggle (on by default).
-    expect(lastView(b)).toEqual({ arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, legend: true, nebula: true, captions: true })
+    // And the Links and Ties switches (both on by default).
+    expect(lastView(b)).toEqual({ arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, legend: true, nebula: true, captions: true, bonds: true, ties: true })
     expect(b.node('view-map').classList.contains('solar-on')).toBe(true)
     for (const id of ['solar-card-arrange', 'solar-card-show', 'solar-bodies']) expect(b.node(id).hidden).toBe(false)
     for (const id of ['map-card-colour', 'map-card-links', 'map-card-know', 'map-card-layers', 'map-card-projects', 'map-overview', 'map-legend']) expect(b.node(id).classes()).toContain('legacy-only')
@@ -466,6 +467,48 @@ describe('the Galaxy layout as a solar page', () => {
     const feed = b.node('map-feed').textContent ?? ''
     expect(feed).not.toContain('No new activity')
     expect(feed).toContain('demo')
+  })
+
+  test('Simulate auto in the Demo row and in the LIVE panel drive one run: either starts it, both show it, either stops it', async () => {
+    const b = await boot()
+    const timeline = b.node('map-sim-auto')
+    const galaxy = b.node('solar-sim-auto')
+    timeline.fire('click')
+    expect(timeline.attributes.get('aria-pressed')).toBe('true')
+    expect(galaxy.attributes.get('aria-pressed')).toBe('true')
+    expect(b.scene().of('event').length).toBeGreaterThan(0)
+    galaxy.fire('click')
+    expect(timeline.attributes.get('aria-pressed')).toBe('false')
+    expect(galaxy.attributes.get('aria-pressed')).toBe('false')
+  })
+
+  test('Links, Ties and Sound keep their own button (and so keyboard focus) when pressed; only aria-pressed changes', async () => {
+    const b = await boot()
+    const sound = byText(b.node('solar-views'), 'Sound')
+    expect(sound.attributes.get('aria-pressed')).toBe('false')
+    sound.fire('click')
+    expect(byText(b.node('solar-views'), 'Sound')).toBe(sound)
+    expect(sound.attributes.get('aria-pressed')).toBe('true')
+    const links = byText(b.node('solar-views'), 'Links')
+    links.fire('click')
+    expect(byText(b.node('solar-views'), 'Links')).toBe(links)
+    expect(links.attributes.get('aria-pressed')).toBe('false')
+    expect(lastView(b).bonds).toBe(false)
+  })
+
+  test('the app hands the scene every callback, the lightning one included', () => {
+    const app = readFileSync(join(ROOT, 'ui', 'app.ts'), 'utf8')
+    expect(app).toContain('onStorm: options.onStorm')
+  })
+
+  test('The Human (the monolith) answers every 10th event the map draws', async () => {
+    const b = await boot()
+    for (let i = 0; i < 9; i++) b.node('solar-sim-recall').fire('click')
+    expect(b.scene().of('monolith')).toHaveLength(0)
+    b.node('solar-sim-write').fire('click')
+    expect(b.scene().of('monolith')).toHaveLength(1)
+    for (let i = 0; i < 10; i++) b.node('solar-sim-recall').fire('click')
+    expect(b.scene().of('monolith')).toHaveLength(2)
   })
 
   test('without a solar host the Galaxy layout is the page it was: nothing solar shows', async () => {

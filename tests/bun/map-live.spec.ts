@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { demoId, drawsOnMap, noduleFor, RECALL_HITS, simulate, toMapEvent, topicOf, WRITE_MIX } from '../../ui/map-live'
+import { arrivalSeconds, demoId, drawsOnMap, EVENT_SECONDS, noduleFor, RECALL_HITS, simulate, toMapEvent, topicOf, WRITE_MIX } from '../../ui/map-live'
 import type { GalaxyLike } from '../../ui/map-live'
 import { ROOT } from './helpers'
 
@@ -182,4 +182,13 @@ test('MAPX.5: the dashboard\'s own recall draws nothing, every other event draws
   expect(drawsOnMap({ kind: 'recall', client: 'claude-code' })).toBe(true)
   expect(drawsOnMap({ kind: 'forget', client: 'dashboard' })).toBe(true)
   expect(drawsOnMap({ kind: 'save', client: 'dashboard' })).toBe(true)
+})
+
+describe('event timing shared by the scene and the sounds', () => {
+  test('an event reaches its planet: a recall after its ping, a save after its comet, a beam after its flight', () => {
+    expect(arrivalSeconds('recall')).toBe(EVENT_SECONDS.ping)
+    expect(arrivalSeconds('save')).toBe(EVENT_SECONDS.comet)
+    expect(arrivalSeconds('update')).toBe(EVENT_SECONDS.beam)
+    expect(arrivalSeconds('forget')).toBe(EVENT_SECONDS.beam)
+  })
 })
