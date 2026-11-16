@@ -156,6 +156,8 @@ const COMET_TAIL = 0.42
 // How long a comet (recall, save) and a beam (update, forget) take, in seconds.
 const COMET_SECONDS = 2.4
 const BEAM_SECONDS = 1.8
+// The points on a comet's lit path.
+const PATH_POINTS = 32
 // A port choice, not in the mockup: an opened memory shows at most this many knowledge satellites.
 const MAX_SATELLITES = 12
 const FADE_DAYS = 7
@@ -308,6 +310,8 @@ type EventRec = {
   flash?: O3
   /** The ring of light the planet sends out while the event lasts. */
   ring?: O3
+  /** A comet's whole path, lit in the event's colour while it lasts: the link between the writer (or sun) and the planet. */
+  path?: O3
   fade?: Fade[]
 }
 
@@ -2382,6 +2386,13 @@ class SolarImpl {
       ev.flash = this.glow(col, P.R * 4, 0)
       this.fx.add(ev.flash)
       ev.objs.push(ev.flash)
+      const pg = new T.BufferGeometry()
+      pg.setAttribute('position', new T.BufferAttribute(new Float32Array((PATH_POINTS + 1) * 3), 3))
+      ev.path = new T.Line(pg, new T.LineBasicMaterial({ color: new T.Color(col), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
+      ev.path.frustumCulled = false
+      ev.path.userData = { kind: 'event-path' }
+      this.fx.add(ev.path)
+      ev.objs.push(ev.path)
     }
     if (P !== null) {
       // The planet glows in the event's colour while it lasts: something is happening there.
@@ -2475,6 +2486,18 @@ class SolarImpl {
       if (ev.flash) {
         ev.flash.position.copy(pp)
         ev.flash.material.opacity = 0.7 * al
+      }
+      if (ev.path) {
+        const pa = ev.path.geometry.attributes.position.array
+        for (let k = 0; k <= PATH_POINTS; k++) {
+          const v = k / PATH_POINTS
+          const q = from.clone().multiplyScalar((1 - v) * (1 - v)).add(mid.clone().multiplyScalar(2 * (1 - v) * v)).add(to.clone().multiplyScalar(v * v))
+          pa[k * 3] = q.x
+          pa[k * 3 + 1] = q.y
+          pa[k * 3 + 2] = q.z
+        }
+        ev.path.geometry.attributes.position.needsUpdate = true
+        ev.path.material.opacity = 0.75 * al
       }
     }
     this.events = keep

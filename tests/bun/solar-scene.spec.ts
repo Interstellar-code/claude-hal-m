@@ -732,8 +732,8 @@ describe('MAPX.5 live events', () => {
   test('a recall is a gold comet from the planet towards the caller\'s nodule', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall'))
-    // 14 comet sprites, the planet's flash and its glow ring.
-    expect(r.fx().children).toHaveLength(16)
+    // 14 comet sprites, the planet's flash, its lit path and its glow ring.
+    expect(r.fx().children).toHaveLength(17)
     r.clock.tick()
     const head = r.fx().children[0]
     expect(hex(r.fx().children[1])).toBe('f0e442')
@@ -749,7 +749,16 @@ describe('MAPX.5 live events', () => {
   test('a save is a blue comet from the writer\'s nodule to the planet', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('save', { ids: ['m-new'] }))
-    expect(r.fx().children).toHaveLength(16)
+    expect(r.fx().children).toHaveLength(17)
+    // The path between the writer and the planet is lit in the save's colour.
+    const path = r.fx().children.find((o: any) => o.userData?.kind === 'event-path')
+    expect(hex(path)).toBe('56b4e9')
+    r.run(1)
+    expect(path.material.opacity).toBeGreaterThan(0.5)
+    const pa = path.geometry.attributes.position.array
+    const end = { x: pa[pa.length - 3], y: pa[pa.length - 2], z: pa[pa.length - 1] }
+    const at = r.worldPos(r.planet(MATRIX))
+    expect(Math.hypot(end.x - at.x, end.y - at.y, end.z - at.z)).toBeLessThan(4)
     r.clock.tick()
     expect(hex(r.fx().children[1])).toBe('56b4e9')
     const head = r.fx().children[0].position
@@ -852,7 +861,7 @@ describe('MAPX.5 live events', () => {
   test('demo events from Simulate draw like any other', () => {
     const r = rig({ reduced: false })
     r.scene.event(ev('recall', { client: 'demo', demo: true }))
-    expect(r.fx().children).toHaveLength(16)
+    expect(r.fx().children).toHaveLength(17)
     r.scene.dispose()
   })
 
@@ -874,7 +883,8 @@ describe('MAPX.5 live events', () => {
     r.scene.event(ev('save'))
     r.clock.tick()
     const planet = r.worldPos(r.planet(MATRIX))
-    for (const sprite of r.fx().children) expect(sprite.position.distanceTo(planet)).toBeLessThan(1)
+    // Every glow sits on the planet (the lit path is a line along the route, not a glow).
+    for (const sprite of r.fx().children.filter((o: any) => o.userData?.kind !== 'event-path')) expect(sprite.position.distanceTo(planet)).toBeLessThan(1)
     r.scene.dispose()
   })
 

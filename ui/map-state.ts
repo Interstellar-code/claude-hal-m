@@ -1816,6 +1816,8 @@ export type SolarHost = {
 }
 
 export type SolarPage = SolarView & {
+  /** Sound effects for live events (the page's own; the scene never sees it). Off by default. */
+  sound: boolean
   /** The two legend cards, open or folded. */
   legL: boolean
   legR: boolean
@@ -1827,11 +1829,11 @@ export const SOLAR_KEY = 'mnemosyne.map.solar'
 const GALAXY_LEVEL: Target = { level: 'galaxy' }
 
 export const initialSolarPage = (): SolarPage => ({
-  arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, nebula: true, captions: true, legend: true, bonds: true, ties: true, legL: true, legR: true, level: GALAXY_LEVEL, findOpen: false,
+  arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, nebula: true, captions: true, legend: true, bonds: true, ties: true, sound: false, legL: true, legR: true, level: GALAXY_LEVEL, findOpen: false,
 })
 
 /** What is remembered per viewer: Arrange by and the Show toggles (and the folds of the two legend cards). */
-const SOLAR_KEYS = ['arrange', 'rotate', 'nebula', 'captions', 'legend', 'bonds', 'ties', 'legL', 'legR'] as const
+const SOLAR_KEYS = ['arrange', 'rotate', 'nebula', 'captions', 'legend', 'bonds', 'ties', 'sound', 'legL', 'legR'] as const
 
 /** The remembered settings laid over the defaults; anything stored that is not a known value is ignored. */
 export function readSolarPage(storage: Pick<Storage, 'getItem'> | undefined): SolarPage {
@@ -1841,7 +1843,7 @@ export function readSolarPage(storage: Pick<Storage, 'getItem'> | undefined): So
     if (raw === null || typeof raw !== 'object') return page
     if (ARRANGE.some(a => a.id === raw.arrange)) page.arrange = raw.arrange as Arrange
     // 0.28.3: no Colour-dots-by card any more, so a remembered Recalls or Age is not restored: dots are by writer.
-    for (const key of ['rotate', 'nebula', 'captions', 'legend', 'bonds', 'ties', 'legL', 'legR'] as const) if (typeof raw[key] === 'boolean') page[key] = raw[key] as boolean
+    for (const key of ['rotate', 'nebula', 'captions', 'legend', 'bonds', 'ties', 'sound', 'legL', 'legR'] as const) if (typeof raw[key] === 'boolean') page[key] = raw[key] as boolean
   } catch {
     // storage is a convenience only
   }
@@ -1858,7 +1860,7 @@ export function saveSolarPage(storage: Pick<Storage, 'setItem'> | undefined, pag
 
 export const setArrange = (page: SolarPage, arrange: Arrange): SolarPage => (ARRANGE.some(a => a.id === arrange) && arrange !== page.arrange ? { ...page, arrange } : page)
 export const setColour = (page: SolarPage, colour: ColourMode): SolarPage => (COLOURS.some(c => c.id === colour) && colour !== page.colour ? { ...page, colour } : page)
-export const toggleShow = (page: SolarPage, key: 'rotate' | 'nebula' | 'captions' | 'legend' | 'bonds' | 'ties' | 'legL' | 'legR'): SolarPage => ({ ...page, [key]: !page[key] })
+export const toggleShow = (page: SolarPage, key: 'rotate' | 'nebula' | 'captions' | 'legend' | 'bonds' | 'ties' | 'sound' | 'legL' | 'legR'): SolarPage => ({ ...page, [key]: !page[key] })
 
 /** The Bodies strip: hides one body, or shows it again. */
 export function toggleBody(page: SolarPage, owner: string): SolarPage {
@@ -2100,6 +2102,7 @@ export const VIEW_BUTTONS: readonly { label: string; aria: string; action: { zoo
 export const LINE_TOGGLES = [
   { key: 'bonds', label: 'Links', title: 'Show or hide the violet strands between projects that share similar memories' },
   { key: 'ties', label: 'Ties', title: 'Show or hide the lines from the nebula clouds to their projects' },
+  { key: 'sound', label: 'Sound', title: 'Play a short sound for each recall, save, update and forget' },
 ] as const
 
 export const SHOW_TOGGLES = [

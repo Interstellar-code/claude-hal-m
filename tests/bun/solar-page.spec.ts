@@ -441,7 +441,8 @@ describe('the Galaxy layout as a solar page', () => {
     expect(b.scene().of('setData')[0]!.galaxy.projects.length).toBe(FIXTURE.projects.length)
     // 0.29.0: the view carries the Meaning nebula toggle (on by default).
     // 0.30.0: and the Nebula captions toggle (on by default).
-    expect(lastView(b)).toEqual({ arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, legend: true, nebula: true, captions: true })
+    // And the Links and Ties switches (both on by default).
+    expect(lastView(b)).toEqual({ arrange: 'activity', colour: 'writer', hidden: {}, query: '', rotate: true, legend: true, nebula: true, captions: true, bonds: true, ties: true })
     expect(b.node('view-map').classList.contains('solar-on')).toBe(true)
     for (const id of ['solar-card-arrange', 'solar-card-show', 'solar-bodies']) expect(b.node(id).hidden).toBe(false)
     for (const id of ['map-card-colour', 'map-card-links', 'map-card-know', 'map-card-layers', 'map-card-projects', 'map-overview', 'map-legend']) expect(b.node(id).classes()).toContain('legacy-only')

@@ -18,7 +18,8 @@
 import type { ForceGraph3DInstance, GraphNode } from './vendor/map-lib.js'
 import { plainLabel } from './escape'
 import type { GalaxyHub, GalaxyStar, Vec3 } from './map-layout'
-import { simulate, toMapEvent, type MapEvent } from './map-live'
+import { drawsOnMap, simulate, toMapEvent, type MapEvent } from './map-live'
+import { createSoundPlayer } from './sound'
 import { ARRANGE, buildBodies, SEARCH_MIN, describe, globalOwnedOf, kindLabel, kindOne, linkInfos, linksOf, searchResults, tagColour, type Body, type SolarGalaxy, type SolarMemory, type Target } from './solar-layout'
 import {
   addMemory,
@@ -751,6 +752,17 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
   const send = <T,>(call: (scene: SolarSceneApi) => T) => {
     if (scene !== null) call(scene)
   }
+  // Sound effects (the Sound switch): one short sound per event the map draws.
+  const sound = createSoundPlayer()
+  const fire = (event: MapEvent) => {
+    if (scene === null) return
+    scene.event(event)
+    if (page.sound && drawsOnMap(event)) sound.play(event.kind)
+  }
+  // A browser only starts audio after a click on the page: a remembered Sound: on wakes on the first one.
+  root.ownerDocument?.addEventListener?.('pointerdown', () => {
+    if (page.sound) sound.wake()
+  })
   const sceneView = () => ({ ...viewOf(page), rotate: page.rotate && !reducedMotion })
   // Local bodies, moons and tags first, then the memories the server ranked for this very query, in its order.
   const rows = (): FindRow[] => (page.findOpen && galaxy !== null ? findRows(bodies, page.query, hitsFor === page.query.trim() ? hits : [], galaxy.memories) : [])
@@ -874,6 +886,7 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
         item.title = toggle.title
         item.addEventListener('click', () => {
           changeView(toggleShow(page, toggle.key))
+          if (toggle.key === 'sound' && page.sound) sound.wake()
           renderViews()
         })
         return item
@@ -1212,7 +1225,7 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
     const event = toMapEvent(line)
     if (event === null) return
     refreshDetails(event)
-    send(scene => scene.event(event))
+    fire(event)
   })
   renderRail()
   renderViews()
@@ -1228,7 +1241,7 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
     simulate(kind) {
       if (!active || galaxy === null) return undefined
       const event = simulate(kind, galaxy)
-      if (event) send(scene => scene.event(event))
+      if (event) fire(event)
       return event
     },
     sync(layout: string) {
