@@ -162,7 +162,9 @@ const FADE_DAYS = 7
 // A forgotten memory's dot keeps this share of its colour.
 const FORGET_DIM = 0.1
 const DAY_MS = 86400000
-const PULSE_EVERY = 30
+// A bond's pulse: one every PULSE_EVERY seconds per bond, PULSE_TRAVEL seconds from end to end (slow, so it glides).
+const PULSE_EVERY = 120
+const PULSE_TRAVEL = 14
 
 // ---- What a memory looks like (beyond the mockup, items 1 to 5) -------------------------
 
@@ -260,17 +262,17 @@ type StormRec = { cloud: number; glow: O3; bolt: O3; members: number[]; base: O3
 const BOLT_POINTS = 10
 const FLASH_SECONDS = 1.1
 // A storm's next flash comes FLASH_GAP_MIN to FLASH_GAP_MIN + FLASH_GAP_SPREAD seconds after the last.
-const FLASH_GAP_MIN = 5
-const FLASH_GAP_SPREAD = 9
+const FLASH_GAP_MIN = 15
+const FLASH_GAP_SPREAD = 20
 // The current on a tie: ties per second a pulse travels, at rest and when lit.
-const TIE_FLOW = 0.12
+const TIE_FLOW = 0.035
 // The electric blob on a tie: one bright core and BLOB_CRACKLE sparks crackling around it (re-placed every
 // BLOB_RESHAPE s), plus a tiny jagged arc of BLOB_ARC points through it; its radius is BLOB_R of the orbit radius.
 const BLOB_CRACKLE = 6
 const BLOB_ARC = 7
-const BLOB_RESHAPE = 0.09
+const BLOB_RESHAPE = 0.5
 const BLOB_R = 0.014
-const TIE_FLOW_LIT = 0.25
+const TIE_FLOW_LIT = 0.07
 /** 0.30.0: one cloud-to-project tie: a curve from the cloud's middle up to the planet (or the sun for global). */
 type TieRec = { tie: CloudTie; line: O3; phase: number }
 /** 0.30.0: one idle caption: a speck's first line, fading in, holding and fading out. */
@@ -1395,7 +1397,7 @@ class SolarImpl {
       this.world.add(sp)
       pulse.push(sp)
     }
-    this.holes.push({ L, pair, line, line2, chip, pulse, phase: 26 - i * 8 })
+    this.holes.push({ L, pair, line, line2, chip, pulse, phase: PULSE_EVERY - 4 - i * 16 })
   }
 
   private makeSun(): void {
@@ -2751,11 +2753,11 @@ class SolarImpl {
       const mid = pts[30] as O3
       H.chip.position.set(mid.x, mid.y + 6, mid.z)
       const local = (((this.clock + H.phase) % PULSE_EVERY) + PULSE_EVERY) % PULSE_EVERY
-      const on = local < 7 && !this.reduced && strands
+      const on = local < PULSE_TRAVEL && !this.reduced && strands
       for (let k = 0; k < H.pulse.length; k++) {
         H.pulse[k].visible = on
         if (on) {
-          const e = ease(local / 7)
+          const e = ease(local / PULSE_TRAVEL)
           const idx = Math.max(0, Math.min(60, Math.round((e - k * 0.012) * 60)))
           H.pulse[k].position.copy(pts[idx])
         }

@@ -1134,7 +1134,7 @@ describe('MAPX.5 motion and dispose', () => {
     r.scene.dispose()
   })
 
-  test('one pulse of energy runs along each black-hole line every 30 seconds', () => {
+  test('one slow pulse of energy runs along each black-hole line every 120 seconds', () => {
     const r = rig({ reduced: false })
     const shown = () => r.all(o => o.userData?.kind === 'pulse' && o.visible)
     expect(r.all(o => o.userData?.kind === 'pulse')).toHaveLength(24)
@@ -1145,8 +1145,8 @@ describe('MAPX.5 motion and dispose', () => {
     const head = shown()[0].position.clone()
     r.run(1)
     expect(shown()[0].position.distanceTo(head)).toBeGreaterThan(5)
-    // Between the first pulse (ends at 11 s) and the second (starts at 12 s) nothing runs.
-    r.run(5.3)
+    // Between the first pulse (ends at 18 s) and the second (starts at 20 s) nothing runs.
+    r.run(12.8)
     expect(shown()).toHaveLength(0)
     r.run(2)
     expect(shown()).toHaveLength(8)
@@ -1179,7 +1179,7 @@ describe('MAPX.5 motion and dispose', () => {
     }
     expect(r.clock.frames).toBeGreaterThanOrEqual(35 / 0.016)
     expect(r.clock.now).toBeGreaterThanOrEqual(35_000)
-    // One pulse of energy runs along each black-hole line every 30 s: seen at least once in 35 s.
+    // The first bond's pulse starts 4 s in: seen at least once in 35 s.
     expect(pulses).toBeGreaterThan(0)
     r.scene.dispose()
   })

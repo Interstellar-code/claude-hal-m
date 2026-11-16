@@ -2082,7 +2082,7 @@ export const LEGEND_LEFT: readonly LegendRow[] = legend([
 export const LEGEND_RIGHT: readonly LegendRow[] = legend([
   ['#7d8aa0', 'Orbit', 'thin slate ring; closer = busier'], ['#56B4E9', 'Planet ring', 'its memories, from afar'], ['#8b93a3', 'Grey asteroid', 'kind unknown (planet belt)'], ['#ffe3a3', 'Sun belt', 'global memories (gold)'],
   ['#ffd27a', 'Gold beads', 'global memory → close project'], ['#9ec4ff', 'Probe · dashed ring', 'project memory shared with all'],
-  ['#6f7787', 'Outer belt', 'retired, expired, lapsed (ash)'], ['#000000', 'Black hole', 'similar across projects'], ['#E8B8FF', 'Twin violet strands', 'bond: N pairs; pulse /30 s'],
+  ['#6f7787', 'Outer belt', 'retired, expired, lapsed (ash)'], ['#000000', 'Black hole', 'similar across projects'], ['#E8B8FF', 'Twin violet strands', 'bond: N pairs; slow pulse /2 min'],
   ['#F0E442', 'Recall comet', 'planet → sun'], ['#56B4E9', 'Save comet', 'sun → planet'], ['#3DDC97', 'Update beam', 'green, writer → body'],
   ['#FF4D4D', 'Forget laser', 'red, writer → body'], ['#ecf1fa', 'Clouds · ice', 'needs review · idle 30 d'],
   ['#c77dff', 'Nebula', 'below: memories by meaning; a cloud = a topic'], ['#4cc9f0', 'Tie', 'cloud → project; brighter = more of it'],
