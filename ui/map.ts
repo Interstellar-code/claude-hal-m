@@ -18,7 +18,7 @@
 import type { ForceGraph3DInstance, GraphNode } from './vendor/map-lib.js'
 import { plainLabel } from './escape'
 import type { GalaxyHub, GalaxyStar, Vec3 } from './map-layout'
-import { drawsOnMap, simulate, toMapEvent, type MapEvent } from './map-live'
+import { arrivalSeconds, drawsOnMap, simulate, toMapEvent, type MapEvent } from './map-live'
 import { createSoundPlayer } from './sound'
 import { ARRANGE, buildBodies, SEARCH_MIN, describe, globalOwnedOf, kindLabel, kindOne, linkInfos, linksOf, searchResults, tagColour, type Body, type SolarGalaxy, type SolarMemory, type Target } from './solar-layout'
 import {
@@ -757,7 +757,11 @@ function mountSolarPage(host: MapHost, solar: SolarHost, shell: SolarShell, stor
   const fire = (event: MapEvent) => {
     if (scene === null) return
     scene.event(event)
-    if (page.sound && drawsOnMap(event)) sound.play(event.kind)
+    if (!page.sound || !drawsOnMap(event)) return
+    // The launch sound starts with the comet; the landing tone comes as the event reaches its planet (the scene
+    // flares the planet at the same moment). An event with no project of its own only gets the launch sound.
+    sound.play(event.kind)
+    if (event.owner !== undefined && event.owner !== 'global') window.setTimeout(() => sound.play('land'), arrivalSeconds(event.kind) * 1000)
   }
   // A browser only starts audio after a click on the page: a remembered Sound: on wakes on the first one.
   root.ownerDocument?.addEventListener?.('pointerdown', () => {

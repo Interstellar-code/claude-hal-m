@@ -13,7 +13,7 @@
 // Renderer and composer are injected (`createRenderer`, `createComposer`) and so is the
 // frame clock, so a spec can run the scene on the vendored three.js without WebGL.
 
-import { drawsOnMap, noduleFor } from './map-live'
+import { arrivalSeconds, drawsOnMap, EVENT_SECONDS, noduleFor } from './map-live'
 import type { MapEvent } from './map-live'
 import {
   buildBodies,
@@ -153,9 +153,10 @@ const VIEW_LIFT = 0.09
 // A live comet's head and tail, in units of the sun's radius, so a comet stays visible however big the map is.
 const COMET_HEAD = 0.55
 const COMET_TAIL = 0.42
-// How long a comet (recall, save) and a beam (update, forget) take, in seconds.
-const COMET_SECONDS = 2.4
-const BEAM_SECONDS = 1.8
+// How long a comet (recall, save) and a beam (update, forget) take, and a recall's ping, in seconds (map-live.ts:
+// the page reads the same numbers to time the landing tone). TAIL_SECONDS: the planet's flare fades after the flight.
+const { comet: COMET_SECONDS, beam: BEAM_SECONDS, ping: PING_SECONDS } = EVENT_SECONDS
+const TAIL_SECONDS = 0.8
 // The points on a comet's lit path.
 const PATH_POINTS = 32
 // A port choice, not in the mockup: an opened memory shows at most this many knowledge satellites.
@@ -312,6 +313,13 @@ type EventRec = {
   ring?: O3
   /** A comet's whole path, lit in the event's colour while it lasts: the link between the writer (or sun) and the planet. */
   path?: O3
+  /** The caller's flash (writer nodule or sun) at the start, and a recall's ping out to the planet. */
+  origin?: O3
+  ping?: O3
+  /** Seconds before the comet or beam leaves (a recall's ping), how long it flies, and when it reaches the planet. */
+  delay: number
+  flight: number
+  arrive: number
   fade?: Fade[]
 }
 
@@ -2342,12 +2350,20 @@ class SolarImpl {
     const source = e.demo === true && sources.length > 0 && noduleFor(e.client, sources) === null ? (sources[Math.floor(Math.random() * sources.length)] as string) : noduleFor(e.client, sources)
     const col = EVENT_COLOUR[e.kind]
     const P = owner === null ? null : (this.P[owner] as PlanetRec)
+    const beam = e.kind === 'update' || e.kind === 'forget'
+    // Call, then answer: the caller (sun or writer) flashes as the event starts, and the planet flares when it is
+    // reached. A recall first sends a faint ping out to the planet, then the gold comet carries the memory back.
+    const delay = P !== null && e.kind === 'recall' ? PING_SECONDS : 0
+    const flight = P === null ? 1.1 : beam ? BEAM_SECONDS : COMET_SECONDS
     const ev: EventRec = {
       type: P === null ? 'pulse' : e.kind,
       owner,
       source,
       start: this.clock,
-      dur: P === null ? 1.1 : e.kind === 'update' || e.kind === 'forget' ? BEAM_SECONDS : COMET_SECONDS,
+      delay,
+      flight,
+      arrive: arrivalSeconds(e.kind),
+      dur: P === null ? flight : delay + flight + TAIL_SECONDS,
       bend: Math.random() < 0.5 ? 1 : -1,
       objs: [],
     }
@@ -2359,7 +2375,7 @@ class SolarImpl {
       ev.objs.push(sun, nod)
       ev.flash = sun
       ev.trail = [nod]
-    } else if (e.kind === 'update' || e.kind === 'forget') {
+    } else if (beam) {
       const geo = new T.BufferGeometry()
       geo.setAttribute('position', new T.BufferAttribute(new Float32Array(6), 3))
       ev.beam = new T.Line(geo, new T.LineBasicMaterial({ color: new T.Color(col), transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending }))
@@ -2393,12 +2409,22 @@ class SolarImpl {
       ev.path.userData = { kind: 'event-path' }
       this.fx.add(ev.path)
       ev.objs.push(ev.path)
+      if (delay > 0) {
+        ev.ping = this.glow(col, this.sunR * COMET_HEAD * 0.7, 0)
+        ev.ping.userData = { kind: 'event-ping' }
+        this.fx.add(ev.ping)
+        ev.objs.push(ev.ping)
+      }
     }
     if (P !== null) {
-      // The planet glows in the event's colour while it lasts: something is happening there.
+      // The planet flares in the event's colour when the event reaches it.
       ev.ring = this.glow(col, P.R * 9, 0)
-      this.fx.add(ev.ring)
-      ev.objs.push(ev.ring)
+      ev.ring.userData = { kind: 'event-ring' }
+      // The caller (the writer's nodule, or the sun) flashes as the event starts.
+      ev.origin = this.glow(col, source === null ? this.sunR * 4 : this.sunR * 1.6, 0)
+      ev.origin.userData = { kind: 'event-origin' }
+      this.fx.add(ev.ring, ev.origin)
+      ev.objs.push(ev.ring, ev.origin)
     }
     this.events.push(ev)
     while (this.events.length > MAX_EVENTS) this.endEvent(this.events.shift() as EventRec)
@@ -2428,18 +2454,24 @@ class SolarImpl {
   private stepEvents(): void {
     const T = this.T
     const keep: EventRec[] = []
+    // A flash that starts at `at` seconds and dies away.
+    const burst = (t: number, at: number, fall: number) => (t < at ? 0 : Math.exp(-(t - at) / fall))
     for (const ev of this.events) {
-      const u = (this.clock - ev.start) / ev.dur
+      const t = this.clock - ev.start
+      const done = t >= ev.dur
       const P = ev.owner === null ? undefined : this.P[ev.owner]
       // An event bound for a body that is gone or hidden since it started stops drawing.
-      if (u >= 1 || (ev.owner !== null && (!P || this.hiddenOwner(ev.owner)))) {
+      if (done || (ev.owner !== null && (!P || this.hiddenOwner(ev.owner)))) {
         this.endEvent(ev)
-        if (u >= 1 && ev.type === 'recall') this.flares.set(ev.source ?? '', this.clock)
+        if (done && ev.type === 'recall') this.flares.set(ev.source ?? '', this.clock)
         continue
       }
       keep.push(ev)
+      // u: how far the comet or beam is along its flight (0 before it leaves, 1 once it has landed).
+      const u = Math.max(0, Math.min(1, (t - ev.delay) / ev.flight))
+      const flying = t >= ev.delay && t < ev.delay + ev.flight
       // Reduced motion: beams, pulses and flashes are drawn at full strength for their time, not faded in and out.
-      const al = this.reduced ? 1 : Math.sin(Math.PI * u)
+      const al = this.reduced ? 1 : flying ? Math.sin(Math.PI * u) : 0
       const nod = this.noduleAt(ev.source)
       if (ev.type === 'pulse') {
         ;(ev.flash as O3).position.set(0, 0, 0)
@@ -2450,11 +2482,22 @@ class SolarImpl {
         continue
       }
       const pp = this.worldOf((P as PlanetRec).pG)
+      if (ev.origin) {
+        // The caller flashes at the start; for a recall it flashes again as the memory comes home.
+        const home = ev.type === 'recall' ? burst(t, ev.delay + ev.flight, 0.35) : 0
+        ev.origin.position.copy(nod)
+        ev.origin.material.opacity = this.reduced ? 0.6 : 0.85 * Math.max(burst(t, 0, 0.4), home)
+      }
       if (ev.ring) {
-        // Two soft beats of the planet's glow over the event's life.
-        const beat = this.reduced ? 1 : 0.55 + 0.45 * Math.abs(Math.sin(Math.PI * 2 * u))
+        // The planet: a faint glow while it waits, then a bright flare when the event reaches it.
         ev.ring.position.copy(pp)
-        ev.ring.material.opacity = 0.55 * al * beat
+        ev.ring.material.opacity = this.reduced ? 0.55 : t < ev.arrive ? 0.12 * (t / Math.max(0.01, ev.arrive)) : 0.9 * burst(t, ev.arrive, 0.6)
+      }
+      if (ev.ping) {
+        // The recall's ping: out from the caller to the planet before the comet comes back.
+        const k = Math.min(1, t / Math.max(0.01, ev.delay))
+        ev.ping.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : k))
+        ev.ping.material.opacity = this.reduced || t >= ev.delay ? 0 : 0.7 * Math.sin(Math.PI * k)
       }
       if (ev.type === 'update' || ev.type === 'forget') {
         const ba = ev.beam.geometry.attributes.position.array
@@ -2469,7 +2512,7 @@ class SolarImpl {
         ev.flash.position.copy(pp)
         ev.flash.material.opacity = 0.7 * al
         if (ev.head) {
-          ev.head.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : Math.min(1, u * 1.6)))
+          ev.head.position.copy(nod.clone().lerp(pp, this.reduced ? 1 : u))
           ev.head.material.opacity = al
         }
         if (ev.fade) this.setFade(ev.fade, this.reduced ? 1 : u)
@@ -2482,6 +2525,8 @@ class SolarImpl {
       for (let k = 0; k < trail.length; k++) {
         const v = this.reduced ? 1 : Math.max(0, u - k * 0.016)
         trail[k].position.copy(from.clone().multiplyScalar((1 - v) * (1 - v)).add(mid.clone().multiplyScalar(2 * (1 - v) * v)).add(to.clone().multiplyScalar(v * v)))
+        // The comet shows only while it flies (before a recall's ping lands, and after it has landed, it is gone).
+        trail[k].visible = this.reduced || flying
       }
       if (ev.flash) {
         ev.flash.position.copy(pp)

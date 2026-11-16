@@ -100,6 +100,15 @@ export function demoId(random: () => number = Math.random): string {
   return `demo-${part()}${part()}`
 }
 
+// How long the map's events take, in seconds: a comet (recall, save), a beam (update, forget), and the ping a recall
+// sends out to its planet before the comet comes back.
+export const EVENT_SECONDS = { comet: 2.4, beam: 1.1, ping: 0.6 } as const
+
+/** When an event reaches its planet, in seconds after it starts: the planet flares then, and the page plays the landing tone. */
+export function arrivalSeconds(kind: MapEventKind): number {
+  return kind === 'recall' ? EVENT_SECONDS.ping : kind === 'save' ? EVENT_SECONDS.comet : EVENT_SECONDS.beam
+}
+
 // The write mix: a save 50%, an update 32%, a forget 18%.
 export const WRITE_MIX: readonly { kind: MapEventKind; upTo: number }[] = [
   { kind: 'save', upTo: 0.5 },

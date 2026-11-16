@@ -30,7 +30,7 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
 
 describe('sound effects', () => {
   test('each kind plays its own tones', () => {
-    for (const kind of ['recall', 'save', 'update', 'forget'] as const) {
+    for (const kind of ['recall', 'save', 'update', 'forget', 'land'] as const) {
       const ctx = fakeContext()
       createSoundPlayer(() => ctx, () => 0).play(kind)
       expect(ctx.started).toBe(oscillators(kind))
@@ -48,6 +48,14 @@ describe('sound effects', () => {
     t = 200
     player.play('recall')
     expect(ctx.started).toBe(2 * oscillators('recall'))
+  })
+
+  test('a landing tone is spaced on its own: a launch never silences it', () => {
+    const ctx = fakeContext()
+    const player = createSoundPlayer(() => ctx, () => 0)
+    player.play('save')
+    player.play('land')
+    expect(ctx.started).toBe(oscillators('save') + oscillators('land'))
   })
 
   test('nothing plays until the page wakes the audio; no audio at all is quiet', () => {

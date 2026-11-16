@@ -1,9 +1,9 @@
 // Sound effects for live map events (recall, save, update, forget), made with the Web Audio API: no sound files.
 // The palette is sci-fi console, not arcade: a tricorder scan for a recall, a phaser beam for a save, a tricorder
-// chirp for an update and a disruptor zap for a forget, all with a short space echo.
+// chirp for an update and a disruptor zap for a forget, all with a short space echo; a soft shimmer as it lands.
 // Off by default. A browser starts audio only after a click on the page, so the context is made (or resumed) then.
 
-export type SoundKind = 'recall' | 'save' | 'update' | 'forget'
+export type SoundKind = 'recall' | 'save' | 'update' | 'forget' | 'land'
 
 type Ctx = AudioContext
 /**
@@ -37,6 +37,11 @@ export const SOUND_SHAPES: Readonly<Record<SoundKind, readonly Tone[]>> = {
     { wave: 'sine', from: 1750, to: 1900, at: 0, dur: 0.07, gain: 0.55, fm: { rate: 90, depth: 70 }, filter: { type: 'lowpass', freq: 5200, q: 0.7 } },
     { wave: 'sine', from: 2350, to: 2550, at: 0.085, dur: 0.11, gain: 0.55, fm: { rate: 90, depth: 70 }, filter: { type: 'lowpass', freq: 5200, q: 0.7 } },
   ],
+  land: [
+    // The landing: a soft low shimmer as the event reaches its planet.
+    { wave: 'sine', from: 660, to: 520, at: 0, dur: 0.38, gain: 0.45, fm: { rate: 6, depth: 12 } },
+    { wave: 'triangle', from: 165, to: 140, at: 0, dur: 0.42, gain: 0.5, filter: { type: 'lowpass', freq: 900, q: 0.7 } },
+  ],
   forget: [
     // The disruptor: a deep buzz falling fast through a resonant band, with a low body under it.
     { wave: 'sawtooth', from: 950, to: 70, at: 0, dur: 0.5, gain: 0.8, fm: { rate: 34, depth: 280 }, filter: { type: 'bandpass', freq: 850, q: 6 } },
@@ -48,6 +53,8 @@ export const SOUND_SHAPES: Readonly<Record<SoundKind, readonly Tone[]>> = {
 // and the space echo: its delay, how much of it feeds back, and how loud it is.
 const VOLUME = 0.08
 const MIN_GAP_MS = 110
+// The landing tone is quieter and has its own spacing, so a launch never silences a landing.
+const LAND_LEVEL = 0.6
 const ECHO_SECONDS = 0.14
 const ECHO_FEEDBACK = 0.3
 const ECHO_LEVEL = 0.35
@@ -59,6 +66,7 @@ export function createSoundPlayer(make: () => Ctx | null = defaultContext, now: 
   // The shared output: master → speakers, and master → echo → speakers. Made once with the context.
   let master: GainNode | null = null
   let last = -Infinity
+  let lastLand = -Infinity
   const context = () => {
     if (ctx === null) {
       ctx = make()
@@ -73,12 +81,14 @@ export function createSoundPlayer(make: () => Ctx | null = defaultContext, now: 
     },
     play(kind) {
       const t = now()
-      if (t - last < MIN_GAP_MS) return
+      const land = kind === 'land'
+      if (t - (land ? lastLand : last) < MIN_GAP_MS) return
       const c = context()
       if (c === null || master === null || c.state !== 'running') return
-      last = t
+      if (land) lastLand = t
+      else last = t
       const start = c.currentTime + 0.01
-      for (const tone of SOUND_SHAPES[kind]) voice(c, master, tone, start)
+      for (const tone of SOUND_SHAPES[kind]) voice(c, master, land ? { ...tone, gain: tone.gain * LAND_LEVEL } : tone, start)
     },
   }
 }
