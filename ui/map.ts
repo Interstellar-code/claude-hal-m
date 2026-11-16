@@ -2977,8 +2977,9 @@ export function createMap(host: MapHost): MapView {
   byId<HTMLButtonElement>('map-sim-write').addEventListener('click', () => simulateOnce('write'))
   byId<HTMLButtonElement>('solar-sim-recall').addEventListener('click', () => simulateOnce('recall'))
   byId<HTMLButtonElement>('solar-sim-write').addEventListener('click', () => simulateOnce('write'))
-  // Simulate auto: about one demo event a second (half recalls, half writes, now and then a second recall) for the chosen
+  // Simulate auto: one demo event every AUTO_EVERY seconds (half recalls, half writes, now and then a second recall) for the chosen
   // number of seconds, then it stops by itself. Same demo events as the buttons above: nothing reaches the server.
+  const AUTO_EVERY = 3
   const autoBtn = byId<HTMLButtonElement>('solar-sim-auto')
   const autoSecs = byId<HTMLInputElement>('solar-sim-secs')
   let autoTimer: number | undefined
@@ -2996,12 +2997,15 @@ export function createMap(host: MapHost): MapView {
     const endAt = Date.now() + seconds * 1000
     autoBtn.setAttribute('aria-pressed', 'true')
     autoSecs.disabled = true
+    let ticks = 0
     const tick = () => {
       const left = Math.ceil((endAt - Date.now()) / 1000)
       if (left <= 0) return stopAuto()
       autoBtn.textContent = `Stop (${left}s)`
+      // The countdown moves every second; an event comes every AUTO_EVERY seconds.
+      if (ticks++ % AUTO_EVERY !== 0) return
       simulateOnce(Math.random() < 0.5 ? 'recall' : 'write')
-      if (Math.random() < 0.2) window.setTimeout(() => simulateOnce('recall'), 350)
+      if (Math.random() < 0.1) window.setTimeout(() => simulateOnce('recall'), 600)
     }
     tick()
     autoTimer = window.setInterval(tick, 1000)
