@@ -106,6 +106,7 @@ import { candidateList, parseVocabulary, ribbon as vocabRibbon, tagGroups, vocab
 import { isClaudeRecall, isOtherAppsRecall } from './recalls'
 import { startTheme, type ThemeMode } from './theme'
 import { drawGroups, drawQuick as drawSettingsQuick, drawRail as drawSettingsRail, drawTop, newView, parseSettings, type BrowserPrefs, type SettingsData, type SettingsHost } from './settings'
+import { baseUrl, drawMcp, loadKeys, loginErrorText, newMcpState, parseSession, retryAfterSeconds, type McpHost } from './server-mode'
 import { closeSheet, openSheet, wireSheet } from './sheet'
 import {
   chooseMode,
@@ -161,6 +162,8 @@ type Health = {
   total: number
   owners: Owner[]
   note?: string
+  /** True when the dashboard runs as a server (Docker): no Update button there, an upgrade is a redeploy. */
+  server?: boolean
 }
 
 export type Memory = {
@@ -975,7 +978,7 @@ function setStatus(text: string, kind: 'ok' | 'error' | 'plain' = 'plain') {
 function setConnection(state: 'live' | 'lost' | 'expired') {
   const pill = byId('conn')
   pill.dataset.state = state
-  byId('conn-text').textContent = state === 'live' ? 'Local · live' : state === 'lost' ? 'Reconnecting…' : 'Link expired'
+  byId('conn-text').textContent = state === 'live' ? (serverMode ? 'Server · live' : 'Local · live') : state === 'lost' ? 'Reconnecting…' : serverMode ? 'Signed out' : 'Link expired'
   // While lost, the tab's data is from before: it is dimmed, and the strip says when the page will ask again.
   for (const view of VIEWS) byId(`view-${view}`).classList.toggle('is-stale', state === 'lost')
   byId('lost-extra').hidden = state !== 'lost'
@@ -1013,16 +1016,28 @@ function takeToken(): string | undefined {
 
 let token = ''
 let expired = false
+// Server mode (docs/plans/remote-server.md): no #token= link; the page signs in with a password and the
+// session cookie rides on every same-origin request, so no Authorization header is sent.
+let serverMode = false
+let publicUrl = ''
+
+/** The auth header for /api calls: the token locally, none in server mode (the cookie does it). */
+const authHeaders = (): Record<string, string> => (serverMode ? {} : { Authorization: `Bearer ${token}` })
 
 class Expired extends Error {}
 
-// The link stopped working (the server restarted): say so and show no data.
+// The link stopped working (the server restarted): say so and show no data. In server mode the session ended: sign in again.
 function expire() {
   if (expired) return
   expired = true
   sessionStorage.removeItem(TOKEN_KEY)
   for (const view of VIEWS) byId(`view-${view}`).hidden = true
   byId('foot').hidden = true
+  if (serverMode) {
+    setConnection('expired')
+    showSignIn('Your session ended. Sign in again.')
+    return
+  }
   setStatus('This link no longer works (the server was restarted). Run /mnemosyne-ui again for a fresh link.', 'error')
   // 0.17.0: the recovery card (two steps, a Copy button, what this means) and the pill in its expired state.
   setConnection('expired')
@@ -1044,7 +1059,7 @@ async function api(path: string, init: ApiInit = {}) {
 }
 
 async function send(path: string, init: ApiInit) {
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+  const headers = authHeaders()
   if (init.body !== undefined) headers['Content-Type'] = 'application/json'
   const response = await fetch(path, {
     method: init.method ?? 'GET',
@@ -1074,8 +1089,23 @@ async function postJson(path: string, body: unknown): Promise<{ status: number; 
     const response = await api(path, { method: 'POST', body })
     return { status: response.status, body: await readJson<unknown>(response) }
   } catch (err) {
-    return { status: 0, body: { error: err instanceof Expired ? 'This link no longer works. Run /mnemosyne-ui again.' : `Could not reach the server: ${failure(err)}` } }
+    return { status: 0, body: { error: expiredText(err) } }
   }
+}
+
+/** A GET with the token (or cookie): the status and the JSON body, as postJson. */
+async function getJson(path: string): Promise<{ status: number; body: unknown }> {
+  try {
+    const response = await api(path)
+    return { status: response.status, body: await readJson<unknown>(response) }
+  } catch (err) {
+    return { status: 0, body: { error: expiredText(err) } }
+  }
+}
+
+function expiredText(err: unknown) {
+  if (!(err instanceof Expired)) return `Could not reach the server: ${failure(err)}`
+  return serverMode ? 'Your session ended. Sign in again.' : 'This link no longer works. Run /mnemosyne-ui again.'
 }
 
 // ---- The server going away ----
@@ -1764,8 +1794,27 @@ export function drawSettings() {
     dangerBox.replaceChildren(danger)
   } else byId('settings-top').replaceChildren(...[banner, danger].filter((node): node is HTMLElement => node !== undefined))
   drawSettingsGroups(data)
+  drawMcpCard()
   tabStatus('settings', '')
   byId('settings-body').hidden = false
+}
+
+// Server mode only: the "MCP connection" card (device keys for the plugin and for MCP apps; ui/server-mode.ts).
+const mcpState = newMcpState()
+const mcpHost: McpHost = {
+  get: getJson,
+  post: postJson,
+  copy: settingsHost.copy,
+  url: () => baseUrl(publicUrl, typeof location === 'undefined' ? '' : location.origin),
+}
+
+function drawMcpCard() {
+  const box = maybe('settings-mcp')
+  if (box === null) return
+  box.hidden = !serverMode
+  if (!serverMode) return box.replaceChildren()
+  box.replaceChildren(drawMcp(mcpState, mcpHost, drawMcpCard))
+  if (mcpState.keys === null && mcpState.error === '') void loadKeys(mcpState, mcpHost, drawMcpCard)
 }
 
 /** The groups, the rail and the quick filter counts: the filter box redraws these per keystroke, so the box keeps focus. */
@@ -2413,7 +2462,8 @@ async function loadHealth() {
     fact('Version', `Mnemosyne v${health.plugin}`)
     // 0.28.0: the release check and the Update button fill this value later; a slow or failed check leaves it as is.
     const value = facts.lastElementChild as HTMLElement | null
-    if (value) void loadUpdate(value)
+    // A server deployment has no Update button (its /api/update* answer 404): it is upgraded by redeploying.
+    if (value && health.server !== true) void loadUpdate(value)
   }
   fact('Store', health.store)
   serverPid = health.pid
@@ -2450,7 +2500,7 @@ async function startUpdate(): Promise<string | undefined> {
 }
 
 /** A GET with the token that never touches the connection watch: the server going away is expected here. */
-const quietGet = (path: string) => fetch(path, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+const quietGet = (path: string) => fetch(path, { headers: authHeaders(), cache: 'no-store' })
 
 /** Polls the run's progress into `box` until it ends, or until the dashboard stops for the swap. */
 function followUpdate(box: HTMLElement, via: UpdateInfo['via'] = 'updater') {
@@ -4202,20 +4252,127 @@ export async function main() {
       () => (button.textContent = 'Copy failed'),
     )
   })
+  wireSignIn()
   const found = takeToken()
   if (found === undefined) {
-    setStatus('Open this dashboard with the link from /mnemosyne-ui in Claude Code: it carries the key this page needs.', 'error')
-    return
-  }
-  token = found
+    // No link: a server deployment answers /api/session without auth; a local server does not (401).
+    const session = await askSession()
+    if (session === null) {
+      setStatus('Open this dashboard with the link from /mnemosyne-ui in Claude Code: it carries the key this page needs.', 'error')
+      return
+    }
+    serverMode = true
+    publicUrl = session.publicUrl
+    setConnection('live')
+    const pill = byId('conn')
+    pill.title = 'This dashboard talks to your Mnemosyne server'
+    const note = maybe('about-note')
+    if (note) note.textContent = 'Runs on your Mnemosyne server, behind its password.'
+    byId('signout').hidden = false
+    if (!session.signedIn) return showSignIn()
+  } else token = found
+  await start()
+}
+
+/** The first load and the wiring after it: local (with the token) or server mode once signed in. */
+async function start() {
   try {
     await loadHealth()
   } catch (err) {
-    if (!(err instanceof Expired)) setStatus(`Could not reach the Mnemosyne server: ${failure(err)}. Run /mnemosyne-ui again.`, 'error')
+    if (!(err instanceof Expired)) setStatus(`Could not reach the Mnemosyne server: ${failure(err)}.${serverMode ? '' : ' Run /mnemosyne-ui again.'}`, 'error')
     return
   }
   setStatus(CONNECTED, 'ok')
   finishBoot()
+}
+
+// ---- Server mode: sign in and sign out ----
+
+/** GET /api/session with no auth: the session in server mode, null for a local server (401) or no answer. */
+async function askSession() {
+  try {
+    const response = await fetch('/api/session', { cache: 'no-store' })
+    return parseSession(response.status, await readJson<unknown>(response))
+  } catch {
+    return null
+  }
+}
+
+/** Shows the sign-in card in place of the views (and the status line), with an optional line on top. */
+function showSignIn(line = '') {
+  for (const view of VIEWS) byId(`view-${view}`).hidden = true
+  byId('foot').hidden = true
+  byId('status').hidden = true
+  byId('lost-extra').hidden = true
+  closeSheet()
+  byId('signin').hidden = false
+  const error = byId('signin-error')
+  error.textContent = line
+  error.hidden = line === ''
+  const field = byId<HTMLInputElement>('signin-password')
+  field.value = ''
+  field.focus?.()
+}
+
+let signingIn = false
+function wireSignIn() {
+  // The CSP has form-action 'none': the form never submits itself, the page posts the password as JSON.
+  byId('signin-form').addEventListener('submit', event => {
+    ;(event as Event).preventDefault?.()
+    void signIn()
+  })
+  byId('signout').addEventListener('click', () => void signOut())
+}
+
+async function signIn() {
+  const submit = byId<HTMLButtonElement>('signin-submit')
+  const error = byId('signin-error')
+  const password = byId<HTMLInputElement>('signin-password').value
+  if (signingIn || submit.disabled) return
+  if (password === '') {
+    error.textContent = 'Enter the password.'
+    error.hidden = false
+    return
+  }
+  signingIn = true
+  submit.disabled = true
+  let status = 0
+  let body: unknown = {}
+  try {
+    const response = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }), cache: 'no-store' })
+    status = response.status
+    body = await readJson<unknown>(response)
+  } catch (err) {
+    body = { error: `Could not reach the server: ${failure(err)}` }
+  }
+  signingIn = false
+  if (status === 200) {
+    // After a session that ended, the page's state is from before: a fresh load is the clean start.
+    if (booted) return location.reload()
+    expired = false
+    byId('signin').hidden = true
+    byId<HTMLInputElement>('signin-password').value = ''
+    submit.disabled = false
+    setStatus('Loading…')
+    return start()
+  }
+  error.textContent = loginErrorText(status, body)
+  error.hidden = false
+  // After too many tries the button rests for the server's pause.
+  const wait = retryAfterSeconds(status, body)
+  if (wait > 0) setTimeout(() => (submit.disabled = false), wait * 1000)
+  else submit.disabled = false
+}
+
+async function signOut() {
+  try {
+    await fetch('/api/logout', { method: 'POST', cache: 'no-store' })
+  } catch {
+    // The cookie may outlive a server that did not answer; the card shows anyway.
+  }
+  expired = true
+  setConnection('expired')
+  showSignIn('You signed out.')
 }
 
 // What follows the first successful load; once only, from main() or from the watch when the server answers after a failed first load.

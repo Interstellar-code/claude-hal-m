@@ -2,6 +2,15 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.36.0 (one shared memory on a server)
+
+1. Server mode: `bun ui/server.ts --server` serves one store to every PC. The dashboard asks for a password (`MNEMOSYNE_UI_PASSWORD`, 8 or more characters; a 30-day cookie, a 60-second pause after 5 wrong tries) instead of the token in the link. Settings in server mode come from environment variables (see the README's "Run it as a server").
+2. Device keys: the dashboard's Settings, MCP connection makes one key per device (shown once, revocable, stored only as a SHA-256). A key opens `/api/plugin/*` for the plugin and `/mcp` for other MCP clients.
+3. `/mcp`: a stateless Streamable HTTP MCP endpoint with the same six tools as the local `mnemosyne-mcp`; saves are recorded as `mcp:<device name>`.
+4. Plugin client mode: with the new `serverUrl` and `serverKey` options set, recall, saves, the owner lookup and the first-prompt block go to the server and no local engine is needed. Knowledge extraction, session summaries, the expiry sweep and the store-wide commands (`/mnemosyne-tags`, `-import`, `-knowledge`, `-embed`) stay on the server. A server that does not answer turns memory off for 60 seconds ("memory offline").
+5. Docker template: `Dockerfile` (Debian Bun image, engine and model installed at build time, data in `/data`, runs as 99:100), `docker-compose.yml` with a Tailscale sidecar serving HTTPS on the tailnet and no published port, `.env.example`. Made for Dokploy on Unraid; works with plain `docker compose`.
+6. Local installs without `serverUrl` behave as before.
+
 ## 0.35.0 (the map comes alive: HAL-10000, The Human, sounds, a usable Timeline)
 
 1. The dashboard's name is HAL-10000 (header, tab title, About). Commands, tools and the plugin id keep the Mnemosyne name.

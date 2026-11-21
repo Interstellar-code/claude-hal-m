@@ -135,7 +135,10 @@ export function createWarmEngine(options: WarmOptions): WarmEngine {
 
   function ensure(): WarmProcess {
     if (child !== null) return child
-    const env = { ...(options.baseEnv ?? process.env), ...engineEnv(options.store, 'global', { embeddings: options.embeddings !== false }), MNEMOPI_OWNER_PER_CALL: '1' }
+    const base = options.baseEnv ?? process.env
+    // Server mode: the image's absolute model cache (MNEMOSYNE_MODEL_CACHE), as runEngine passes it.
+    const modelCacheDir = base.MNEMOSYNE_MODEL_CACHE || undefined
+    const env = { ...base, ...engineEnv(options.store, 'global', { embeddings: options.embeddings !== false, ...(modelCacheDir ? { modelCacheDir } : {}) }), MNEMOPI_OWNER_PER_CALL: '1' }
     const proc = spawn([process.execPath, options.cli, 'mcp'], env)
     child = proc
     started++
