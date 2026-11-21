@@ -1,5 +1,5 @@
 // What a person or Claude sees of the engine: the engine's own names (Mnemopi)
-// are renamed to Mnemosyne. Shared by the hooks module and the stdio proxy.
+// are renamed to HAL-M. Shared by the hooks module and the stdio proxy.
 
 // The engine names stats with its provider, bank and a duplicate `stats` block.
 // Keeps the counts, renames the provider; errors and text that is not JSON pass through.

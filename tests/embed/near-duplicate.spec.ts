@@ -67,7 +67,7 @@ const rowsOf = (host: Host) => {
     db.close()
   }
 }
-const idOf = (reply: { result?: string }) => JSON.parse(String(reply.result).split('\nMnemosyne')[0]!).memory_id as string
+const idOf = (reply: { result?: string }) => JSON.parse(String(reply.result).split('\nHAL-M')[0]!).memory_id as string
 
 describe('G3 near-duplicate warning under the real model', () => {
   test('META.3.a4: a near-identical note is refused and named in strict mode, flagged when confirmed; an unrelated note is not warned about', async () => {
@@ -108,7 +108,7 @@ describe('G3 near-duplicate warning under the real model', () => {
     const firstId = idOf(first)
     const second = await host.tool('memory_remember', { content: 'The deploy script lives in the ops folder of this repository.', kind: 'fact' })
     expect(second.deny).toBeUndefined()
-    expect(String(second.result)).toContain(`Mnemosyne guard warning: G3`)
+    expect(String(second.result)).toContain(`HAL-M guard warning: G3`)
     expect(String(second.result)).toContain(firstId)
     const stored = rowsOf(host).find(row => row.content.endsWith('of this repository.'))!
     expect(JSON.parse(stored.metadata_json!).guard).toEqual([`near-duplicate:${firstId}`])

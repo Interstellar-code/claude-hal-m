@@ -1,14 +1,14 @@
-# Claude Mnemosyne server for Dokploy (Compose type) or plain `docker compose up -d`.
+# Claude HAL-M server for Dokploy (Compose type) or plain `docker compose up -d`.
 # The app has no published port: it shares the Tailscale sidecar's network and is
-# reached only at https://mnemosyne.<your tailnet>.ts.net (tailscale serve -> 127.0.0.1:8787).
+# reached only at https://hal-m.<your tailnet>.ts.net (tailscale serve -> 127.0.0.1:8787).
 # Set the variables in Dokploy's Environment tab or in .env (see .env.example).
 services:
   tailscale:
     image: tailscale/tailscale:v1.104.7
-    hostname: mnemosyne
+    hostname: hal-m
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY:?set TS_AUTHKEY to a Tailscale auth key}
-      - TS_HOSTNAME=mnemosyne
+      - TS_HOSTNAME=hal-m
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_SERVE_CONFIG=/config/serve.json
       - TS_USERSPACE=false
@@ -24,7 +24,8 @@ services:
       - sys_module
     restart: unless-stopped
 
-  mnemosyne:
+  hal-m:
+    image: hal-m:local
     build:
       context: .
       args:

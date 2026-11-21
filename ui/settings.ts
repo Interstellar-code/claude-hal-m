@@ -134,7 +134,7 @@ export function formatValue(value: unknown): string {
 /** The badge words for a server "applies" value ("now", "next session", "after restart"). */
 export const appliesText = (applies: string) => (applies === '' ? '' : `Applies ${applies}`)
 
-const HOMES: Record<string, string> = { config: 'Mnemosyne config', option: 'Plugin option', 'read-only': 'Read-only' }
+const HOMES: Record<string, string> = { config: 'HAL-M config', option: 'Plugin option', 'read-only': 'Read-only' }
 export const homeText = (home: string) => HOMES[home] ?? home
 
 /** The range in words, for the hint under a number field. */
@@ -1041,7 +1041,7 @@ export function drawTop(data: SettingsData, view: SettingsView, host: SettingsHo
   const diff = resetDiff(data.settings)
   if (!view.resetAll) {
     const words = el('div', undefined, 'set-danger-text')
-    words.append(el('p', 'Reset all to defaults', 'set-danger-title'), el('p', diff.length === 0 ? 'Every Mnemosyne config value is at its default. Plugin options stay as they are.' : `${diff.length} Mnemosyne config ${diff.length === 1 ? 'value differs' : 'values differ'} from the default. Plugin options stay as they are.`, 'small muted'))
+    words.append(el('p', 'Reset all to defaults', 'set-danger-title'), el('p', diff.length === 0 ? 'Every HAL-M config value is at its default. Plugin options stay as they are.' : `${diff.length} HAL-M config ${diff.length === 1 ? 'value differs' : 'values differ'} from the default. Plugin options stay as they are.`, 'small muted'))
     all.append(
       words,
       button('Reset all', 'danger-outline', () => {
@@ -1061,7 +1061,7 @@ export function drawTop(data: SettingsData, view: SettingsView, host: SettingsHo
       }
       all.append(el('p', `Reset ${diff.length} ${diff.length === 1 ? 'setting' : 'settings'} to ${diff.length === 1 ? 'its default' : 'their defaults'}?`, 'set-danger-title'), list)
     }
-    const status = el('p', 'This puts every Mnemosyne setting in config.json back at its default (the old file is kept as config.json.bak). Plugin options are not changed.', 'small muted')
+    const status = el('p', 'This puts every HAL-M setting in config.json back at its default (the old file is kept as config.json.bak). Plugin options are not changed.', 'small muted')
     const fail = el('p', '', 'set-msg warn')
     fail.hidden = true
     const go = button('Reset all settings', 'danger', () => {
@@ -1081,7 +1081,7 @@ export function drawTop(data: SettingsData, view: SettingsView, host: SettingsHo
         try {
           const reply = await host.post('/api/settings/reset', { all: true, confirm: 'reset' })
           if (reply.status >= 200 && reply.status < 300 && isObject(reply.body) && reply.body.ok === true) {
-            view.notice = text(reply.body.note, 'Every Mnemosyne setting is back at its default.')
+            view.notice = text(reply.body.note, 'Every HAL-M setting is back at its default.')
             view.resetAll = false
             view.busy = false
             host.reload()

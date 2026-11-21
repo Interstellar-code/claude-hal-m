@@ -1180,7 +1180,7 @@ describe('VIEWS R2: the Knowledge and Health glue in app.ts', () => {
     yes!.fire('click')
     await until(() => byId('status').textContent.startsWith('Retired memory'), 'the retire status')
     app.show('search')
-    expect(byId('status').textContent).toBe('Connected to the local Mnemosyne server.')
+    expect(byId('status').textContent).toBe('Connected to the local HAL-M server.')
     expect(byId('status').className).toBe('status is-ok')
     // The same tab again leaves a message alone.
     ;(byId('status') as AppNode).textContent = 'something on search'

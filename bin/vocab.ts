@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the shared tag vocabulary's one writer (v3 plan, C5).
+// Claude HAL-M — the shared tag vocabulary's one writer (v3 plan, C5).
 //   bun bin/vocab.ts --store <dir> init [--force]        seed <root>/vocabulary.json from the store
 //   bun bin/vocab.ts [--root <dir> | --store <dir>] admit <tag> [--description <text>]
 //   bun bin/vocab.ts [--root <dir> | --store <dir>] alias <from> <to>

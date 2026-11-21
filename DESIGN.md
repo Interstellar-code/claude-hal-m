@@ -6,7 +6,7 @@ reproduced. `v0.1.0` implements it; §5 records the decisions taken.
 
 ---
 
-## 1. What the Mnemosyne Memory engine is, and what it costs to depend on
+## 1. What the HAL-M Memory engine is, and what it costs to depend on
 
 [`@oh-my-pi/pi-mnemopi`](https://www.npmjs.com/package/@oh-my-pi/pi-mnemopi) —
 MIT, ~153K weekly downloads, source at
@@ -428,7 +428,7 @@ Manual check (plan SRV.4), in a real terminal session and in the desktop app:
 1. Run `/mnemosyne-ui`. The default browser opens the page, and the reply
    shows `Link: http://127.0.0.1:<port>/#token=<token>`. The page
    shows the header, the owners with counts, the store path and "Connected to
-   the local Mnemosyne server." Open the browser console: no error and no CSP
+   the local HAL-M server." Open the browser console: no error and no CSP
    violation.
 2. After the page loads, the address bar shows no `#token=`. Reload: the page
    still works (the tab's sessionStorage). Open `http://127.0.0.1:<port>/`
@@ -676,7 +676,7 @@ submitting). Its report says it does not run the directory's safety scan
 and policy review, nor check code loaded through `hooks.json` modules. The
 portal's own check was not run. (The first run also listed the
 `mnemosyne-tags` command hook as a gating hook without `.catch`; it now has
-one, returning "Mnemosyne: the tag backfill failed.", and the rerun lists it
+one, returning "HAL-M: the tag backfill failed.", and the rerun lists it
 with `.catch`.)
 
 ### 3.7 v0.6.0: the galaxy, live sparks and knowledge

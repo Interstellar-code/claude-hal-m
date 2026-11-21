@@ -628,7 +628,7 @@ export function settingsRoutes(config: SettingsConfig, log: (fields: ActivityFie
         if (!result.ok) return bad(`${result.key}: ${result.reason}`)
         return {
           status: 200,
-          body: { ok: true, all: true, scope: 'config', changed: result.changes.length > 0, applies: 'now', note: 'Every Mnemosyne setting in config.json is back at its default; the old file is kept as config.json.bak. Plugin options were not changed: reset them one at a time.' },
+          body: { ok: true, all: true, scope: 'config', changed: result.changes.length > 0, applies: 'now', note: 'Every HAL-M setting in config.json is back at its default; the old file is kept as config.json.bak. Plugin options were not changed: reset them one at a time.' },
         }
       })
     }

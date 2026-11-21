@@ -1,4 +1,4 @@
-// The Mnemosyne dashboard page. Built by ui/server.ts with Bun.build at server
+// The HAL-M dashboard page. Built by ui/server.ts with Bun.build at server
 // start and served as /app.js.
 //
 // The link from /mnemosyne-ui carries the token in the URL fragment
@@ -142,8 +142,8 @@ type View = (typeof VIEWS)[number]
 const VIEW_NAMES: Record<View, string> = { map: 'Map', memories: 'Memories', activity: 'Activity', search: 'Search', knowledge: 'Knowledge', review: 'Review', health: 'Health', vocabulary: 'Vocabulary', settings: 'Settings' }
 const FEED_KEEP = 1000
 const FEED_SHOW = 300
-const CONNECTED = 'Connected to the local Mnemosyne server.'
-export const LOST = 'The Mnemosyne server has stopped (its Claude session ended). Run /mnemosyne-ui in Claude Code to start it again.'
+const CONNECTED = 'Connected to the local HAL-M server.'
+export const LOST = 'The HAL-M server has stopped (its Claude session ended). Run /mnemosyne-ui in Claude Code to start it again.'
 
 type Owner = { owner: string; count: number }
 
@@ -2459,7 +2459,7 @@ async function loadHealth() {
   facts.replaceChildren()
   const fact = (label: string, value: string) => facts.append(el('dt', label), el('dd', value))
   if (health.plugin) {
-    fact('Version', `Mnemosyne v${health.plugin}`)
+    fact('Version', `HAL-M v${health.plugin}`)
     // 0.28.0: the release check and the Update button fill this value later; a slow or failed check leaves it as is.
     const value = facts.lastElementChild as HTMLElement | null
     // A server deployment has no Update button (its /api/update* answer 404): it is upgraded by redeploying.
@@ -4265,9 +4265,9 @@ export async function main() {
     publicUrl = session.publicUrl
     setConnection('live')
     const pill = byId('conn')
-    pill.title = 'This dashboard talks to your Mnemosyne server'
+    pill.title = 'This dashboard talks to your HAL-M server'
     const note = maybe('about-note')
-    if (note) note.textContent = 'Runs on your Mnemosyne server, behind its password.'
+    if (note) note.textContent = 'Runs on your HAL-M server, behind its password.'
     signedInChrome(true)
     if (!session.signedIn) return showSignIn()
   } else token = found
@@ -4279,7 +4279,7 @@ async function start() {
   try {
     await loadHealth()
   } catch (err) {
-    if (!(err instanceof Expired)) setStatus(`Could not reach the Mnemosyne server: ${failure(err)}.${serverMode ? '' : ' Run /mnemosyne-ui again.'}`, 'error')
+    if (!(err instanceof Expired)) setStatus(`Could not reach the HAL-M server: ${failure(err)}.${serverMode ? '' : ' Run /mnemosyne-ui again.'}`, 'error')
     return
   }
   setStatus(CONNECTED, 'ok')

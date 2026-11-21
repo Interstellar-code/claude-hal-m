@@ -70,7 +70,7 @@ export function mcpJson(url: string, key: string): string {
   return JSON.stringify({ mcpServers: { mnemosyne: { type: 'http', url: `${url}/mcp`, headers: { Authorization: `Bearer ${key}` } } } }, null, 2)
 }
 
-export const PLUGIN_NOTE = 'These go into the Mnemosyne plugin\'s settings in Claude Code: /plugin → Mnemosyne → configure.'
+export const PLUGIN_NOTE = 'These go into the HAL-M plugin\'s settings in Claude Code: /plugin → mnemosyne → configure.'
 
 // ---- The Settings card ----
 
@@ -213,7 +213,7 @@ export function drawMcp(state: McpState, host: McpHost, redraw: () => void): HTM
     box.setAttribute('role', 'status')
     box.append(el('p', `Key for "${state.created.name}". Copy it now: it is not shown again.`, 'mcp-new-title'))
     box.append(copyBlock('Copy key', key, host, false))
-    box.append(el('p', 'Claude Code (Mnemosyne plugin)', 'set-label'), copyBlock('Copy plugin settings', pluginSettingsText(url, key), host, true), el('p', PLUGIN_NOTE, 'small muted'))
+    box.append(el('p', 'Claude Code (HAL-M plugin)', 'set-label'), copyBlock('Copy plugin settings', pluginSettingsText(url, key), host, true), el('p', PLUGIN_NOTE, 'small muted'))
     box.append(el('p', 'Cursor or Claude Desktop', 'set-label'), copyBlock('Copy MCP JSON', mcpJson(url, key), host, true))
     box.append(
       button('Done', '', () => {

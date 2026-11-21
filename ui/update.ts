@@ -45,9 +45,9 @@ export const parseStatusBody = (body: unknown) => parseStatus((body as { status?
 
 export const isRunning = (status: UpdateStatus | null) => status !== null && (status.state === 'starting' || status.state === 'running')
 
-/** "Mnemosyne v0.27.0 · v0.28.0 available", "… · up to date", or the version alone when no check answered. */
+/** "HAL-M v0.27.0 · v0.28.0 available", "… · up to date", or the version alone when no check answered. */
 export function versionText(info: UpdateInfo): string {
-  const current = info.current.plugin ? `Mnemosyne v${info.current.plugin}` : 'Mnemosyne'
+  const current = info.current.plugin ? `HAL-M v${info.current.plugin}` : 'HAL-M'
   if (info.available && info.latest) return `${current} · v${info.latest.plugin} available`
   if (info.latest) return `${current} · up to date`
   return current
@@ -163,7 +163,7 @@ export function versionCell(info: UpdateInfo, host: UpdateHost): HTMLElement {
   confirm.hidden = true
   confirm.setAttribute('role', 'group')
   confirm.setAttribute('aria-label', 'Confirm the update')
-  confirm.append(el('p', `Update Mnemosyne to ${info.latest.tag}?`))
+  confirm.append(el('p', `Update HAL-M to ${info.latest.tag}?`))
   const list = el('ul', undefined, 'small update-changes')
   for (const line of confirmLines(info)) list.append(el('li', line))
   confirm.append(list)

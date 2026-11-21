@@ -303,7 +303,7 @@ describe('the page when the server stops', () => {
     expect(listeners('pause')).toBe(0)
     answer = 'ok'
     await fire()
-    expect(box('status').textContent).toBe('Connected to the local Mnemosyne server.')
+    expect(box('status').textContent).toBe('Connected to the local HAL-M server.')
     expect(listeners('pause')).toBe(1)
     // Once only: a later loss and return does not wire again.
     answer = 'refuse'
@@ -335,7 +335,7 @@ describe('the page when the server stops', () => {
   test('the same server answering again brings the Connected banner back by itself', async () => {
     answer = 'ok'
     await fire()
-    expect(box('status').textContent).toBe('Connected to the local Mnemosyne server.')
+    expect(box('status').textContent).toBe('Connected to the local HAL-M server.')
     expect(box('status').className).toBe('status is-ok')
     // 0.17.0: the Connected line itself is not shown; the header pill says live, and the strip is gone
     expect(box('status').hidden).toBe(true)

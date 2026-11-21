@@ -303,7 +303,7 @@ describe('UI.1: the Settings tab draws from /api/settings only', () => {
       expect(joined).toContain('Max length')
       expect(joined).toContain('Current: 4000 (default)')
       expect(joined).toContain('Default: 4000')
-      expect(joined).toContain('Mnemosyne config')
+      expect(joined).toContain('HAL-M config')
       expect(joined).toContain('Applies now')
       // A plugin option: its home and the "after restart" badge are the server's words.
       const mode = rowOf(cards, 'guardMode')!.all().map(node => node.textContent).join(' | ')

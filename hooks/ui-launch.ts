@@ -153,9 +153,9 @@ async function handOver($: EngineInterface, state: State, verb: 'started' | 'run
     openBrowser($, link),
     $.ui.copy({ text: link }).catch(() => ({ isCopied: false as const })),
   ])
-  $.ui.toast(opened ? 'Mnemosyne dashboard opened in your browser.' : 'Mnemosyne dashboard: open its link from the reply.')
+  $.ui.toast(opened ? 'HAL-M dashboard opened in your browser.' : 'HAL-M dashboard: open its link from the reply.')
   const how = [opened ? 'Opened in your default browser' : 'Could not open a browser: open the link yourself', copied.isCopied ? 'the link is also on the clipboard' : '']
-  return { text: `Mnemosyne dashboard ${verb}${note}.\n${how.filter(Boolean).join('; ')}.\nLink: ${link}` }
+  return { text: `HAL-M dashboard ${verb}${note}.\n${how.filter(Boolean).join('; ')}.\nLink: ${link}` }
 }
 
 // Starts the holder (ui/server.ts --hold) in a spawn loop that keeps running
@@ -422,7 +422,7 @@ export async function openDashboard($: EngineInterface, paths: UiPaths, session:
   const up = await ready
   if (up instanceof Error) {
     await stopEntry($, session, entry)
-    return { text: `Mnemosyne dashboard did not start: ${up.message}` }
+    return { text: `HAL-M dashboard did not start: ${up.message}` }
   }
   const state = await readState($, paths.root)
   if (state !== undefined && state.pid === up.pid && state.port === up.port) {
@@ -440,7 +440,7 @@ export async function openDashboard($: EngineInterface, paths: UiPaths, session:
     return handOver($, state, 'running', `${restarted}${await restartNote($, paths, state)}${listed ? '' : NOT_LISTED}`)
   }
   await stopEntry($, session, entry)
-  return { text: `Mnemosyne dashboard did not start: ${paths.root}/${UI_STATE} does not name the new server.` }
+  return { text: `HAL-M dashboard did not start: ${paths.root}/${UI_STATE} does not name the new server.` }
 }
 
 // Ends one spawn loop (which kills its holder) and waits for it, at most STOP_WAIT_MS; the server itself is not signalled.

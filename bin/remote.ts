@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Plugin client mode (docs/plans/remote-server.md, "Plugin client mode"): one call to a Mnemosyne server.
+// Plugin client mode (docs/plans/remote-server.md, "Plugin client mode"): one call to a HAL-M server.
 //
 //   bun bin/remote.ts <engine|memories|resolve|project|hello>
 //   stdin: { url, key, body, timeoutMs, connectMs? }

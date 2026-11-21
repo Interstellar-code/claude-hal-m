@@ -1,4 +1,4 @@
-// Claude Mnemosyne — one-step update for machines that run Mnemosyne through
+// Claude HAL-M — one-step update for machines that run HAL-M through
 // Claude Desktop (or any MCP client) without Claude Code, where
 // `claude plugin update` does not exist (issue #43).
 //
@@ -38,7 +38,7 @@ import { slashes } from '../hooks/owner'
 import { VOCAB_FILE } from '../hooks/vocab'
 import { cliOf, install, isInside, LockBusy, lockTimingFromEnv, proxyClosure, windowsPathProblem, withInstallLock } from './install-engine'
 
-export const REPO = 'Interstellar-code/claude-mnemosyne'
+export const REPO = 'Interstellar-code/claude-hal-m'
 export const TASK_NAME = 'Mnemosyne dashboard'
 export const SHORTCUT_NAME = 'Update Mnemosyne'
 export const EXIT = { ok: 0, failed: 1, blocked: 2, busy: 3 } as const
@@ -372,11 +372,11 @@ const programOf = (command: string) => (/^"([^"]+)"|^(\S+)/.exec(command.trim())
  * installed now, and the ways out. Said only after a swap failed, never
  * predicted: a running engine does not always lock its folder.
  */
-export function lockedMessage(classified: Classified, unchanged: boolean, folder = "Mnemosyne's files") {
+export function lockedMessage(classified: Classified, unchanged: boolean, folder = "HAL-M's files") {
   const n = classified.chats.length
   const lines: string[] = [`Windows would not let the update replace ${folder}: a program has a file or the folder open.`]
   if (n > 0) {
-    lines.push(`${n === 1 ? 'A Claude chat uses' : 'Claude chats use'} Mnemosyne (${n} MCP connection${n === 1 ? '' : 's'} running) and may be holding it:`)
+    lines.push(`${n === 1 ? 'A Claude chat uses' : 'Claude chats use'} HAL-M (${n} MCP connection${n === 1 ? '' : 's'} running) and may be holding it:`)
     for (const chat of classified.chats) {
       const engines = chat.engines.map(e => e.pid).join(', ')
       lines.push(chat.proxy ? `  proxy pid ${chat.proxy.pid}${engines ? ` with engine pid ${engines}` : ''}` : `  engine pid ${engines}`)
@@ -385,12 +385,12 @@ export function lockedMessage(classified: Classified, unchanged: boolean, folder
   if (classified.dashboard.length > 0) lines.push(`Dashboard processes still running: ${classified.dashboard.map(p => `${programOf(p.command)} ${p.pid}`).join(', ')}`)
   if (classified.others.length > 0) lines.push(`Other programs using the install: ${classified.others.map(p => `${programOf(p.command)} ${p.pid}`).join(', ')}`)
   if (n === 0 && classified.dashboard.length === 0 && classified.others.length === 0) {
-    lines.push('No Mnemosyne process was found, so another program probably has it open: an Explorer window, an editor or a terminal opened in that folder.')
+    lines.push('No HAL-M process was found, so another program probably has it open: an Explorer window, an editor or a terminal opened in that folder.')
   }
   lines.push(unchanged ? 'Nothing was changed; the previous version keeps working.' : 'Part of the update is in place; see the versions below.')
   if (n > 0) {
-    lines.push('Quit Claude Desktop (and any other app using Mnemosyne), then update again.')
-    lines.push('From a terminal, --wait 600 waits up to 10 minutes for them to end, and --stop-engines stops them first (open chats lose Mnemosyne until the app is restarted).')
+    lines.push('Quit Claude Desktop (and any other app using HAL-M), then update again.')
+    lines.push('From a terminal, --wait 600 waits up to 10 minutes for them to end, and --stop-engines stops them first (open chats lose HAL-M until the app is restarted).')
   } else lines.push('Close what holds it, then update again.')
   return lines.join('\n')
 }
@@ -418,8 +418,8 @@ export function planUpdate(input: {
   stopEngines: boolean
 }): Plan {
   const { installed, source, processes, windows, force } = input
-  if (source.engineBuild === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no engine/package.json; it is not a claude-mnemosyne checkout` }
-  if (source.pluginVersion === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no .claude-plugin/plugin.json; it is not a claude-mnemosyne checkout` }
+  if (source.engineBuild === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no engine/package.json; it is not a claude-hal-m checkout` }
+  if (source.pluginVersion === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no .claude-plugin/plugin.json; it is not a claude-hal-m checkout` }
   if (!force && compareVersions(source.pluginVersion, installed.pluginVersion) < 0) {
     return { kind: 'refused', code: EXIT.failed, message: `the installed plugin ${installed.pluginVersion} is newer than ${source.pluginVersion}; nothing was changed (--force installs the older one)` }
   }
@@ -427,7 +427,7 @@ export function planUpdate(input: {
   const plugin = force || installed.pluginVersion !== source.pluginVersion
   const launcher = force || installed.launcherText !== input.expectedLauncher
   if (!engine && !plugin && !launcher) {
-    return { kind: 'up-to-date', message: `Mnemosyne is up to date: plugin ${installed.pluginVersion}, engine ${installed.engineBuild}.` }
+    return { kind: 'up-to-date', message: `HAL-M is up to date: plugin ${installed.pluginVersion}, engine ${installed.engineBuild}.` }
   }
   const swaps = engine || plugin
   const notes: string[] = []
@@ -447,7 +447,7 @@ export function planUpdate(input: {
 export function summary(before: InstallState, after: InstallState, plan: Extract<Plan, { kind: 'update' }>) {
   const change = (what: string, a: string | undefined, b: string | undefined) => (a === b ? `${what} ${b} (unchanged)` : `${what} ${a ?? 'none'} -> ${b}`)
   return [
-    'Mnemosyne updated:',
+    'HAL-M updated:',
     `  ${change('plugin', before.pluginVersion, after.pluginVersion)}`,
     `  ${change('engine', before.engineBuild, after.engineBuild)}`,
     ...(plan.launcher ? ['  launcher rewritten'] : []),
@@ -561,7 +561,7 @@ const psQuote = (text: string) => `'${text.replace(/'/g, "''")}'`
 
 /** update-mnemosyne.ps1: runs the update hidden and shows the result in a message box. */
 export function shortcutScript(layout: Layout, bun: string) {
-  return `# Updates Mnemosyne (Claude Desktop, no Claude Code) and shows the result.
+  return `# Updates HAL-M (Claude Desktop, no Claude Code) and shows the result.
 # Written by bin/update.ts; the Start Menu entry "${SHORTCUT_NAME}" runs it through update-mnemosyne.vbs, with no window.
 param([switch]$StopEngines)
 $updater = ${psQuote(join(layout.plugin, 'bin', 'update.ts'))}
@@ -577,7 +577,7 @@ $code = $LASTEXITCODE
 Set-Content -Path $log -Value $output -Encoding utf8
 $text = ($output.Trim() -split "\`r?\`n" | Select-Object -Last 14) -join "\`n"
 if ($code -eq ${EXIT.blocked}) {
-  $answer = [System.Windows.MessageBox]::Show("$text\`n\`nStop these Mnemosyne processes now and update? Open chats lose Mnemosyne until Claude is restarted.", '${SHORTCUT_NAME}', 'YesNo', 'Warning')
+  $answer = [System.Windows.MessageBox]::Show("$text\`n\`nStop these HAL-M processes now and update? Open chats lose HAL-M until Claude is restarted.", '${SHORTCUT_NAME}', 'YesNo', 'Warning')
   if ($answer -eq 'Yes') { & $PSCommandPath -StopEngines }
   exit
 }
@@ -587,7 +587,7 @@ $icon = if ($code -eq 0) { 'Information' } else { 'Error' }
 }
 
 /** update-mnemosyne.vbs: starts the script with no console window, as open-dashboard.vbs does. */
-export const shortcutVbs = () => `' Runs update-mnemosyne.ps1 (the Mnemosyne update) with no console window. Written by bin/update.ts.
+export const shortcutVbs = () => `' Runs update-mnemosyne.ps1 (the HAL-M update) with no console window. Written by bin/update.ts.
 Dim sh, dir
 Set sh = CreateObject("WScript.Shell")
 dir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
@@ -606,7 +606,7 @@ async function installShortcut(layout: Layout, run: Runner) {
     `$s.TargetPath = Join-Path $env:SystemRoot 'System32\\wscript.exe'`,
     `$s.Arguments = ${psQuote(`//B //Nologo "${vbs}"`)}`,
     `$s.WorkingDirectory = ${psQuote(layout.uiDir)}`,
-    `$s.Description = 'Update the Mnemosyne memory engine and dashboard'`,
+    `$s.Description = 'Update the HAL-M memory engine and dashboard'`,
     '$s.Save()',
   ].join('; ')
   const done = await run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', ps])
@@ -757,7 +757,7 @@ export async function stageRelease(dir: string, tag: string | undefined, runner:
     return tag
   }
   if (tag === undefined) {
-    const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'claude-mnemosyne-update' } })
+    const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'claude-hal-m-update' } })
     if (!reply.ok) throw new UpdateError(`could not list the releases (GitHub answered ${reply.status}); install Git or pass --from <checkout>`)
     tag = latestReleaseTag(((await reply.json()) as { name: string }[]).map(t => t.name))
     if (tag === undefined) throw new UpdateError(`${REPO} has no vX.Y.Z release tag`)
@@ -791,7 +791,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
     log(`Start Menu shortcut written: ${await installShortcut(layout, run)}`)
     return EXIT.ok
   }
-  if (!existsSync(layout.root)) throw new UpdateError(`no Mnemosyne install at ${layout.root}; install it first (README: Install outside Claude Code)`)
+  if (!existsSync(layout.root)) throw new UpdateError(`no HAL-M install at ${layout.root}; install it first (README: Install outside Claude Code)`)
   // 1. No checkout given: stage the release, then let its own updater do the rest,
   // so the newest update logic runs (and none of it runs from the plugin copy it replaces).
   if (options.from === undefined) {
@@ -840,7 +840,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
       let processes = classifyProcesses(await listProcesses(run), layout, windows)
       // --wait: give running chats time to end before the swap is tried (it may well succeed while they run).
       if (options.waitSeconds > 0 && processes.chats.length > 0 && !options.stopEngines) {
-        log(`${processes.chats.length} Mnemosyne MCP connection(s) running; waiting up to ${options.waitSeconds} s for them to end ...`)
+        log(`${processes.chats.length} HAL-M MCP connection(s) running; waiting up to ${options.waitSeconds} s for them to end ...`)
         while (processes.chats.length > 0 && Date.now() < deadline) {
           await Bun.sleep(3000)
           processes = classifyProcesses(await listProcesses(run), layout, windows)
@@ -855,7 +855,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
       }
 
       if (plan.stopChats.length > 0) {
-        log(`Stopping ${plan.stopChats.length} Mnemosyne MCP process(es) (--stop-engines): ${plan.stopChats.join(', ')}`)
+        log(`Stopping ${plan.stopChats.length} HAL-M MCP process(es) (--stop-engines): ${plan.stopChats.join(', ')}`)
         await stopProcesses(plan.stopChats, run)
       }
       if (plan.plugin) stagePlugin(sourceDir, layout, source.pluginVersion)

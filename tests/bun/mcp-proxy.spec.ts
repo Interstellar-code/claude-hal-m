@@ -402,7 +402,7 @@ describe('the proxy against a real installed engine', () => {
     const env = { MNEMOSYNE_GUARD_MODE: 'warn' }
     const saved = await proxy(cli, store, [toolCall(1, 'memory_remember', { content: 'Today the proxy importer was rewired to use the guard', kind: 'fact', tags: ['ops'] })], 'global', '', env)
     // A warned save's reply has guard warning lines after the engine's JSON.
-    const id = JSON.parse(String(saved.get(1).result.content[0].text).split('\nMnemosyne')[0]!).memory_id
+    const id = JSON.parse(String(saved.get(1).result.content[0].text).split('\nHAL-M')[0]!).memory_id
     expect(JSON.parse(fullRow(id).metadata_json!)).toEqual({ tags: ['ops'], guard: ['G4'] })
     const updated = await proxy(cli, store, [toolCall(1, 'memory_update', { memory_id: id, content: 'The proxy importer uses the guard module for each save.' })], 'global', '', env)
     expect(text(updated.get(1))).toMatchObject({ status: 'updated' })
@@ -423,7 +423,7 @@ describe('the proxy against a real installed engine', () => {
         toolCall(1, 'memory_update', { memory_id: 'x', tags: ['a'] }),
         toolCall(2, 'memory_stats', {}),
       ])
-      expect(replies.get(1).error.message).toContain(`needs the Mnemosyne engine build ${ENGINE_BUILD}`)
+      expect(replies.get(1).error.message).toContain(`needs the HAL-M engine build ${ENGINE_BUILD}`)
       expect(replies.get(1).error.message).toContain('/mnemosyne-setup')
       expect(text(replies.get(2)).status).toBe('ok') // the other tools still work
     } finally {
@@ -577,7 +577,7 @@ describe('the proxy against a real installed engine', () => {
       toolCall(1, 'memory_remember', { kind: 'fact', content: 'Today the importer was rewired to use the guard module', tags: ['Ops'] }),
       toolCall(2, 'memory_remember', { kind: 'fact', content: 'The plugin keeps its memories in one local SQLite file.' }),
     ], 'global', log, { MNEMOSYNE_GUARD_MODE: 'warn' })
-    const [reply, ...warnings] = String(replies.get(1).result.content[0].text).split('\nMnemosyne guard warning: ')
+    const [reply, ...warnings] = String(replies.get(1).result.content[0].text).split('\nHAL-M guard warning: ')
     const id = JSON.parse(reply!).memory_id
     expect(warnings.length).toBe(1)
     expect(warnings[0]).toContain('G4')
@@ -625,7 +625,7 @@ describe('the proxy against a real installed engine', () => {
       toolCall(2, 'memory_remember', { kind: 'fact', content: `the bucket key is ${AWS_KEY} for the deploy`, confirm: true }),
       toolCall(3, 'memory_remember', { kind: 'fact', content: 'tiny', confirm: true }),
     ], 'global', log)
-    const [reply, ...warnings] = String(replies.get(1).result.content[0].text).split('\nMnemosyne guard warning: ')
+    const [reply, ...warnings] = String(replies.get(1).result.content[0].text).split('\nHAL-M guard warning: ')
     expect(warnings.length).toBe(1)
     expect(metadataOf(JSON.parse(reply!).memory_id)).toEqual({ tags: ['ops'], guard: ['G4'] })
     expect(replies.get(2).error.code).toBe(-32602)
@@ -669,7 +669,7 @@ describe('the proxy against a real installed engine', () => {
         log,
       )
       expect(replies.get(1).error.code).toBe(-32000)
-      expect(replies.get(1).error.message).toContain(`memory_remember needs the Mnemosyne engine build ${ENGINE_BUILD}; installed is 18.12.3`)
+      expect(replies.get(1).error.message).toContain(`memory_remember needs the HAL-M engine build ${ENGINE_BUILD}; installed is 18.12.3`)
       expect(replies.get(1).error.message).toContain('/mnemosyne-setup')
       // the same error as the update refusal, apart from the tool name
       expect(replies.get(1).error.message.replace('memory_remember', 'memory_update')).toBe(replies.get(2).error.message)
@@ -683,7 +683,7 @@ describe('the proxy against a real installed engine', () => {
     expect(rowCount()).toBe(before)
     const [line] = logLines(log)
     expect(line).toMatchObject({ action: 'remember', origin: 'external', ok: false, text: '' })
-    expect(line.error).toContain(`memory_remember needs the Mnemosyne engine build ${ENGINE_BUILD}`)
+    expect(line.error).toContain(`memory_remember needs the HAL-M engine build ${ENGINE_BUILD}`)
     expect(readFileSync(log, 'utf8')).not.toContain('marmalade')
   })
 
@@ -740,14 +740,14 @@ describe('the proxy against a real installed engine', () => {
         log,
       )
       // the log never breaks the proxy: every call still gets its reply (review r1 LOW 7)
-      expect(replies.get(2).error.message).toContain(`needs the Mnemosyne engine build ${ENGINE_BUILD}`)
+      expect(replies.get(2).error.message).toContain(`needs the HAL-M engine build ${ENGINE_BUILD}`)
       expect(text(replies.get(3)).status).toBe('ok')
     } finally {
       writeFileSync(pkgPath, original)
     }
     const [line, hostile] = logLines(log)
     expect(line).toMatchObject({ action: 'update', origin: 'external', ok: false, text: 'tags: a' })
-    expect(line.error).toContain(`needs the Mnemosyne engine build ${ENGINE_BUILD}`)
+    expect(line.error).toContain(`needs the HAL-M engine build ${ENGINE_BUILD}`)
     expect(hostile).toMatchObject({ action: 'update', ok: false, text: 'tags: b' })
   })
 

@@ -77,7 +77,7 @@ export function serverModeFromEnv(env: Record<string, string | undefined>): Serv
   if (!Number.isInteger(port) || port < 1 || port > 65535) return new Error('MNEMOSYNE_PORT must be a port number.')
   const secure = (env.MNEMOSYNE_SECURE_COOKIE ?? 'auto').trim().toLowerCase()
   const publicUrl = (env.MNEMOSYNE_PUBLIC_URL ?? '').trim().replace(/\/+$/, '')
-  if (publicUrl !== '' && !/^https?:\/\/[^\s/]+$/.test(publicUrl)) return new Error('MNEMOSYNE_PUBLIC_URL must be like https://mnemosyne.example.ts.net (no path).')
+  if (publicUrl !== '' && !/^https?:\/\/[^\s/]+$/.test(publicUrl)) return new Error('MNEMOSYNE_PUBLIC_URL must be like https://hal-m.example.ts.net (no path).')
   const expire = expireSetting(env.MNEMOSYNE_EXPIRE_UNUSED_DAYS)
   if (expire.mode === 'refused') return new Error(`MNEMOSYNE_EXPIRE_UNUSED_DAYS: ${expire.reason}`)
   return {

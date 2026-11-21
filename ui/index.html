@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>HAL-10000</title>
+<title>HAL-M</title>
 <link rel="stylesheet" href="/style.css">
 <script type="module" src="/app.js"></script>
 </head>
@@ -13,18 +13,18 @@
   <header class="top">
     <div class="brand">
       <svg class="logo" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><circle cx="5" cy="6" r="2"></circle><circle cx="19" cy="6" r="2"></circle><circle cx="12" cy="20" r="2"></circle><path d="M6.5 7.5l3.5 3M17.5 7.5l-3.5 3M12 15v3"></path></svg>
-      <span class="name">HAL-10000</span>
+      <span class="name">HAL-M</span>
     </div>
     <nav class="tabs" aria-label="Dashboard" id="tabs"></nav>
     <div class="meta">
       <span id="summary"></span>
-      <span id="conn" class="conn" data-state="live" title="This dashboard talks only to the Mnemosyne server on this computer"><span class="conn-dot" aria-hidden="true"></span><span id="conn-text">Local · live</span></span>
+      <span id="conn" class="conn" data-state="live" title="This dashboard talks only to the HAL-M server on this computer"><span class="conn-dot" aria-hidden="true"></span><span id="conn-text">Local · live</span></span>
       <button id="theme" type="button" class="theme-btn">Theme: Auto</button>
       <button id="signout" type="button" class="theme-btn" hidden>Sign out</button>
       <details class="about">
         <summary class="about-btn" aria-label="About this dashboard" title="About">i</summary>
         <div class="about-pop">
-          <p class="about-title">HAL-10000 dashboard</p>
+          <p class="about-title">HAL-M dashboard</p>
           <p id="engine" class="mono"></p>
           <p id="about-note" class="about-note">Runs on this computer only; nothing is sent anywhere.</p>
         </div>
@@ -36,7 +36,7 @@
   <p id="lost-extra" class="lost-extra" hidden><span id="lost-next"></span> <button id="lost-retry" type="button" class="btn small">Try now</button></p>
   <section id="expired" class="expired-card" aria-labelledby="expired-title" hidden>
     <h1 id="expired-title" class="expired-title">This link no longer works</h1>
-    <p class="expired-lead">The Mnemosyne server was restarted, so it now answers to a new link.</p>
+    <p class="expired-lead">The HAL-M server was restarted, so it now answers to a new link.</p>
     <ol class="expired-steps">
       <li>In Claude Code, run <code class="mono">/mnemosyne-ui</code> <button id="expired-copy" type="button" class="btn small">Copy</button></li>
       <li>Open the link it prints (it is also on the clipboard), or use the "Open Mnemosyne dashboard" shortcut if you have one.</li>
@@ -45,7 +45,7 @@
   </section>
   <section id="signin" class="expired-card signin-card" aria-labelledby="signin-title" hidden>
     <h1 id="signin-title" class="expired-title">Sign in</h1>
-    <p class="expired-lead">This Mnemosyne dashboard runs on your server. Enter its password to open it.</p>
+    <p class="expired-lead">This HAL-M dashboard runs on your server. Enter its password to open it.</p>
     <form id="signin-form" class="signin-form" novalidate>
       <label for="signin-password" class="set-label">Password</label>
       <div class="signin-line">
@@ -628,7 +628,7 @@
   <main id="view-settings" class="main view column wide" hidden>
     <div class="titlebar">
       <h1 id="settings-title" tabindex="-1">Settings</h1>
-      <span class="muted small">View, change and reset how Mnemosyne guards, tags, recalls and stores memories. Each setting says when a change takes effect.</span>
+      <span class="muted small">View, change and reset how HAL-M guards, tags, recalls and stores memories. Each setting says when a change takes effect.</span>
     </div>
     <div class="status-row">
       <p id="settings-status" class="notice-line small muted" role="status">Loading…</p>

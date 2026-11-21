@@ -1,17 +1,17 @@
 <?xml version="1.0"?>
-<!-- Claude Mnemosyne server as a plain Unraid container. Copy to /boot/config/plugins/dockerMan/templates-user/my-Mnemosyne.xml,
+<!-- Claude HAL-M server as a plain Unraid container. Copy to /boot/config/plugins/dockerMan/templates-user/my-HAL-M.xml,
      then set MyIP (a free address on your br0 LAN), the dashboard password and the public URL. README: "Run it on Unraid". -->
 <Container version="2">
-  <Name>Mnemosyne</Name>
-  <Repository>mnemosyne:local</Repository>
+  <Name>HAL-M</Name>
+  <Repository>hal-m:local</Repository>
   <Registry/>
   <Network>br0</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/Interstellar-code/claude-mnemosyne</Support>
-  <Project>https://github.com/Interstellar-code/claude-mnemosyne</Project>
-  <Overview>Claude Mnemosyne server: one shared memory store for every PC, its dashboard, /api/plugin/* and /mcp. Reached only through Unraid's Tailscale Serve at https://mnemosyne.&lt;your tailnet&gt;.ts.net; the app listens on 127.0.0.1:8787 inside the container. The image is built locally (docker build -t mnemosyne:local . in a checkout). See README "Run it on Unraid".</Overview>
+  <Support>https://github.com/Interstellar-code/claude-hal-m</Support>
+  <Project>https://github.com/Interstellar-code/claude-hal-m</Project>
+  <Overview>Claude HAL-M server: one shared memory store for every PC, its dashboard, /api/plugin/* and /mcp. Reached only through Unraid's Tailscale Serve at https://hal-m.&lt;your tailnet&gt;.ts.net; the app listens on 127.0.0.1:8787 inside the container. The image is built locally (docker build -t hal-m:local . in a checkout). See README "Run it on Unraid".</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI/>
   <TemplateURL/>
@@ -24,7 +24,7 @@
   <Requires/>
   <TailscaleEnabled>true</TailscaleEnabled>
   <TailscaleIsExitNode>false</TailscaleIsExitNode>
-  <TailscaleHostname>mnemosyne</TailscaleHostname>
+  <TailscaleHostname>hal-m</TailscaleHostname>
   <TailscaleExitNodeIP/>
   <TailscaleSSH>false</TailscaleSSH>
   <TailscaleUserspaceNetworking>true</TailscaleUserspaceNetworking>
@@ -42,11 +42,11 @@
   <TailscaleRoutes/>
   <TailscaleAcceptRoutes>false</TailscaleAcceptRoutes>
   <TailscaleStateDir>/var/lib/tailscale-state</TailscaleStateDir>
-  <Config Name="Data" Target="/data" Default="/mnt/cache/appdata/mnemosyne" Mode="rw" Description="Store, settings, keys, backups. Keep on a pool path, not /mnt/user." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/mnemosyne</Config>
-  <Config Name="Tailscale state" Target="/var/lib/tailscale-state" Default="/mnt/cache/appdata/mnemosyne-tailscale" Mode="rw" Description="Tailscale login state, so a rebuild stays logged in." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/mnemosyne-tailscale</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/cache/appdata/hal-m" Mode="rw" Description="Store, settings, keys, backups. Keep on a pool path, not /mnt/user." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/hal-m</Config>
+  <Config Name="Tailscale state" Target="/var/lib/tailscale-state" Default="/mnt/cache/appdata/hal-m-tailscale" Mode="rw" Description="Tailscale login state, so a rebuild stays logged in." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/hal-m-tailscale</Config>
   <Config Name="Dashboard password" Target="MNEMOSYNE_UI_PASSWORD" Default="" Mode="" Description="8 or more characters." Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="Bind address" Target="MNEMOSYNE_BIND" Default="127.0.0.1" Mode="" Description="127.0.0.1: only Tailscale Serve reaches the app, not the LAN." Type="Variable" Display="advanced" Required="false" Mask="false">127.0.0.1</Config>
-  <Config Name="Public URL" Target="MNEMOSYNE_PUBLIC_URL" Default="" Mode="" Description="Address shown in copied connection settings, e.g. https://mnemosyne.your-tailnet.ts.net (empty: the page's own address)." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Public URL" Target="MNEMOSYNE_PUBLIC_URL" Default="" Mode="" Description="Address shown in copied connection settings, e.g. https://hal-m.your-tailnet.ts.net (empty: the page's own address)." Type="Variable" Display="always" Required="false" Mask="false"></Config>
   <Config Name="Expire unused days" Target="MNEMOSYNE_EXPIRE_UNUSED_DAYS" Default="90" Mode="" Description="30-365; 0 off." Type="Variable" Display="advanced" Required="false" Mask="false">90</Config>
   <Config Name="Start command (Tailscale hook)" Target="ORG_ENTRYPOINT" Default="/bin/sh" Mode="" Description="The image's entrypoint, for Unraid's Tailscale hook (the CLI rebuild does not pass it)." Type="Variable" Display="advanced" Required="false" Mask="false">/bin/sh</Config>
   <Config Name="Start script (Tailscale hook)" Target="ORG_CMD" Default="/app/docker/entrypoint.sh" Mode="" Description="Runs after Tailscale is up." Type="Variable" Display="advanced" Required="false" Mask="false">/app/docker/entrypoint.sh</Config>

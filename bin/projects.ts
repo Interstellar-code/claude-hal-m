@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the project registry writer (C12 in the solar-map plan).
+// Claude HAL-M — the project registry writer (C12 in the solar-map plan).
 //
 // writeProjects(path, input) records one project in <root>/projects.json: which
 // owner it is, its name, whether it is a git repo or a plain folder, and its
@@ -6,7 +6,7 @@
 //   bun bin/projects.ts write <path>   (one JSON record on stdin)
 //
 // The path is a required argument with no default, so the script never reaches the
-// real Mnemosyne root by itself, and only a file named projects.json is written.
+// real HAL-M root by itself, and only a file named projects.json is written.
 // The folder is created owner-only (0700) and the file is set to 0600 at every
 // write. The new text goes to a temp file that is renamed over the old one, under a
 // <path>.lock taken with O_EXCL (a lock older than LOCK_STALE_MS is taken over by renaming it away, so only one writer can; a

@@ -1,4 +1,4 @@
-// The Mnemosyne dashboard server (DESIGN.md, "The dashboard server").
+// The HAL-M dashboard server (DESIGN.md, "The dashboard server").
 //
 // Runs under Bun on 127.0.0.1, on a port the OS picks, behind a random token
 // it makes itself. The page shell, its script and its style load without the

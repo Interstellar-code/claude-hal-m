@@ -1,4 +1,4 @@
-# Claude Mnemosyne as a server: one shared memory, its dashboard, /api/plugin/* and /mcp.
+# Claude HAL-M as a server: one shared memory, its dashboard, /api/plugin/* and /mcp.
 # See README "Run it as a server" and docs/plans/remote-server.md. Debian (glibc), not
 # Alpine: the embeddings runtime (onnxruntime-node) needs glibc.
 FROM oven/bun:1.4.3-debian

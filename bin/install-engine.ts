@@ -1,4 +1,4 @@
-// Claude Mnemosyne — installs the plugin's own engine copy (engine/) into the
+// Claude HAL-M — installs the plugin's own engine copy (engine/) into the
 // engine folder, without ever removing a working engine first.
 //
 //   bun bin/install-engine.ts <plugin root> <engine dir> <store dir> [embeddings]

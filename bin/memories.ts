@@ -1,4 +1,4 @@
-// Claude Mnemosyne — a read-only look at the store, for the tag backfill (plan
+// Claude HAL-M — a read-only look at the store, for the tag backfill (plan
 // phase TAGS). A hook cannot read SQLite, so /mnemosyne-tags runs this file:
 //   bun bin/memories.ts --store <dir> list --untagged   untagged memories, as JSON
 //   bun bin/memories.ts --store <dir> list --all        every memory, as JSON (what a retag proposes for)

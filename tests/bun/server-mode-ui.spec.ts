@@ -200,7 +200,7 @@ describe('the MCP connection card', () => {
     await tick()
     expect(calls.find(call => call.path === '/api/keys/create')?.body).toEqual({ name: 'Work laptop' })
     expect(box.textContent).toContain('Copy it now: it is not shown again.')
-    expect(box.textContent).toContain("/plugin → Mnemosyne → configure")
+    expect(box.textContent).toContain("/plugin → mnemosyne → configure")
     box.button('Copy key').fire('click')
     box.button('Copy plugin settings').fire('click')
     box.button('Copy MCP JSON').fire('click')

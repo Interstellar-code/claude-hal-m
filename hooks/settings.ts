@@ -1,4 +1,4 @@
-// The Mnemosyne settings schema (0.8.5 settings plan, C1 and C2): every knob that lives in
+// The HAL-M settings schema (0.8.5 settings plan, C1 and C2): every knob that lives in
 // <root>/config.json, with its type, default, range, help text and when a change takes effect, and
 // resolve(), the one function that turns raw JSON into a checked Settings object. The hooks, the
 // outside-agent proxy and the dashboard server all read their numbers through it.

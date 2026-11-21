@@ -14,7 +14,7 @@ const KEY = 'mn_test_7f3a9c2e1b5d4f6a8c0e'
 type Seen = { method: string; path: string; auth: string | null; body: any }
 type Answer = (seen: Seen) => Response | Promise<Response>
 
-/** A fake Mnemosyne server; `answer` decides each reply. */
+/** A fake HAL-M server; `answer` decides each reply. */
 function fakeServer(answer: Answer) {
   const seen: Seen[] = []
   const server = Bun.serve({
@@ -189,9 +189,9 @@ describe('hooks/register.ts client mode', () => {
     expect(answer.result).toContain('not')
     expect(server.seen.find(seen => seen.path === '/api/plugin/memories')!.body).toEqual({ args: ['row-info', 'abcdef12'] })
     // Any other bin/memories.ts command is the server's.
-    await expect((hooks.knowledgeDryRun as (...args: unknown[]) => Promise<string>)(host.$, host.options)).rejects.toThrow('This runs on the Mnemosyne server')
+    await expect((hooks.knowledgeDryRun as (...args: unknown[]) => Promise<string>)(host.$, host.options)).rejects.toThrow('This runs on the HAL-M server')
     for (const command of ['mnemosyne-tags', 'mnemosyne-import', 'mnemosyne-knowledge', 'mnemosyne-embed']) {
-      expect((await host.command(command, command === 'mnemosyne-import' ? 'apply' : '')).text).toBe(`/${command} runs on the Mnemosyne server (${server.url}): open its dashboard or run it there.`)
+      expect((await host.command(command, command === 'mnemosyne-import' ? 'apply' : '')).text).toBe(`/${command} runs on the HAL-M server (${server.url}): open its dashboard or run it there.`)
     }
     expect(host.memoriesRuns()).toEqual([])
   })
@@ -216,7 +216,7 @@ describe('hooks/register.ts client mode', () => {
     ;(host.options as Record<string, unknown>).serverKey = 'mn_wrong'
     await host.sessionStart()
     await host.settled()
-    expect(toasts).toEqual([`Mnemosyne server ${server.url} refused the key: check serverKey.`])
+    expect(toasts).toEqual([`HAL-M server ${server.url} refused the key: check serverKey.`])
   })
 
   test('an unreachable server marks memory offline: one try, then calls fail at once until it answers again', async () => {
@@ -224,11 +224,11 @@ describe('hooks/register.ts client mode', () => {
     const { host, toasts, statuses, remoteRuns } = await clientHost(dead)
     await host.sessionStart()
     await host.settled()
-    expect(toasts).toEqual([`Mnemosyne server ${dead} is not reachable: memory is off until it is back.`])
-    expect(statuses).toEqual(['Mnemosyne · memory offline'])
+    expect(toasts).toEqual([`HAL-M server ${dead} is not reachable: memory is off until it is back.`])
+    expect(statuses).toEqual(['HAL-M · memory offline'])
     // The breaker is open: no process, the plain offline error.
     const denied = await host.tool('memory_forget', { memory_id: 'abc123' })
-    expect(denied.deny).toBe('Mnemosyne: Mnemosyne server unreachable (memory offline)')
+    expect(denied.deny).toBe('HAL-M: HAL-M server unreachable (memory offline)')
     expect(remoteRuns()).toHaveLength(1)
     // The first prompt goes on at once without a recall.
     const started = Date.now()

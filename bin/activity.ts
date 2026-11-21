@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the activity log writer (C3 in the mnemosyne-ui plan).
+// Claude HAL-M — the activity log writer (C3 in the mnemosyne-ui plan).
 //
 // appendActivity(path, lines) appends one JSON object per line to
 // <root>/activity.jsonl. The proxy and the dashboard server import it; the
