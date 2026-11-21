@@ -6,6 +6,9 @@ FROM oven/bun:1.4.3-debian
 # 1 installs the local embedding model at build time and turns embeddings on; 0 leaves both out.
 ARG EMBEDDINGS=1
 # The user the server runs as. 99:100 is nobody:users on Unraid, which owns /mnt/*/appdata.
+# The container starts as root (Unraid's Tailscale hook needs root); the entrypoint hands the
+# data folder to PUID:PGID and drops to that user before the server starts. PUID/PGID set at
+# run time win over these build defaults.
 ARG PUID=99
 ARG PGID=100
 
@@ -20,6 +23,8 @@ ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
     MNEMOSYNE_PORT=8787 \
     MNEMOSYNE_BIND=0.0.0.0 \
     MNEMOSYNE_SECURE_COOKIE=auto \
+    PUID=${PUID} \
+    PGID=${PGID} \
     HOME=/home/mnemosyne
 
 WORKDIR /app
@@ -43,7 +48,6 @@ RUN set -eu; \
     chown -R "$PUID:$PGID" /opt/mnemosyne /data /home/mnemosyne; \
     chmod 700 /data /home/mnemosyne
 
-USER ${PUID}:${PGID}
 VOLUME /data
 EXPOSE 8787
 

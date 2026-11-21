@@ -2,6 +2,10 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.36.2 (the server runs as a plain Unraid container with its own Tailscale name)
+
+1. The server image starts as root and its entrypoint drops to `PUID:PGID` (99:100 by default, settable at run time, 0 refused) after giving the data folder to that user, so Unraid's per-container Tailscale option (which needs root) works. README: running it as a plain Unraid container with Tailscale Serve, including the `ORG_ENTRYPOINT`/`ORG_CMD` variables a command-line rebuild needs.
+
 ## 0.36.1 (the server finishes what each PC used to do)
 
 1. Daily upkeep on the server: once a day (the same sweep marker a PC uses, so a restart does not repeat it) the server backs its store up into `/data/backups`, then runs the unused-expiry sweep for every project. `MNEMOSYNE_EXPIRE_UNUSED_DAYS` sets the days (90 by default, 0 off). `bin/memories.ts expire` takes `--cli` for an engine outside the data root.
