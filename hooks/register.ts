@@ -339,6 +339,101 @@ async function paths($: EngineInterface, options: PluginOptions) {
   }
 }
 
+// ---- Plugin client mode (docs/plans/remote-server.md): serverUrl set, the memory lives on a Mnemosyne server ----
+//
+// Every engine run, the first-prompt block, row-info and the owner lookup go through `bun bin/remote.ts <op>` (a hook has
+// no fetch). The key rides on that process's stdin only, never its argv or env. No local engine, store sweep, summaries or
+// extraction run in this mode. An unreachable server (remote.ts exit 75) marks memory offline for OFFLINE_MS in this plugin
+// instance: calls then fail at once, so a down server costs one connect budget, not one per call.
+
+/** The server URL without trailing slashes, or undefined in local mode (serverUrl empty or unset). */
+export function serverUrlOf(options: PluginOptions): string | undefined {
+  const raw = (options as { serverUrl?: unknown }).serverUrl
+  return typeof raw === 'string' && raw.trim() !== '' ? raw.trim().replace(/\/+$/, '') : undefined
+}
+const clientMode = (options: PluginOptions) => serverUrlOf(options) !== undefined
+
+type RemoteOp = 'engine' | 'memories' | 'resolve' | 'hello'
+// How long a remote call may take to open its connection; the request itself gets the caller's timeout.
+export const REMOTE_CONNECT_MS = 3_000
+// Session start's hello and /mnemosyne-setup's check.
+export const HELLO_TIMEOUT_MS = 3_000
+export const OFFLINE_MS = 60_000
+const REMOTE_UNREACHABLE = 75
+const REMOTE_REFUSED = 77
+export const OFFLINE_ERROR = 'Mnemosyne server unreachable (memory offline)'
+export const REFUSED_ERROR = 'Mnemosyne server refused the key: check serverKey'
+export const SERVER_ONLY = 'This runs on the Mnemosyne server; open its dashboard or run it there.'
+
+class RemoteError extends Error {
+  constructor(
+    message: string,
+    readonly kind: 'offline' | 'refused',
+  ) {
+    super(message)
+  }
+}
+
+// Per plugin instance: until when memory is offline (an unreachable server was seen). Cleared by the next call that gets an answer.
+const offlineUntil = new WeakMap<object, number>()
+
+/**
+ * One call to the server through bin/remote.ts. Resolves the run (the server's stdout, stderr and exit code, replayed) for any
+ * answer; rejects with a RemoteError when the server is unreachable (and marks memory offline) or refuses the key. `force`
+ * skips the offline check (/mnemosyne-setup's deliberate look).
+ */
+async function remoteCall($: EngineInterface, options: PluginOptions, op: RemoteOp, body: unknown, timeoutMs: number, force = false) {
+  const url = serverUrlOf(options)
+  if (url === undefined) throw new Error('serverUrl is not set')
+  const until = offlineUntil.get(options)
+  if (!force && until !== undefined && Date.now() < until) throw new RemoteError(OFFLINE_ERROR, 'offline')
+  const rawKey = (options as { serverKey?: unknown }).serverKey
+  const key = typeof rawKey === 'string' ? rawKey.trim() : ''
+  const connectMs = Math.min(REMOTE_CONNECT_MS, timeoutMs)
+  const ran = await $.process.run(['bun', `${slashes($.plugin.root)}/bin/remote.ts`, op], {
+    stdin: JSON.stringify({ url, key, body, timeoutMs, connectMs }),
+    // remote.ts ends on its own timeouts; this only bounds a process that hangs before it gets there.
+    timeoutMs: timeoutMs + connectMs + 5_000,
+  })
+  if (ran.exitCode === REMOTE_UNREACHABLE) {
+    offlineUntil.set(options, Date.now() + OFFLINE_MS)
+    progress($, 'memory offline')
+    const reason = ran.stderr.trim().replace(/^mnemosyne server unreachable:\s*/i, '').slice(0, 200)
+    throw new RemoteError(`${OFFLINE_ERROR}${reason ? `: ${reason}` : ''}`, 'offline')
+  }
+  // The server answered: memory is back.
+  if (offlineUntil.delete(options)) progress($, undefined)
+  if (ran.exitCode === REMOTE_REFUSED) throw new RemoteError(REFUSED_ERROR, 'refused')
+  return ran
+}
+
+type Hello = { plugin?: unknown; engine?: unknown; embeddings?: unknown }
+/** The server's hello, or the reason there is none (unreachable, a refused key, another failure). */
+async function hello($: EngineInterface, options: PluginOptions, force = false): Promise<Hello | { failed: string; kind: 'offline' | 'refused' | 'failed' }> {
+  try {
+    const ran = await remoteCall($, options, 'hello', undefined, HELLO_TIMEOUT_MS, force)
+    if (ran.exitCode !== 0) return { failed: ran.stderr.trim().slice(0, 300) || `exit ${ran.exitCode}`, kind: 'failed' }
+    return JSON.parse(ran.stdout) as Hello
+  } catch (err) {
+    return { failed: (err as Error)?.message ?? 'failed', kind: err instanceof RemoteError ? err.kind : 'failed' }
+  }
+}
+
+/** Session start in client mode: a background hello; a server that does not answer says so once, in a toast. Never throws. */
+async function helloAtStart($: EngineInterface, options: PluginOptions) {
+  const url = serverUrlOf(options) ?? ''
+  try {
+    const said = await hello($, options)
+    if ('failed' in said) {
+      if (said.kind === 'offline') $.ui.toast(`Mnemosyne server ${url} is not reachable: memory is off until it is back.`)
+      else if (said.kind === 'refused') $.ui.toast(`Mnemosyne server ${url} refused the key: check serverKey.`)
+      else $.ui.toast(`Mnemosyne server ${url} did not answer: ${said.failed}`)
+    } else activity($, options, `memory ready on ${url}`, 'ready')
+  } catch {
+    // a UI failure must not break the session start
+  }
+}
+
 // ---- Embeddings (EMB): local only, downloaded once by /mnemosyne-setup ----------
 
 // The setup marker /mnemosyne-setup writes after downloading the model; its
@@ -419,6 +514,8 @@ async function embeddingsReady($: EngineInterface, root: string): Promise<boolea
  * it never downloads the model mid-call (EMB.2.a4).
  */
 async function embeddingsOn($: EngineInterface, options: PluginOptions, root?: string): Promise<boolean> {
+  // Client mode: the server decides (mnemopi_similar's reply says whether embeddings are on there).
+  if (clientMode(options)) return true
   if (embeddingsSetting(options) === 'off') return false
   const base = root ?? (await paths($, options)).root
   return embeddingsReady($, base)
@@ -494,8 +591,15 @@ async function owner($: EngineInterface, options: PluginOptions) {
   let found = cache.get(key)
   if (found === undefined) {
     found = (async () => {
-      const { root, store } = await paths($, options)
       const input = { legacy, remoteKey: remote === null ? null : remoteKey(remote), remoteOwner: remote === null ? null : remoteOwnerId(remote) }
+      // Client mode: the server's registry and store decide, so every PC finds the same owner.
+      if (clientMode(options)) {
+        const asked = await remoteCall($, options, 'resolve', { input }, RESOLVE_TIMEOUT_MS)
+        const id = asked.stdout.trim()
+        if (asked.exitCode !== 0 || !PROJECT_OWNER.test(id)) throw new Error(`the server's owner lookup failed: ${asked.stderr.trim().slice(0, 300)}`)
+        return id
+      }
+      const { root, store } = await paths($, options)
       const ran = await $.process.run(['bun', `${slashes($.plugin.root)}/bin/projects.ts`, 'resolve', `${root}/${PROJECTS_FILE}`, store], { stdin: JSON.stringify(input), timeoutMs: RESOLVE_TIMEOUT_MS })
       const id = ran.stdout.trim()
       if (ran.exitCode !== 0 || !PROJECT_OWNER.test(id)) throw new Error(`bin/projects.ts resolve failed: ${ran.stderr.trim().slice(0, 300)}`)
@@ -548,6 +652,8 @@ async function syncWrapper($: EngineInterface, options: PluginOptions) {
 }
 
 async function isInstalled($: EngineInterface, options: PluginOptions) {
+  // Client mode: no local engine; the server has its own.
+  if (clientMode(options)) return true
   try {
     return (await $.fs.stat((await paths($, options)).cli)).kind === 'file'
   } catch {
@@ -558,6 +664,7 @@ async function isInstalled($: EngineInterface, options: PluginOptions) {
 // The one "engine is current" check: the installed engine is this plugin's
 // build (ENGINE_BUILD), so it has the metadata update and the recall flag.
 async function isCurrent($: EngineInterface, options: PluginOptions) {
+  if (clientMode(options)) return true
   return (await installedBuild($, options)) === ENGINE_BUILD
 }
 
@@ -643,6 +750,13 @@ async function runAll(
   as?: string,
   timeoutMs = 20_000,
 ) {
+  // Client mode: the server runs the one engine process as this owner and hands back its stdout, stderr and exit code.
+  if (clientMode(options)) {
+    const id = as ?? (await owner($, options))
+    // The server's engine timeout comes first, so its own answer (with the engine's stderr) arrives before ours gives up.
+    const ran = await remoteCall($, options, 'engine', { owner: id, requests: buildRequests(requests), timeoutMs }, timeoutMs + 5_000)
+    return parseReplies(requests.length, ran.stdout, ran.exitCode, ran.stderr)
+  }
   const [id, { cli, store }, settings] = await Promise.all([as ?? owner($, options), paths($, options), settingsFor($, options)])
   const embeddings = await embeddingsOn($, options)
   const ran = await $.process.run(['bun', cli, 'mcp'], {
@@ -911,17 +1025,27 @@ async function backupFirst($: EngineInterface, options: PluginOptions, command: 
 
 // bin/memories.ts: lists and reads rows from a read-only handle, and saves the proposals file.
 async function memoriesCli($: EngineInterface, options: PluginOptions, args: readonly string[], stdin?: string, timeoutMs = MEMORIES_TIMEOUT_MS) {
-  const { store } = await paths($, options)
-  // --store goes first, before the command: the script refuses a second one, so no id can redirect the read.
-  // save, pending, session-pending and sweep-claim name their own folder (the data root) and refuse --store.
-  const ran = await $.process.run(['bun', `${slashes($.plugin.root)}/bin/memories.ts`, ...(args[0] === 'save' || args[0] === 'pending' || args[0] === 'session-pending' || args[0] === 'sweep-claim' ? [] : ['--store', store]), ...args], {
-    ...(stdin === undefined ? {} : { stdin }),
-    timeoutMs,
-  })
+  const ran = clientMode(options) ? await remoteMemories($, options, args, timeoutMs) : await localMemories($, options, args, stdin, timeoutMs)
   if (ran.exitCode !== 0) throw new Error(`bin/memories.ts ${args[0]} failed: ${`${ran.stderr}\n${ran.stdout}`.trim().slice(-300)}`)
   // The host keeps 4 MiB of stdout; a cut listing would be broken JSON and a misleading error.
   if (ran.isStdoutTruncated) throw new Error(`the output of bin/memories.ts ${args[0]} was cut at 4 MiB: too many memories for one run`)
   return ran.stdout
+}
+
+// Client mode: only the two reads a session needs (the first-prompt block, memory_get's row-info) run on the server; the store-wide commands are the server's own.
+async function remoteMemories($: EngineInterface, options: PluginOptions, args: readonly string[], timeoutMs: number) {
+  if (args[0] !== 'first-prompt' && args[0] !== 'row-info') throw new Error(SERVER_ONLY)
+  return remoteCall($, options, 'memories', { args }, timeoutMs)
+}
+
+async function localMemories($: EngineInterface, options: PluginOptions, args: readonly string[], stdin: string | undefined, timeoutMs: number) {
+  const { store } = await paths($, options)
+  // --store goes first, before the command: the script refuses a second one, so no id can redirect the read.
+  // save, pending, session-pending and sweep-claim name their own folder (the data root) and refuse --store.
+  return $.process.run(['bun', `${slashes($.plugin.root)}/bin/memories.ts`, ...(args[0] === 'save' || args[0] === 'pending' || args[0] === 'session-pending' || args[0] === 'sweep-claim' ? [] : ['--store', store]), ...args], {
+    ...(stdin === undefined ? {} : { stdin }),
+    timeoutMs,
+  })
 }
 
 // A progress line under the prompt (undefined clears it); a UI failure must not stop the run.
@@ -1098,6 +1222,8 @@ function sourceText(source: string | undefined): { text?: string } {
 export async function extraction($: EngineInterface, options: PluginOptions, id: string, as: string, queue?: <T>(work: () => Promise<T>) => Promise<T>, source?: string) {
   const model = extractionModelOf(options)
   if (extractionOff(model)) return
+  // Client mode: no knowledge extraction on this PC (it writes to the store through bin/memories.ts).
+  if (clientMode(options)) return
   if (!(await isCurrent($, options))) {
     await record($, options, [{ action: 'extract', origin: 'tool', owner: as, ok: false, error: 'engine out of date', ids: [id], count: 0, ...sourceText(source) }])
     return
@@ -1864,7 +1990,8 @@ export async function backgroundSettled(options: PluginOptions): Promise<void> {
  */
 async function leaveSessionMarker($: EngineInterface, options: PluginOptions, sessionId: string) {
   try {
-    if (!sessionSummaryOn(options)) return
+    // Client mode: no session summaries on this PC.
+    if (!sessionSummaryOn(options) || clientMode(options)) return
     const [{ root, home }, me, cwd] = await Promise.all([paths($, options), owner($, options), $.session.cwd()])
     const entry = pendingSession(sessionId, me, transcriptPath(home, slashes(cwd), sessionId))
     if (entry === undefined) return
@@ -1898,6 +2025,7 @@ async function firstPromptBlock($: EngineInterface, options: PluginOptions, sett
  * (issue #38), and the fifth failure drops it with one activity line. Memory text is never logged. Never throws.
  */
 async function finishSessionSummaries($: EngineInterface, options: PluginOptions) {
+  if (clientMode(options)) return
   const mine = runningOf(options)
   if (mine.summaries) return
   mine.summaries = true
@@ -2042,6 +2170,8 @@ export function sweepFailure(err: unknown): string {
  * 'expire-sweep'. Rows are only ever expired (valid_until), never deleted. The activity line holds counts and ids, never text.
  */
 async function maybeSweep($: EngineInterface, options: PluginOptions) {
+  // Client mode: the daily sweep is the server's.
+  if (clientMode(options)) return
   const mine = runningOf(options)
   if (mine.sweep) return
   mine.sweep = true
@@ -2159,6 +2289,11 @@ export const register: Register = (on, options) => {
     const session = await $.session.id().catch(() => undefined)
     if (session !== undefined) registered.set(session, enabled)
     for (const tool of toolsFor(settings)) if (enabled.has(tool.name)) await $.tool.register({ ...tool, isDeferred: false })
+    // Client mode: no local engine, wrapper, registry, sweep or log pruning; a background hello says whether the server answers.
+    if (clientMode(options)) {
+      void track(options, helloAtStart($, options))
+      return next(e)
+    }
     if (!(await isInstalled($, options))) $.ui.toast('Mnemosyne Memory engine not installed. Run /mnemosyne-setup.')
     else {
       // A stale engine keeps recall, forget and stats working; memory_remember and memory_update wait for the update (AUTO.1), then refuse if it failed (an old engine's 24 h trim would delete the new saves).
@@ -2180,6 +2315,14 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'mnemosyne-setup' }, async $ => {
+    const server = serverUrlOf(options)
+    if (server !== undefined) {
+      const said = await hello($, options, true)
+      const where = `Mnemosyne uses the server at ${server} and needs no local engine.`
+      if ('failed' in said) return { text: `${where} The server did not answer: ${said.failed}` }
+      const engine = typeof said.engine === 'string' ? said.engine : 'unknown'
+      return { text: `${where} The server answered: engine build ${engine}${typeof said.embeddings === 'boolean' ? `, embeddings ${said.embeddings ? 'on' : 'off'}` : ''}.` }
+    }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'Mnemosyne needs Bun on PATH: https://bun.sh' }
 
@@ -2249,6 +2392,14 @@ export const register: Register = (on, options) => {
 
   // The dashboard: one shared server on 127.0.0.1 (hooks/ui-launch.ts, ui/server.ts).
   on('command.run', { command: 'mnemosyne-ui' }, async $ => {
+    const server = serverUrlOf(options)
+    if (server !== undefined) {
+      // Client mode: no local dashboard; the server's is the one to open.
+      const copied = await Promise.resolve()
+        .then(() => $.ui.copy({ text: server }))
+        .catch(() => undefined)
+      return { text: `Mnemosyne uses the server at ${server}: open it in your browser for the dashboard${copied?.isCopied === true ? ' (the link is on the clipboard)' : ''}.` }
+    }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The Mnemosyne dashboard needs Bun on PATH: https://bun.sh' }
     try {
@@ -2269,6 +2420,7 @@ export const register: Register = (on, options) => {
 
   // The tag backfill: no argument is a dry run (the only mode that calls a model); apply writes the saved proposals.
   on('command.run', { command: 'mnemosyne-tags' }, async ($, e, next) => {
+    if (clientMode(options)) return { text: `/mnemosyne-tags runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply' && mode !== 'retag') return { text: TAGS_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
@@ -2284,6 +2436,7 @@ export const register: Register = (on, options) => {
 
   // The importers: doc and session are dry runs (nothing is written); apply backs the store up, then saves what the last dry run checked.
   on('command.run', { command: 'mnemosyne-import' }, async ($, e, next) => {
+    if (clientMode(options)) return { text: `/mnemosyne-import runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const parsed = parseImportArgs(e.args)
     if (parsed.mode === 'usage') return { text: IMPORT_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
@@ -2301,6 +2454,7 @@ export const register: Register = (on, options) => {
 
   // The knowledge backfill: no argument is a dry run; apply extracts pending and older memories.
   on('command.run', { command: 'mnemosyne-knowledge' }, async ($, e, next) => {
+    if (clientMode(options)) return { text: `/mnemosyne-knowledge runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply') return { text: KNOWLEDGE_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
@@ -2316,6 +2470,7 @@ export const register: Register = (on, options) => {
   // The embeddings backfill: no argument is a dry run, "apply" fills the vectors,
   // "rebuild" also allows a model change (which wipes and rebuilds every vector).
   on('command.run', { command: 'mnemosyne-embed' }, async ($, e) => {
+    if (clientMode(options)) return { text: `/mnemosyne-embed runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply' && mode !== 'rebuild') return { text: EMBED_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)

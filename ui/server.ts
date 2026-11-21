@@ -65,7 +65,7 @@ import { hasTagSql, tagsSql, untaggedSql } from '../bin/memories'
 import { readConfig } from '../bin/settings'
 import { defaults as settingDefaults } from '../hooks/settings'
 import { admitTag, aliasTag, listVocabulary } from '../bin/vocab'
-import { activityEntry, preview } from '../hooks/activity-log'
+import { activityEntry, preview, settingsFields } from '../hooks/activity-log'
 import type { ActivityFields } from '../hooks/activity-log'
 import { buildRequests, engineEnv, parseReplies } from '../hooks/engine'
 import type { EngineRequest } from '../hooks/engine'
@@ -81,6 +81,32 @@ import type { SettingsDeps } from './settings-routes'
 import { takeHandoff, type UpdateDeps, updateRoutes } from './update-routes'
 import { countByDay, isClaudeRecall, isOtherAppsRecall } from './recalls'
 import type { MeaningPair, MeaningReply as MeaningWorkerReply, MeaningStarted } from './semantic-worker'
+import {
+  badKeyLimiter,
+  bearerOf,
+  checkEngineBody,
+  checkMemoriesBody,
+  cleanKeyName,
+  clearCookies,
+  deviceKeys,
+  handleMcp,
+  isSecure,
+  loginLimiter,
+  OWNER,
+  passwordMatches,
+  PLUGIN_BODY_MAX,
+  publicUrlOf,
+  runPluginEngine,
+  runPluginMemories,
+  runPluginResolve,
+  sameOrigin,
+  serverModeFromEnv,
+  serverSecret,
+  sessionCookie,
+  sessions,
+  signedIn,
+} from './remote'
+import type { RunContext, ServerMode } from './remote'
 
 const UI_DIR = import.meta.dir
 const VENDOR_DIR = join(UI_DIR, 'vendor')
@@ -147,6 +173,8 @@ export type Config = {
   // The settings routes: the installed plugin's id (absent for a --plugin-dir install) and the claude CLI to run.
   pluginId?: string
   claudeCli?: string
+  // Server mode (docs/plans/remote-server.md): set by `--server`, absent for the local dashboard.
+  mode?: ServerMode
 }
 
 // version: the plugin version this server runs (UIVER.1), so /mnemosyne-ui can replace a server an older plugin started.
@@ -219,8 +247,10 @@ export async function runEngine(
   // (MNEMOSYNE_EMBEDDINGS). 'on' only when /mnemosyne-setup downloaded the model.
   // `keywordOnly` turns it off for this one process (a keyword search), never the server's own setting.
   const embeddings = embeddingsOn(baseEnv) && runOptions.keywordOnly !== true
+  // Server mode: the model cache baked into the image (an absolute PI_CONFIG_DIR), not one under $HOME.
+  const modelCacheDir = baseEnv.MNEMOSYNE_MODEL_CACHE || undefined
   const child = Bun.spawn([process.execPath, config.cli, 'mcp'], {
-    env: { ...baseEnv, ...engineEnv(config.store, owner, { embeddings }) },
+    env: { ...baseEnv, ...engineEnv(config.store, owner, { embeddings, ...(modelCacheDir ? { modelCacheDir } : {}) }) },
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -2901,10 +2931,27 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     options.update,
   )
 
+  // Server mode (ui/remote.ts): the password session, device keys and the keyed routes.
+  const mode = config.mode
+  const ctx: RunContext = {
+    root: config.root,
+    store: config.store,
+    cli: config.cli,
+    pluginRoot: config.pluginRoot,
+    activityLog: config.activityLog,
+    embeddings: embeddingsOn(),
+    modelCacheDir: mode?.modelCacheDir,
+  }
+  const session = mode ? sessions(serverSecret(config.root), mode.password) : undefined
+  const logins = loginLimiter()
+  const keys = deviceKeys(config.root)
+  const badKeys = badKeyLimiter()
+
   // Every POST route: the page's own origin, JSON, a body within the route's cap (4096 bytes unless the route says more); then the handler.
   async function post(request: Request, handle: (views: Views, text: string) => Promise<Answer>, maxBytes = MAX_BODY_BYTES) {
     if (request.method !== 'POST') return notAllowed('POST')
-    if (request.headers.get('origin') !== `http://${host}`) return json({ error: 'forbidden origin' }, 403)
+    // Server mode is reached by several names (the tailnet name, an IP): the Origin must name the host the request went to.
+    if (mode ? !sameOrigin(request) : request.headers.get('origin') !== `http://${host}`) return json({ error: 'forbidden origin' }, 403)
     const type = (request.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
     if (type !== 'application/json') return json({ error: 'the body must be application/json' }, 415)
     if (Number(request.headers.get('content-length') ?? 0) > maxBytes) return json({ error: 'the body is too large' }, 413)
@@ -2972,7 +3019,28 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
       // The galaxy route is the one answer that waits (its UMAP run is in a Worker): everything else is already settled.
       return out instanceof Promise ? out.then(settled => json(settled.body, settled.status)) : json(out.body, out.status)
     }
-    if (path === '/api/health') return get(() => ({ status: 200, body: { ...health(config, store, engine, plugin), ...(dev ? { dev: true } : {}) } }))
+    if (path === '/api/health') return get(() => ({ status: 200, body: { ...health(config, store, engine, plugin), ...(dev ? { dev: true } : {}), ...(mode ? { server: true } : {}) } }))
+    // Server mode: upgrading is a redeploy, and the keys are managed from a signed-in page only.
+    if (mode && (path === '/api/update' || path.startsWith('/api/update/'))) return notFound()
+    if (mode && path === '/api/keys') return get(() => ({ status: 200, body: { keys: keys.list() } }))
+    if (mode && path === '/api/keys/create') {
+      return post(request, async (_views, text) => {
+        const name = cleanKeyName((plainBody(text, ['name']) as Record<string, unknown>)?.name)
+        if (name === undefined) return { status: 400, body: { error: 'name must be 1 to 60 characters' } }
+        const made = keys.create(name)
+        log(settingsFields([{ key: 'deviceKeys', old: 'list', new: 'list' }], { origin: 'ui' }), { client: 'dashboard' })
+        return { status: 200, body: made }
+      })
+    }
+    if (mode && path === '/api/keys/revoke') {
+      return post(request, async (_views, text) => {
+        const id = (plainBody(text, ['id']) as Record<string, unknown>)?.id
+        if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8}$/.test(id)) return { status: 400, body: { error: 'id must be a key id' } }
+        if (!keys.revoke(id)) return { status: 404, body: { error: 'no such key' } }
+        log(settingsFields([{ key: 'deviceKeys', old: 'list', new: 'list' }], { origin: 'ui' }), { client: 'dashboard' })
+        return { status: 200, body: { ok: true } }
+      })
+    }
     if (path === '/api/health-report') return get(() => healthReport(config, store, engine))
     if (path === '/api/knowledge') return get(() => knowledgeList((store.db ??= openStore(config.store))))
     if (path === '/api/review') return get(() => reviewReport((store.db ??= openStore(config.store))))
@@ -3068,16 +3136,123 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     '/favicon.ico': () => reply(null, 204),
   }
 
+  // Server mode: a JSON body within PLUGIN_BODY_MAX, or a message.
+  async function jsonBody(request: Request): Promise<unknown> {
+    const type = (request.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
+    if (type !== 'application/json') throw new Error('the body must be application/json')
+    const text = await request.text()
+    if (Buffer.byteLength(text) > PLUGIN_BODY_MAX) throw new Error('the body is too large')
+    return JSON.parse(text)
+  }
+
+  // Server mode, the keyed routes: a live device key, else 401 (429 past the bad-key cap).
+  async function keyed(request: Request, path: string): Promise<Response> {
+    if (badKeys.blocked()) return json({ error: 'too many bad keys, try again in a minute' }, 429)
+    const device = keys.verify(bearerOf(request))
+    if (device === undefined) {
+      badKeys.failed()
+      return json({ error: 'unauthorized' }, 401)
+    }
+    if (path === '/mcp') {
+      if (request.method !== 'POST') return reply(null, 405, { Allow: 'POST' })
+      const owner = request.headers.get('mnemosyne-owner')?.trim() || 'global'
+      if (!OWNER.test(owner)) return json({ error: 'Mnemosyne-Owner must be global or a project-... id' }, 400)
+      let payload: unknown
+      try {
+        payload = await jsonBody(request)
+      } catch (error) {
+        return json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: (error as Error).message } }, 400)
+      }
+      const answer = await engines.run(() => handleMcp(ctx, device.name, owner, payload))
+      return answer.body === undefined ? reply(null, answer.status) : json(answer.body, answer.status)
+    }
+    if (path === '/api/plugin/hello') {
+      if (request.method !== 'GET') return notAllowed()
+      return json({ ok: true, plugin: plugin ?? null, engine: engine ?? null, embeddings: ctx.embeddings, device: device.name })
+    }
+    if (request.method !== 'POST') return notAllowed('POST')
+    let body: unknown
+    try {
+      body = await jsonBody(request)
+    } catch (error) {
+      return json({ error: (error as Error).message }, 400)
+    }
+    if (path === '/api/plugin/engine') {
+      const checked = checkEngineBody(body)
+      if (typeof checked === 'string') return json({ error: checked }, 400)
+      return json(await engines.run(() => runPluginEngine(ctx, checked.owner, checked.requests, checked.timeoutMs)))
+    }
+    if (path === '/api/plugin/memories') {
+      const args = checkMemoriesBody(body)
+      if (typeof args === 'string') return json({ error: args }, 400)
+      return json(await runPluginMemories(ctx, args))
+    }
+    if (path === '/api/plugin/resolve') return json(await runPluginResolve(ctx, (body as { input?: unknown } | null)?.input))
+    return notFound()
+  }
+
+  // Server mode, the session routes that need no sign-in.
+  async function account(request: Request, path: string): Promise<Response> {
+    if (!mode || !session) return notFound()
+    if (path === '/api/session') {
+      if (request.method !== 'GET') return notAllowed()
+      return json({ server: true, signedIn: signedIn(request, session), publicUrl: publicUrlOf(mode, request) })
+    }
+    if (request.method !== 'POST') return notAllowed('POST')
+    if (!sameOrigin(request)) return json({ error: 'forbidden origin' }, 403)
+    if (path === '/api/logout') {
+      const headers = new Headers({ ...SECURITY_HEADERS, 'Content-Type': 'application/json; charset=utf-8' })
+      for (const cookie of clearCookies()) headers.append('Set-Cookie', cookie)
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers })
+    }
+    const wait = logins.paused()
+    if (wait > 0) return json({ error: 'Too many wrong passwords. Wait a minute, then try again.', retryAfter: Math.ceil(wait / 1000) }, 429)
+    let password: unknown
+    try {
+      password = ((await jsonBody(request)) as { password?: unknown } | null)?.password
+    } catch (error) {
+      return json({ error: (error as Error).message }, 400)
+    }
+    if (!passwordMatches(password, mode.password)) {
+      logins.failed()
+      const after = logins.paused()
+      return after > 0
+        ? json({ error: 'Too many wrong passwords. Wait a minute, then try again.', retryAfter: Math.ceil(after / 1000) }, 429)
+        : json({ error: 'Wrong password.' }, 401)
+    }
+    logins.passed()
+    return reply(JSON.stringify({ ok: true }), 200, { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': sessionCookie(session.issue(), isSecure(mode, request)) })
+  }
+
+  const allowedHost = (request: Request) => {
+    if (!mode) return request.headers.get('host') === host
+    if (mode.hosts.length === 0) return true
+    return mode.hosts.includes((request.headers.get('host') ?? '').toLowerCase())
+  }
+
   const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: options.port ?? 0,
-    maxRequestBodySize: 64 * 1024,
+    hostname: mode ? mode.bind : '127.0.0.1',
+    port: mode ? mode.port : (options.port ?? 0),
+    maxRequestBodySize: mode ? PLUGIN_BODY_MAX : 64 * 1024,
     fetch(request, server) {
-      // DNS rebinding: a page on another name that resolves here is refused.
-      if (request.headers.get('host') !== host) return json({ error: 'forbidden' }, 403)
+      // DNS rebinding: a page on another name that resolves here is refused (server mode: MNEMOSYNE_HOSTS, when set).
+      if (!allowedHost(request)) return json({ error: 'forbidden' }, 403)
       if (request.method === 'OPTIONS') return notAllowed()
       const url = new URL(request.url)
       const path = url.pathname
+      if (mode && session) {
+        if (path === '/mcp' || path.startsWith('/api/plugin/')) {
+          // An engine call can outlast Bun's 10 s idle timeout.
+          server.timeout(request, 0)
+          return keyed(request, path)
+        }
+        if (path === '/api/session' || path === '/api/login' || path === '/api/logout') return account(request, path)
+        if (path === '/api' || path.startsWith('/api/')) {
+          // The page signs in with the password; the cookie stands in for the token on every other route.
+          if (!signedIn(request, session)) return json({ error: 'unauthorized' }, 401)
+          return api(request, url, server)
+        }
+      }
       if (path === '/api' || path.startsWith('/api/')) {
         // The token only ever counts in the header: never in the query string.
         if (!hasToken(request, token)) return json({ error: 'unauthorized' }, 401)
@@ -3098,7 +3273,7 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
   const port = server.port
   if (port === undefined) throw new Error('the server has no port')
   boundPort = port
-  host = `127.0.0.1:${port}`
+  host = mode ? `${mode.bind}:${port}` : `127.0.0.1:${port}`
   return {
     port,
     token,
@@ -3201,6 +3376,25 @@ async function serve() {
   })()
 }
 
+// Server mode (`bun ui/server.ts --server`, the Docker image's command): a long-lived service.
+// No parent, stdin or ui-users.json watch and no ui.json: it runs until SIGTERM or SIGINT.
+async function serveDaemon() {
+  const mode = serverModeFromEnv(process.env)
+  if (mode instanceof Error) throw mode
+  const env = { ...process.env, MNEMOSYNE_ACTIVITY_LOG: process.env.MNEMOSYNE_ACTIVITY_LOG ?? join(process.env.MNEMOSYNE_ROOT ?? '', 'activity.jsonl') }
+  const config = { ...configFromEnv(env), mode }
+  const started = await startServer(config)
+  let stopping = false
+  const stop = () => {
+    if (stopping) return
+    stopping = true
+    started.stop()
+    process.exit(0)
+  }
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, stop)
+  process.stdout.write(`${JSON.stringify({ server: true, bind: mode.bind, port: started.port, pid: process.pid, embeddings: embeddingsOn() })}\n`)
+}
+
 // What /mnemosyne-ui spawns: holds the server's stdin open and passes its output
 // through. When this process is stopped or orphaned it leaves, and the server (whose
 // stdin then closes) decides: it ends unless other sessions still use it.
@@ -3246,7 +3440,7 @@ async function pingMain() {
 }
 
 if (import.meta.main) {
-  const run = process.argv.includes('--ping') ? pingMain : process.argv.includes('--hold') ? hold : serve
+  const run = process.argv.includes('--ping') ? pingMain : process.argv.includes('--hold') ? hold : process.argv.includes('--server') ? serveDaemon : serve
   run().catch(err => {
     process.stderr.write(`mnemosyne ui: ${(err as Error).message}\n`)
     process.exit(1)

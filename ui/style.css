@@ -1948,3 +1948,23 @@ tr.exp td { padding: 0 var(--space-4) var(--space-3); background: var(--hover); 
 @media (max-width: 700px) { .entity-card .ec-row { grid-template-columns: 1fr auto; } .entity-card .ec-pred { grid-column: 1 / -1; } }
 /* 0.28.2: Check now, beside the version line */
 .update-cell .update-check { margin-left: 8px; }
+/* Server mode: the sign-in card and the MCP connection card (ui/server-mode.ts) */
+.signin-form { display: flex; flex-direction: column; gap: var(--space-2); }
+.signin-line { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.signin-line .input { flex: 1; min-width: 200px; }
+#settings-mcp { margin-top: 20px; }
+.mcp-card { display: flex; flex-direction: column; gap: var(--space-3); }
+.mcp-create { display: flex; flex-direction: column; gap: 4px; }
+.mcp-create-line { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.mcp-create-line .input { flex: 1; min-width: 200px; max-width: 360px; }
+.mcp-new { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--accent); border-radius: var(--radius-2); background: var(--surface-2); }
+.mcp-new-title { margin: 0; font-weight: 600; }
+.mcp-new p { margin: 0; }
+.mcp-copy { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); width: 100%; }
+.mcp-text { flex: 1; min-width: 0; width: 100%; max-width: 640px; font-size: 12px; resize: vertical; }
+textarea.mcp-text { height: auto; padding: 8px 10px; white-space: pre; overflow-x: auto; }
+.mcp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mcp-table th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
+.mcp-table td { padding: 8px; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; vertical-align: middle; }
+.mcp-action { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+@media (max-width: 700px) { .mcp-table th:nth-child(2), .mcp-table td:nth-child(2) { display: none; } }

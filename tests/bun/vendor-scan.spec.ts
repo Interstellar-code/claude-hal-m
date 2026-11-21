@@ -319,7 +319,8 @@ describe('MAP.2.a6: the page and the vendored files as the server sends them', (
     // No static import of anything: the page is one file until the Map tab asks for its library.
     expect(app).not.toMatch(/(?:^|[;\n}])\s*import\s*(?:[\w${},*\s]+from\s*)?["']/)
     expect(app.match(/\/vendor\//g)).toHaveLength(1)
-    expect(app).toMatch(/import\(\w+\)/)
+    // The minifier may name the URL's variable with a $ (e.g. import($0)).
+    expect(app).toMatch(/import\([\w$]+\)/)
     const source = readFileSync(join(ROOT, 'ui', 'app.ts'), 'utf8')
     const calls = source.split('\n').filter(line => line.includes('createMap('))
     expect(calls).toHaveLength(1)

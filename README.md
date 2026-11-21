@@ -587,6 +587,8 @@ The ranking weights are sent with every recall and also pinned in the engine's e
 | `embeddings` | auto | auto, on, off | `auto`: meaning-based recall on only on macOS on Apple Silicon, off elsewhere. `on`: always on. `off`: keyword-only recall. Local only; `/mnemosyne-setup` downloads the model once (see [Embeddings](#embeddings-meaning-based-recall)). |
 | `sessionSummary` | off | off, on | `off`: nothing. `on`: when a session ends (exit, `/clear` or resume) a small marker is left (the session id, its owner and its transcript path; no text). On a later session's first prompt, after the reply and in the background, Haiku (the `extractionModel`) summarises that session's redacted conversation (at most 30,000 characters leave this machine) into one session-summary memory of at most 600 characters, kept 30 days. The next session's first prompt shows the newest summary and the pinned memories. |
 | `expireUnusedDays` | 90 | text | Once a day, in the background, a memory of the kinds project state, session summary, bug note or reference that nobody has recalled for this many days gets an end date and stops being recalled. Nothing is deleted and it can be restored in the dashboard's Review tab. Pinned memories, facts, preferences, rules and decisions are never touched, and the store is backed up first. `0` turns the sweep off; 1 to 29 are refused. Preview it: `bun bin/memories.ts --store <store> expire`. |
+| `serverUrl` |  | text | Empty: memory stays on this PC. Your Mnemosyne server (for example `https://mnemosyne.<tailnet>.ts.net`): every PC uses that one memory. Recall, saves, the owner lookup and the first-prompt block go to the server, no local engine is needed, and the store-wide commands (`/mnemosyne-tags`, `-import`, `-knowledge`, `-embed`) run there. A server that does not answer turns memory off for 60 seconds at a time ("memory offline"). |
+| `serverKey` |  | text | The key from the server dashboard (Settings, MCP connection). Sent only to `serverUrl`, on stdin to a short Bun process, never on a command line. |
 
 The tab draws the plugin options from the schema the `claude` command reports, so an option a later version adds appears there by itself, in an "Other plugin options" group.
 
@@ -679,6 +681,37 @@ Inside a git repo the id is that of the main worktree (the parent of `git rev-pa
 Two notes. On Windows the launcher is `bin\mnemosyne-mcp.cmd` and a root holding `"`, `%` or `!` is refused; this path is untested on Windows. When the installed engine is not the build the proxy expects, a save is refused with a message that says to run `/mnemosyne-setup` in Claude Code; outside Claude Code, run the install above again instead (the text is unchanged so the plugin's message stays right).
 
 Saving text this owner already holds. Since 0.11.0 the `memory_remember` reply carries `duplicate`: `false` for a new memory, `true` when the same text was already stored. `status` stays `stored` and `memory_id` is the existing memory's id, so a caller that ignores the field sees what it saw before. `true` means a row with exactly that text exists for the owner, also a retired or expired one, which a re-save does not bring back; and a save of the same text by another process between the check and the save can report `false` for an existing id. It needs engine build `18.12.3-mnemosyne.11`. In Claude Code, run `/mnemosyne-setup` once after updating: until then saves and updates are refused, because the plugin wants this exact build. Calling an older engine directly leaves the field out.
+
+## Run it as a server (Docker, Unraid, Dokploy)
+
+Since 0.36.0 one Mnemosyne store can live on an always-on machine and serve every PC over Tailscale: each Claude Code install points at it instead of keeping its own memory, and other MCP clients can use it too. The repo has the template: `Dockerfile`, `docker-compose.yml`, `docker/` and `.env.example`.
+
+The compose file runs two containers. `tailscale` joins your tailnet as `mnemosyne` and serves HTTPS on port 443 with a Tailscale certificate (`docker/tailscale/serve.json`, Funnel off). `mnemosyne` runs `bun ui/server.ts --server` inside the Tailscale container's network, so nothing is published on the host's own network. The image is Debian with Bun 1.4.3; the engine and, by default, the local embedding model are installed when it is built. Data lives in one volume, `/data` (store, settings, vocabulary, activity log, device keys, backups).
+
+Steps, with Dokploy:
+
+1. In the Tailscale admin console, make an auth key (Settings, Keys). A tagged key (for example `tag:server`, defined in your ACL policy) keeps the node from expiring with your login. Turn on HTTPS certificates (DNS, HTTPS Certificates) if you have not.
+2. In Dokploy, create a Compose app from this GitHub repository (branch or release tag), compose path `docker-compose.yml`.
+3. In its Environment tab set `MNEMOSYNE_UI_PASSWORD` (8 or more characters) and `TS_AUTHKEY`. Optional: `MNEMOSYNE_PUBLIC_URL` (`https://mnemosyne.<tailnet>.ts.net`, the address shown in copied settings), `MNEMOSYNE_HOSTS`, `MNEMOSYNE_DATA` and `TS_STATE` (host folders), `MNEMOSYNE_BUILD_EMBEDDINGS=0` (no model in the image), `TS_EXTRA_ARGS`. `.env.example` lists them all.
+4. Deploy. The first build downloads the engine's packages and the model, so it takes a few minutes.
+5. Open `https://mnemosyne.<tailnet>.ts.net` from a machine on the tailnet and sign in with the password.
+6. Settings, MCP connection: create a key for each device. A key is shown once; revoke one there when a device is gone.
+7. On each PC, set the plugin's `serverUrl` (the address above) and `serverKey` (that device's key), in Claude Code (`/plugin`, Mnemosyne, configure), and start a new session.
+8. Other MCP clients use `POST <address>/mcp` with `Authorization: Bearer <key>`; the dashboard copies the JSON for you. A save is recorded as `mcp:<device name>`. Clients that speak only stdio, such as Claude Desktop, may need the `mcp-remote` bridge (`npx mcp-remote <address>/mcp --header "Authorization: Bearer <key>"`).
+
+Without Dokploy, copy `.env.example` to `.env`, fill it in and run `docker compose up -d --build` in the checkout.
+
+Unraid notes:
+
+- Keep both host folders on a pool disk path such as `/mnt/cache/appdata/...` (the defaults), not `/mnt/user/...`. SQLite's write-ahead log needs shared memory and locking that the `/mnt/user` FUSE layer does not handle reliably, which can corrupt the store.
+- The server runs as uid 99, gid 100 (`nobody:users`), which owns appdata on Unraid. Elsewhere, set the build args `PUID` and `PGID` to the owner of the data folder, or `chown` the folder; the container exits with a message when it cannot write there.
+- Back up the appdata folder (for example with the Appdata Backup plugin). The Settings tab's Back up now writes a copy to `/data/backups`; the server takes no scheduled backups yet, so your appdata backup is the one that runs on its own.
+
+Upgrading: redeploy (pull the new tag and rebuild). The data volume is kept; the Health tab's Update button is hidden in server mode.
+
+What client mode does not do yet: on a PC with `serverUrl` set there is no knowledge extraction, no session summaries and no expiry sweep, and `/mnemosyne-tags`, `/mnemosyne-import`, `/mnemosyne-knowledge` and `/mnemosyne-embed` answer that they run on the server. The server does not run the daily expiry sweep on its own yet either. Run these on the server, for example `docker compose exec mnemosyne bun /app/bin/vocab.ts --root /data list`. When the server does not answer, the session marks memory offline for 60 seconds ("Mnemosyne · memory offline") and Claude works without it.
+
+**Security.** The dashboard needs the password (30-day cookie, a pause after 5 wrong tries), and `/api/plugin/*` and `/mcp` need a device key; the server stores only each key's SHA-256. Reach it only through Tailscale: do not publish port 8787 or turn on Funnel.
 
 ## How it works
 
