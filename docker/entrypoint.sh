@@ -1,6 +1,27 @@
 #!/bin/sh
 # Claude Mnemosyne server container: checks the password, lays out /data, starts the server.
+# Started as root (the default, and what Unraid's Tailscale hook needs), it gives the data
+# folder to PUID:PGID and runs again as that user; started as a non-root user (--user), it
+# runs as that user.
 set -eu
+
+if [ "$(id -u)" = "0" ]; then
+  PUID="${PUID:-99}"
+  PGID="${PGID:-100}"
+  case "$PUID$PGID" in
+    ''|*[!0-9]*) echo "mnemosyne: PUID and PGID must be numbers (got \"$PUID:$PGID\")." >&2; exit 64 ;;
+  esac
+  if [ "$PUID" -eq 0 ] || [ "$PGID" -eq 0 ]; then
+    echo "mnemosyne: PUID/PGID must not be 0; the server does not run as root." >&2; exit 64
+  fi
+  ROOT="${MNEMOSYNE_ROOT:-/data}"
+  mkdir -p "$ROOT"
+  # Only what is not owned yet, so a large store is not walked on every start.
+  find "$ROOT" \( ! -user "$PUID" -o ! -group "$PGID" \) -exec chown -h "$PUID:$PGID" {} + \
+    || echo "mnemosyne: could not give all of $ROOT to $PUID:$PGID; carrying on, the write check below decides." >&2
+  chown "$PUID:$PGID" /home/mnemosyne
+  exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups --inh-caps=-all -- /bin/sh "$0" "$@"
+fi
 
 if [ -z "${MNEMOSYNE_UI_PASSWORD:-}" ]; then
   echo "mnemosyne: MNEMOSYNE_UI_PASSWORD is not set. Set it (8 or more characters) in the app's environment and deploy again." >&2
