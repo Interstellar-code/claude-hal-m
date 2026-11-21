@@ -705,7 +705,7 @@ Unraid notes:
 
 - Keep both host folders on a pool disk path such as `/mnt/cache/appdata/...` (the defaults), not `/mnt/user/...`. SQLite's write-ahead log needs shared memory and locking that the `/mnt/user` FUSE layer does not handle reliably, which can corrupt the store.
 - The container starts as root, gives the data folder to uid 99, gid 100 (`nobody:users`, the owner of appdata on Unraid) and runs the server as that user. Elsewhere, set `PUID` and `PGID` (environment or build args) to the owner you want; 0 is refused. Started with `--user`, it runs as that user and exits with a message when it cannot write to the data folder.
-- Without Dokploy or compose, as a plain Unraid container: build the image on the server (`docker build -t mnemosyne:local .` in a checkout), add a template with repository `mnemosyne:local`, the data folder at `/data`, `MNEMOSYNE_UI_PASSWORD`, and `MNEMOSYNE_BIND=127.0.0.1`, then turn on the template's Tailscale option with Serve on port 8787 and userspace networking. Tailscale then serves `https://<hostname>.<tailnet>.ts.net` on 443; the first start prints a login link in the container log. Keep the Tailscale state in its own appdata folder (`TailscaleStateDir`) so a rebuild does not log it out. Also add the variables `ORG_ENTRYPOINT=/bin/sh` and `ORG_CMD=/app/docker/entrypoint.sh`: the web UI's Apply fills these in for the Tailscale hook, but a command-line `rebuild_container` does not, and without them the container exits right after Tailscale starts.
+- Without Dokploy or compose, as a plain Unraid container with its own Tailscale name: see "Run it on Unraid" below.
 - Back up the appdata folder (for example with the Appdata Backup plugin). The server also backs its store up once a day into `/data/backups` (keeping the newest 10, setting `storage.backupsKeep`); a copy off the cache drive is still yours to keep.
 
 Upgrading: redeploy (pull the new tag and rebuild). The data volume is kept; the Health tab's Update button is hidden in server mode.
@@ -715,6 +715,71 @@ What the server does for every PC: once a day it backs the store up and runs the
 What client mode does not do yet: on a PC with `serverUrl` set there is no knowledge extraction, no session summaries, and `/mnemosyne-tags`, `/mnemosyne-import`, `/mnemosyne-knowledge` and `/mnemosyne-embed` answer that they run on the server. Run those on the server, for example `docker compose exec mnemosyne bun /app/bin/vocab.ts --root /data list`. When the server does not answer, the session marks memory offline for 60 seconds ("Mnemosyne · memory offline") and Claude works without it.
 
 **Security.** The dashboard needs the password (30-day cookie, a pause after 5 wrong tries), and `/api/plugin/*` and `/mcp` need a device key; the server stores only each key's SHA-256. Reach it only through Tailscale: do not publish port 8787 or turn on Funnel.
+
+### Run it on Unraid (a plain container with its own Tailscale name)
+
+This runs the server as one ordinary Unraid container, editable in the Docker tab, with its own LAN address and its own Tailscale name (`https://mnemosyne.<tailnet>.ts.net` on port 443, a real certificate), using Unraid's built-in Tailscale option instead of the compose file's sidecar. No auth key is needed: you approve the device once through a link. The template is `docker/unraid/my-Mnemosyne.xml`.
+
+Set up, in an Unraid terminal (or `ssh root@<unraid>`):
+
+1. Get the code and build the image (a few minutes the first time: it installs the engine and the embedding model):
+   ```sh
+   git clone https://github.com/Interstellar-code/claude-mnemosyne /mnt/cache/appdata/mnemosyne-src
+   cd /mnt/cache/appdata/mnemosyne-src && git checkout v<version> && docker build -t mnemosyne:local .
+   ```
+2. Copy the template and fill in three values: `MyIP` (a free address on your `br0` LAN, or leave it empty), the dashboard password (8 or more characters), and the public URL (`https://mnemosyne.<tailnet>.ts.net`):
+   ```sh
+   cp docker/unraid/my-Mnemosyne.xml /boot/config/plugins/dockerMan/templates-user/
+   nano /boot/config/plugins/dockerMan/templates-user/my-Mnemosyne.xml
+   ```
+   You can also leave the values empty and fill them in the web UI (Docker, Add Container, template "Mnemosyne", Apply).
+3. Create the folders and start it (the web UI's Apply does the same):
+   ```sh
+   mkdir -p /mnt/cache/appdata/mnemosyne /mnt/cache/appdata/mnemosyne-tailscale
+   php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container Mnemosyne
+   ```
+   `rebuild_container` leaves a container stopped when it is not set to autostart: turn autostart on in the Docker tab, or run `docker start Mnemosyne`.
+4. `docker logs Mnemosyne` prints `To authenticate, visit: https://login.tailscale.com/a/...` the first time. Open it and approve the device `mnemosyne`. In the Tailscale admin console (Machines), use the device's menu to Disable key expiry, or it drops off the tailnet after 180 days. Tailscale must have MagicDNS and HTTPS certificates turned on.
+5. Open `https://mnemosyne.<tailnet>.ts.net`, sign in, and go on with step 6 of the Dokploy steps above (device keys, then each PC's `serverUrl` and `serverKey`).
+
+What the template sets, and why:
+
+- Unraid's Tailscale option installs Tailscale into the container at start, which needs root; the image starts as root and drops to `PUID:PGID` (99:100) before the server starts (0.36.2).
+- `MNEMOSYNE_BIND=127.0.0.1`: only Tailscale Serve (userspace networking, port 8787) reaches the app; the LAN address answers nothing.
+- `ORG_ENTRYPOINT=/bin/sh` and `ORG_CMD=/app/docker/entrypoint.sh`: the web UI's Apply passes the image's start command to the Tailscale hook, but a command-line `rebuild_container` does not, and without these the container exits right after Tailscale starts.
+- `TailscaleStateDir` on its own appdata folder, so a rebuild stays logged in.
+
+Move a PC's existing memory to the server (once, before that PC switches to `serverUrl`):
+
+1. On the PC, take a consistent copy of the store with `sqlite3` (without it, from a checkout, `bun bin/memories.ts --store ~/.claude/mnemosyne/store backup /tmp/mnemo` writes `/tmp/mnemo/backups/mnemopi-<stamp>.db`; copy that file in step 3 instead):
+   ```sh
+   sqlite3 ~/.claude/mnemosyne/store/mnemopi.db "VACUUM INTO '/tmp/mnemopi.db'"
+   ```
+2. On Unraid, stop the server and keep a copy of its data:
+   ```sh
+   docker stop Mnemosyne
+   cp -a /mnt/cache/appdata/mnemosyne /mnt/cache/appdata/mnemosyne-premigrate
+   rm -f /mnt/cache/appdata/mnemosyne/store/mnemopi.db*
+   ```
+3. From the PC, copy the store and the files that go with it (project names, tags, activity, map layout). Leave out `config.json` and `embeddings.json` (they hold the PC's own paths) and never overwrite the server's `server-secret` or `keys.json`:
+   ```sh
+   scp /tmp/mnemopi.db root@<unraid>:/mnt/cache/appdata/mnemosyne/store/
+   cd ~/.claude/mnemosyne && scp projects.json vocabulary.json tags-proposed.json activity.jsonl* activity-daily.json meaning.json root@<unraid>:/mnt/cache/appdata/mnemosyne/
+   ```
+4. On Unraid, give the files to the server's user and start it; the Health tab's total should match the PC's:
+   ```sh
+   chown -R 99:100 /mnt/cache/appdata/mnemosyne && docker start Mnemosyne
+   ```
+
+Upgrade:
+
+```sh
+cd /mnt/cache/appdata/mnemosyne-src && git fetch --tags && git checkout v<new version>
+docker build -t mnemosyne:local .
+php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container Mnemosyne
+```
+
+The data and the Tailscale login are kept; the dashboard password stays in the template.
 
 ## How it works
 

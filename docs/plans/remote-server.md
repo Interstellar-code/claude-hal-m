@@ -92,6 +92,13 @@ model are installed at build time under `/opt/mnemosyne`; the data volume is `/d
 sidecar (`tailscale/tailscale`, hostname `mnemosyne`, `tailscale serve` HTTPS 443 -> 127.0.0.1:8787) and the
 app with `network_mode: service:tailscale`. No published port.
 
+Unraid without compose (0.36.2-0.36.3): `docker/unraid/my-Mnemosyne.xml` runs the same image as one Unraid container
+(`mnemosyne:local`, built on the server) with Unraid's own Tailscale option: `TailscaleServe=serve`, port 8787,
+userspace networking, state in its own appdata folder, `MNEMOSYNE_BIND=127.0.0.1`, and `ORG_ENTRYPOINT`/`ORG_CMD`
+set because a command-line `rebuild_container` does not pass the image's start command to the Tailscale hook. The
+image starts as root (the hook needs it) and the entrypoint drops to `PUID:PGID`. README "Run it on Unraid" has the
+setup, the move of a PC's store to the server, and the upgrade.
+
 ## Server upkeep (0.36.1)
 
 Once a day (the `<root>` sweep marker) the server backs the store up and runs the unused-expiry sweep for every owner (`MNEMOSYNE_EXPIRE_UNUSED_DAYS`, 90 by default, 0 off). Each plugin engine call leaves an activity line in the server log (client `claude-code`, `device` = the key name).

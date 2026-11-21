@@ -2,6 +2,11 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.36.3 (the Unraid template is in the repo)
+
+1. `docker/unraid/my-Mnemosyne.xml`: the Unraid template the server runs from on Unraid, with the password, LAN address and public URL left for you to fill in.
+2. README "Run it on Unraid": build the image, install the template, approve the Tailscale login and turn off key expiry, move a PC's existing memory to the server, and upgrade. docs/plans/remote-server.md names the Unraid path.
+
 ## 0.36.2 (the server runs as a plain Unraid container with its own Tailscale name)
 
 1. The server image starts as root and its entrypoint drops to `PUID:PGID` (99:100 by default, settable at run time, 0 refused) after giving the data folder to that user, so Unraid's per-container Tailscale option (which needs root) works. README: running it as a plain Unraid container with Tailscale Serve, including the `ORG_ENTRYPOINT`/`ORG_CMD` variables a command-line rebuild needs.
