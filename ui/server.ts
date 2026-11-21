@@ -97,7 +97,9 @@ import {
   PLUGIN_BODY_MAX,
   publicUrlOf,
   runPluginEngine,
+  pluginActivity,
   runPluginMemories,
+  runPluginProject,
   runPluginResolve,
   sameOrigin,
   serverModeFromEnv,
@@ -105,6 +107,7 @@ import {
   sessionCookie,
   sessions,
   signedIn,
+  startUpkeep,
 } from './remote'
 import type { RunContext, ServerMode } from './remote'
 
@@ -2867,6 +2870,8 @@ export type ServerOptions = {
   dev?: boolean
   port?: number
   token?: string
+  // Server mode: false turns the daily upkeep loop off (tests run it directly).
+  upkeep?: boolean
 }
 
 // Dev mode: a stamp of ui/ (each file's name and mtime) and of this server's start, so a page reloads when either changes.
@@ -2946,6 +2951,8 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
   const logins = loginLimiter()
   const keys = deviceKeys(config.root)
   const badKeys = badKeyLimiter()
+  // Server mode: the daily backup and unused-expiry sweep a PC used to run at its session start (ui/remote.ts runUpkeep).
+  const stopUpkeep = mode && options.upkeep !== false ? startUpkeep(ctx, mode.expire, fields => log(fields)) : () => {}
 
   // Every POST route: the page's own origin, JSON, a body within the route's cap (4096 bytes unless the route says more); then the handler.
   async function post(request: Request, handle: (views: Views, text: string) => Promise<Answer>, maxBytes = MAX_BODY_BYTES) {
@@ -3180,8 +3187,12 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     if (path === '/api/plugin/engine') {
       const checked = checkEngineBody(body)
       if (typeof checked === 'string') return json({ error: checked }, 400)
-      return json(await engines.run(() => runPluginEngine(ctx, checked.owner, checked.requests, checked.timeoutMs)))
+      const ran = await engines.run(() => runPluginEngine(ctx, checked.owner, checked.requests, checked.timeoutMs))
+      // The PC logs the call too, in its own file; this line is the one the server's dashboard and map read.
+      for (const fields of pluginActivity(checked.owner, checked.requests, ran)) log(fields, { device: device.name })
+      return json(ran)
     }
+    if (path === '/api/plugin/project') return json(await runPluginProject(ctx, (body as { input?: unknown } | null)?.input))
     if (path === '/api/plugin/memories') {
       const args = checkMemoriesBody(body)
       if (typeof args === 'string') return json({ error: args }, 400)
@@ -3281,6 +3292,7 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
       for (const finish of [...streams]) finish()
       meaning.stop()
       views.warm?.stop()
+      stopUpkeep()
       void server.stop(true)
       store.db?.close()
     },

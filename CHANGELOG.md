@@ -2,6 +2,13 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.36.1 (the server finishes what each PC used to do)
+
+1. Daily upkeep on the server: once a day (the same sweep marker a PC uses, so a restart does not repeat it) the server backs its store up into `/data/backups`, then runs the unused-expiry sweep for every project. `MNEMOSYNE_EXPIRE_UNUSED_DAYS` sets the days (90 by default, 0 off). `bin/memories.ts expire` takes `--cli` for an engine outside the data root.
+2. Server activity for PC calls: each save, recall, update, forget, get, stats and retire a PC makes through the plugin leaves a line in the server's activity log (client `claude-code`, the device name in `device`), so the Activity tab and the live map show them. A save the person asked for counts as a trigger.
+3. Project names: a PC in client mode sends its project's name, kind and remote host to the server (`/api/plugin/project`, after the session start's hello), so the map and project lists name projects instead of showing ids.
+4. Signed out, the dashboard shows only the sign-in card: the tab bar and Sign out are hidden.
+
 ## 0.36.0 (one shared memory on a server)
 
 1. Server mode: `bun ui/server.ts --server` serves one store to every PC. The dashboard asks for a password (`MNEMOSYNE_UI_PASSWORD`, 8 or more characters; a 30-day cookie, a 60-second pause after 5 wrong tries) instead of the token in the link. Settings in server mode come from environment variables (see the README's "Run it as a server").

@@ -2,7 +2,7 @@
 // keyed routes and /mcp, run for real in-process against a temporary store made by the real
 // engine (engine/src/cli.ts). Each server is started on a free port bound to 127.0.0.1.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildRequests } from '../../hooks/engine'
 import {
@@ -14,9 +14,12 @@ import {
   deviceKeys,
   loginLimiter,
   passwordMatches,
+  pluginActivity,
   publicUrlOf,
+  runUpkeep,
   serverModeFromEnv,
   sessions,
+  storeOwners,
   viaHttps,
 } from '../../ui/remote'
 import type { ServerMode } from '../../ui/remote'
@@ -113,6 +116,34 @@ describe('device keys', () => {
   })
 })
 
+describe('activity lines for plugin calls', () => {
+  test('one line per logged call; similar is left out; a user save is a trigger', () => {
+    const requests = buildRequests([
+      ['mnemopi_similar', { content: 'x' }],
+      ['mnemopi_remember', { content: 'Deploys are on Fridays.', source: 'user' }],
+      ['mnemopi_recall', { query: 'deploys' }],
+      ['mnemopi_forget', { memory_id: 'abc' }],
+    ])
+    const stdout = [
+      { jsonrpc: '2.0', id: 1, result: { content: [{ text: '{"matches":[]}' }] } },
+      { jsonrpc: '2.0', id: 2, result: { content: [{ text: '{"status":"stored","memory_id":"m1"}' }] } },
+      { jsonrpc: '2.0', id: 3, result: { content: [{ text: '{"results":[{"id":"m1"},{"id":"m2"}]}' }] } },
+    ]
+      .map(line => JSON.stringify(line))
+      .join('\n')
+    const lines = pluginActivity('global', requests, { stdout, stderr: '', exitCode: 0 })
+    expect(lines.map(line => line.action)).toEqual(['remember', 'recall', 'forget'])
+    expect(lines[0]).toMatchObject({ origin: 'trigger', client: 'claude-code', ok: true, ids: ['m1'] })
+    expect(lines[1]).toMatchObject({ origin: 'tool', ok: true, count: 2 })
+    expect(lines[2]?.ok).toBe(false)
+  })
+  test('the expiry setting comes from the environment', () => {
+    expect((serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD }) as ServerMode).expire).toEqual({ mode: 'on', days: 90 })
+    expect((serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD, MNEMOSYNE_EXPIRE_UNUSED_DAYS: '0' }) as ServerMode).expire).toEqual({ mode: 'off' })
+    expect(serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD, MNEMOSYNE_EXPIRE_UNUSED_DAYS: '5' })).toBeInstanceOf(Error)
+  })
+})
+
 describe('plugin body checks', () => {
   test('only the plugin engine tools pass', () => {
     const ok = checkEngineBody({ owner: 'global', requests: buildRequests([['mnemopi_recall', { query: 'x' }]]) })
@@ -130,16 +161,19 @@ describe('the server, end to end', () => {
   let started: Started
   let base: string
   let root: string
+  let store: string
+  let activity: string
   const port = 18_000 + Math.floor(Math.random() * 20_000)
 
   beforeAll(async () => {
     const temp = tempDir('server-mode')
     root = join(temp.dir, 'root')
-    const store = join(temp.dir, 'store')
+    store = join(temp.dir, 'store')
+    activity = join(temp.dir, 'activity.jsonl')
     // The real engine makes the store, with one global memory to recall.
     await engineCall(CLI, store, 'global', [toolCall(1, 'mnemopi_remember', { content: 'We deploy the memory server on Fridays.', scope: 'global', memory_type: 'fact' })])
     const mode = serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD, MNEMOSYNE_PORT: String(port), MNEMOSYNE_BIND: '127.0.0.1', MNEMOSYNE_SECURE_COOKIE: 'off' }) as ServerMode
-    started = await startServer({ root, store, cli: CLI, activityLog: '', pluginRoot: ROOT, mode }, { warm: null })
+    started = await startServer({ root, store, cli: CLI, activityLog: activity, pluginRoot: ROOT, mode }, { warm: null, upkeep: false })
     base = `http://127.0.0.1:${started.port}`
   }, 60_000)
 
@@ -200,6 +234,16 @@ describe('the server, end to end', () => {
     expect(engine.stdout).toContain('Fridays')
     const refused = await fetch(`${base}/api/plugin/engine`, { method: 'POST', headers: auth, body: JSON.stringify({ owner: 'global', requests: buildRequests([['mnemopi_export', {}]]) }) })
     expect(refused.status).toBe(400)
+    // The plugin's recall left a line in the server's own activity log, as Claude's, naming the device.
+    const logged = readFileSync(activity, 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+    expect(logged.some(line => line.action === 'recall' && line.client === 'claude-code' && line.device === 'Laptop' && line.ok === true)).toBe(true)
+
+    // A PC's project record reaches the server's registry (the map's project names).
+    const project = await json(
+      await fetch(`${base}/api/plugin/project`, { method: 'POST', headers: auth, body: JSON.stringify({ input: { owner: 'project-mnemosyne-abc123', name: 'claude-mnemosyne', kind: 'repo', remoteHost: 'github.com', remoteKey: null } }) }),
+    )
+    expect(project.exitCode).toBe(0)
+    expect(readFileSync(join(root, 'projects.json'), 'utf8')).toContain('claude-mnemosyne')
 
     const listed = await json(await fetch(`${base}/api/keys`, { headers: { Cookie: cookie } }))
     expect(listed.keys.map((k: { name: string }) => k.name)).toContain('Laptop')
@@ -221,6 +265,19 @@ describe('the server, end to end', () => {
     const revoked = await fetch(`${base}/api/keys/revoke`, { method: 'POST', headers: { ...origin(), Cookie: cookie }, body: JSON.stringify({ id: made.id }) })
     expect(revoked.status).toBe(200)
     expect((await fetch(`${base}/api/plugin/hello`, { headers: auth })).status).toBe(401)
+  }, 120_000)
+
+  test('daily upkeep: a backup and the sweep once a day, then nothing until the marker is a day old', async () => {
+    const ctx = { root, store, cli: CLI, pluginRoot: ROOT, activityLog: '', embeddings: false, modelCacheDir: undefined }
+    expect(storeOwners(store)).toContain('global')
+    const first = await runUpkeep(ctx, { mode: 'on', days: 90 })
+    expect(first.error).toBeUndefined()
+    expect(first.due).toBe(true)
+    expect(first.backup).toBeDefined()
+    expect(existsSync(first.backup ?? '')).toBe(true)
+    const again = await runUpkeep(ctx, { mode: 'on', days: 90 })
+    expect(again.due).toBe(false)
+    expect(again.backup).toBeUndefined()
   }, 120_000)
 
   test('sign out clears the cookie', async () => {

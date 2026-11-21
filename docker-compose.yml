@@ -39,6 +39,7 @@ services:
       - MNEMOSYNE_PUBLIC_URL=${MNEMOSYNE_PUBLIC_URL:-}
       - MNEMOSYNE_HOSTS=${MNEMOSYNE_HOSTS:-}
       - MNEMOSYNE_SECURE_COOKIE=auto
+      - MNEMOSYNE_EXPIRE_UNUSED_DAYS=${MNEMOSYNE_EXPIRE_UNUSED_DAYS:-90}
     volumes:
       - ${MNEMOSYNE_DATA:-/mnt/cache/appdata/mnemosyne}:/data
     restart: unless-stopped
