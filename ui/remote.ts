@@ -15,9 +15,14 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { Database } from 'bun:sqlite'
+import { callOutcome, callText } from '../hooks/activity-log'
+import type { ActivityAction, ActivityFields } from '../hooks/activity-log'
 import { engineEnv } from '../hooks/engine'
 import { EMBEDDINGS_MODEL } from '../hooks/engine'
 import { PROJECTS_FILE } from '../hooks/projects'
+import { expireSetting, SESSION_ID } from '../hooks/session'
+import type { ExpireSetting } from '../hooks/session'
 import { VOCAB_FILE } from '../hooks/vocab'
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -31,6 +36,8 @@ export type ServerMode = {
   publicUrl: string
   secureCookie: 'auto' | 'on' | 'off'
   modelCacheDir: string | undefined
+  // The daily unused-expiry sweep: MNEMOSYNE_EXPIRE_UNUSED_DAYS (90 by default, 0 off), the plugin's expireUnusedDays rule.
+  expire: ExpireSetting
 }
 
 export const DEFAULT_SERVER_PORT = 8787
@@ -71,7 +78,10 @@ export function serverModeFromEnv(env: Record<string, string | undefined>): Serv
   const secure = (env.MNEMOSYNE_SECURE_COOKIE ?? 'auto').trim().toLowerCase()
   const publicUrl = (env.MNEMOSYNE_PUBLIC_URL ?? '').trim().replace(/\/+$/, '')
   if (publicUrl !== '' && !/^https?:\/\/[^\s/]+$/.test(publicUrl)) return new Error('MNEMOSYNE_PUBLIC_URL must be like https://mnemosyne.example.ts.net (no path).')
+  const expire = expireSetting(env.MNEMOSYNE_EXPIRE_UNUSED_DAYS)
+  if (expire.mode === 'refused') return new Error(`MNEMOSYNE_EXPIRE_UNUSED_DAYS: ${expire.reason}`)
   return {
+    expire,
     password,
     port,
     bind: env.MNEMOSYNE_BIND || '0.0.0.0',
@@ -379,6 +389,12 @@ export function runPluginMemories(ctx: RunContext, args: readonly string[]) {
   return spawnText([process.execPath, join(ctx.pluginRoot, 'bin', 'memories.ts'), '--store', ctx.store, ...args], '', process.env, 20_000)
 }
 
+/** A PC's project record (name, kind, remote host and hash) into <root>/projects.json, through its one writer. */
+export function runPluginProject(ctx: RunContext, input: unknown) {
+  if (input === null || typeof input !== 'object') return Promise.resolve({ stdout: '', stderr: 'input must be a JSON object', exitCode: 1 })
+  return spawnText([process.execPath, join(ctx.pluginRoot, 'bin', 'projects.ts'), 'write', join(ctx.root, PROJECTS_FILE)], JSON.stringify(input), process.env, 10_000)
+}
+
 export function runPluginResolve(ctx: RunContext, input: unknown) {
   if (input === null || typeof input !== 'object') return Promise.resolve({ stdout: '', stderr: 'input must be a JSON object', exitCode: 1 })
   return spawnText([process.execPath, join(ctx.pluginRoot, 'bin', 'projects.ts'), 'resolve', join(ctx.root, PROJECTS_FILE), ctx.store], JSON.stringify(input), process.env, 10_000)
@@ -488,3 +504,139 @@ export function publicUrlOf(mode: Pick<ServerMode, 'publicUrl'>, request: Reques
 }
 
 export const hasStore = (store: string) => existsSync(join(store, 'mnemopi.db'))
+
+// ---- the server's own upkeep: what a PC's session start did locally ----
+
+export const UPKEEP_CHECK_MS = 60 * 60_000
+export const UPKEEP_FIRST_MS = 60_000
+
+/** The owners that hold rows in the store, read-only; none when there is no store yet. */
+export function storeOwners(store: string): string[] {
+  if (!hasStore(store)) return []
+  const db = new Database(join(store, 'mnemopi.db'), { readonly: true })
+  try {
+    db.exec('PRAGMA busy_timeout = 5000')
+    const rows = db.query("SELECT DISTINCT session_id AS owner FROM working_memory WHERE session_id IS NOT NULL AND session_id <> ''").all() as { owner: unknown }[]
+    return rows.map(row => String(row.owner)).filter(owner => SESSION_ID.test(owner))
+  } finally {
+    db.close()
+  }
+}
+
+export type UpkeepReport = { due: boolean; backup?: string; expired: { owner: string; count: number; ids: string[] }[]; error?: string }
+
+/**
+ * Once a day (the same <root>/sweep marker a PC's sweep uses, so a restart does not run it again): a backup of the store
+ * (bin/memories.ts backup, keeping storage.backupsKeep copies), then the unused-expiry sweep for every owner with
+ * MNEMOSYNE_EXPIRE_UNUSED_DAYS (90 by default; 0 turns the sweep off). A failed backup skips the sweep.
+ */
+export async function runUpkeep(ctx: RunContext, expire: ExpireSetting): Promise<UpkeepReport> {
+  const script = join(ctx.pluginRoot, 'bin', 'memories.ts')
+  const claim = await spawnText([process.execPath, script, 'sweep-claim', ctx.root], '', process.env, 10_000)
+  let due = false
+  try {
+    due = (JSON.parse(claim.stdout) as { due?: unknown }).due === true
+  } catch {
+    return { due: false, expired: [], error: `sweep-claim failed: ${claim.stderr.trim().slice(0, 200)}` }
+  }
+  if (!due || !hasStore(ctx.store)) return { due, expired: [] }
+  const backup = await spawnText([process.execPath, script, '--store', ctx.store, 'backup', ctx.root], '', process.env, 300_000)
+  let path: string | undefined
+  try {
+    path = (JSON.parse(backup.stdout) as { path?: unknown }).path as string | undefined
+  } catch {
+    path = undefined
+  }
+  if (backup.exitCode !== 0 || typeof path !== 'string') return { due, expired: [], error: `backup failed: ${backup.stderr.trim().slice(0, 200)}` }
+  const report: UpkeepReport = { due, backup: path, expired: [] }
+  if (expire.mode !== 'on') return report
+  for (const owner of storeOwners(ctx.store)) {
+    const ran = await spawnText(
+      [process.execPath, script, '--store', ctx.store, 'expire', '--apply', '--json', '--days', String(expire.days), '--owner', owner, '--root', ctx.root, '--cli', ctx.cli],
+      '',
+      process.env,
+      300_000,
+    )
+    try {
+      const out = JSON.parse(ran.stdout) as { count?: unknown; rows?: { id?: unknown }[] }
+      const count = typeof out.count === 'number' ? out.count : 0
+      if (count > 0) report.expired.push({ owner, count, ids: (out.rows ?? []).map(row => String(row?.id ?? '')).filter(Boolean) })
+    } catch {
+      report.error = `expire failed for ${owner}: ${ran.stderr.trim().slice(0, 200)}`
+    }
+  }
+  return report
+}
+
+/** Starts the upkeep loop: a first look a minute after start, then hourly; the marker makes it daily. */
+export function startUpkeep(ctx: RunContext, expire: ExpireSetting, log: (fields: ActivityFields) => void, firstMs = UPKEEP_FIRST_MS, everyMs = UPKEEP_CHECK_MS) {
+  let busy = false
+  const tick = async () => {
+    if (busy) return
+    busy = true
+    try {
+      const report = await runUpkeep(ctx, expire)
+      for (const done of report.expired) {
+        log({ action: 'expire', origin: 'session', owner: done.owner, client: 'mnemosyne-sweep', text: `unused-expiry sweep: ${done.count} expired`, ids: done.ids, count: done.count, ok: true })
+      }
+      if (report.error) log({ action: 'expire', origin: 'session', owner: 'global', client: 'mnemosyne-sweep', text: 'server upkeep failed', ok: false, error: report.error })
+    } catch {
+      // the next tick tries again
+    } finally {
+      busy = false
+    }
+  }
+  const first = setTimeout(() => void tick(), firstMs)
+  const timer = setInterval(() => void tick(), everyMs)
+  return () => {
+    clearTimeout(first)
+    clearInterval(timer)
+  }
+}
+
+// ---- activity lines for the plugin's engine calls (the PC keeps its own log; the server's dashboard reads this one) ----
+
+const ENGINE_ACTIONS: Readonly<Record<string, ActivityAction>> = {
+  mnemopi_remember: 'remember',
+  mnemopi_recall: 'recall',
+  mnemopi_update: 'update',
+  mnemopi_forget: 'forget',
+  mnemopi_get: 'get',
+  mnemopi_stats: 'stats',
+  mnemopi_invalidate: 'retire',
+}
+
+/**
+ * One activity line per logged engine call of a plugin request: Claude's own call (client claude-code, so the map draws it
+ * from Claude's writer), a remember the person asked for (source user) as a trigger. mnemopi_similar is the guard's look, not
+ * a call of its own, and is left out, as the plugin leaves it out locally.
+ */
+export function pluginActivity(owner: string, requests: string, run: RawRun): ActivityFields[] {
+  const replies = new Map<number, { text: string; failed?: string }>()
+  for (const line of run.stdout.split('\n')) {
+    try {
+      const reply = JSON.parse(line) as { id?: unknown; error?: { message?: unknown }; result?: { isError?: unknown; content?: { text?: unknown }[] } }
+      if (typeof reply?.id !== 'number') continue
+      const text = String(reply.result?.content?.[0]?.text ?? '')
+      replies.set(reply.id, reply.error ? { text: '', failed: String(reply.error.message ?? 'failed') } : reply.result?.isError ? { text, failed: text.slice(0, 200) || 'failed' } : { text })
+    } catch {
+      // engine chatter
+    }
+  }
+  const lines: ActivityFields[] = []
+  for (const line of requests.split('\n')) {
+    let message: { id?: unknown; params?: { name?: unknown; arguments?: unknown } }
+    try {
+      message = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const action = ENGINE_ACTIONS[String(message.params?.name)]
+    if (action === undefined) continue
+    const args = (message.params?.arguments ?? {}) as Record<string, unknown>
+    const reply = replies.get(Number(message.id))
+    const outcome = reply === undefined ? { ok: false, ids: [], count: 0, error: `engine exited ${run.exitCode} without a reply` } : reply.failed !== undefined ? { ok: false, ids: [], count: 0, error: reply.failed } : callOutcome(action, args, reply.text)
+    lines.push({ action, origin: action === 'remember' && args.source === 'user' ? 'trigger' : 'tool', owner, client: 'claude-code', text: callText(action, args), ...outcome })
+  }
+  return lines
+}

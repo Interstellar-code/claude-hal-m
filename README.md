@@ -692,7 +692,7 @@ Steps, with Dokploy:
 
 1. In the Tailscale admin console, make an auth key (Settings, Keys). A tagged key (for example `tag:server`, defined in your ACL policy) keeps the node from expiring with your login. Turn on HTTPS certificates (DNS, HTTPS Certificates) if you have not.
 2. In Dokploy, create a Compose app from this GitHub repository (branch or release tag), compose path `docker-compose.yml`.
-3. In its Environment tab set `MNEMOSYNE_UI_PASSWORD` (8 or more characters) and `TS_AUTHKEY`. Optional: `MNEMOSYNE_PUBLIC_URL` (`https://mnemosyne.<tailnet>.ts.net`, the address shown in copied settings), `MNEMOSYNE_HOSTS`, `MNEMOSYNE_DATA` and `TS_STATE` (host folders), `MNEMOSYNE_BUILD_EMBEDDINGS=0` (no model in the image), `TS_EXTRA_ARGS`. `.env.example` lists them all.
+3. In its Environment tab set `MNEMOSYNE_UI_PASSWORD` (8 or more characters) and `TS_AUTHKEY`. Optional: `MNEMOSYNE_EXPIRE_UNUSED_DAYS` (the daily sweep that expires unused notes, 90 by default, 0 off), `MNEMOSYNE_PUBLIC_URL` (`https://mnemosyne.<tailnet>.ts.net`, the address shown in copied settings), `MNEMOSYNE_HOSTS`, `MNEMOSYNE_DATA` and `TS_STATE` (host folders), `MNEMOSYNE_BUILD_EMBEDDINGS=0` (no model in the image), `TS_EXTRA_ARGS`. `.env.example` lists them all.
 4. Deploy. The first build downloads the engine's packages and the model, so it takes a few minutes.
 5. Open `https://mnemosyne.<tailnet>.ts.net` from a machine on the tailnet and sign in with the password.
 6. Settings, MCP connection: create a key for each device. A key is shown once; revoke one there when a device is gone.
@@ -705,11 +705,13 @@ Unraid notes:
 
 - Keep both host folders on a pool disk path such as `/mnt/cache/appdata/...` (the defaults), not `/mnt/user/...`. SQLite's write-ahead log needs shared memory and locking that the `/mnt/user` FUSE layer does not handle reliably, which can corrupt the store.
 - The server runs as uid 99, gid 100 (`nobody:users`), which owns appdata on Unraid. Elsewhere, set the build args `PUID` and `PGID` to the owner of the data folder, or `chown` the folder; the container exits with a message when it cannot write there.
-- Back up the appdata folder (for example with the Appdata Backup plugin). The Settings tab's Back up now writes a copy to `/data/backups`; the server takes no scheduled backups yet, so your appdata backup is the one that runs on its own.
+- Back up the appdata folder (for example with the Appdata Backup plugin). The server also backs its store up once a day into `/data/backups` (keeping the newest 10, setting `storage.backupsKeep`); a copy off the cache drive is still yours to keep.
 
 Upgrading: redeploy (pull the new tag and rebuild). The data volume is kept; the Health tab's Update button is hidden in server mode.
 
-What client mode does not do yet: on a PC with `serverUrl` set there is no knowledge extraction, no session summaries and no expiry sweep, and `/mnemosyne-tags`, `/mnemosyne-import`, `/mnemosyne-knowledge` and `/mnemosyne-embed` answer that they run on the server. The server does not run the daily expiry sweep on its own yet either. Run these on the server, for example `docker compose exec mnemosyne bun /app/bin/vocab.ts --root /data list`. When the server does not answer, the session marks memory offline for 60 seconds ("Mnemosyne · memory offline") and Claude works without it.
+What the server does for every PC: once a day it backs the store up and runs the unused-expiry sweep for every project; each PC's saves and recalls land in the server's activity log (the Activity tab and the live map show them as Claude's, with the device name in the line); and each project's name and kind reach the server's registry at a session start, so the map names them.
+
+What client mode does not do yet: on a PC with `serverUrl` set there is no knowledge extraction, no session summaries, and `/mnemosyne-tags`, `/mnemosyne-import`, `/mnemosyne-knowledge` and `/mnemosyne-embed` answer that they run on the server. Run those on the server, for example `docker compose exec mnemosyne bun /app/bin/vocab.ts --root /data list`. When the server does not answer, the session marks memory offline for 60 seconds ("Mnemosyne · memory offline") and Claude works without it.
 
 **Security.** The dashboard needs the password (30-day cookie, a pause after 5 wrong tries), and `/api/plugin/*` and `/mcp` need a device key; the server stores only each key's SHA-256. Reach it only through Tailscale: do not publish port 8787 or turn on Funnel.
 

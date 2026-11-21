@@ -10,7 +10,7 @@
 //   bun bin/memories.ts --store <dir> summarised <session id>...      which of those sessions already have a summary, as JSON (read-only)
 //   bun bin/memories.ts session-pending write|list|claim|release|remove <root> ...  the markers session.end leaves (an id, an owner and a path; never text); claim takes one for a summary, release puts it back (release --failed counts a failed model call: back-off, dropped at the fifth)
 //   bun bin/memories.ts sweep-claim <root>                           whether the daily unused-expiry sweep is due; if so, marks it taken
-//   bun bin/memories.ts --store <dir> expire [--apply] [--days N] [--owner O] [--root R] [--limit N] [--json]
+//   bun bin/memories.ts --store <dir> expire [--apply] [--days N] [--owner O] [--root R] [--limit N] [--cli <engine cli.ts>] [--json]
 //                                                                     the unused-expiry sweep: a dry run unless --apply, which backs the store up first
 //
 // --store comes first and once; `--` and an id starting with `-` are refused, so
@@ -644,7 +644,7 @@ async function engineRun(cli: string, store: string, owner: string, requests: re
   }
 }
 
-export type ExpireOptions = { store: string; root: string; owner: string; days: number; apply: boolean; limit?: number }
+export type ExpireOptions = { store: string; root: string; owner: string; days: number; apply: boolean; limit?: number; cli?: string }
 export type ExpireReport = { dryRun: boolean; days: number; owner: string; count: number; rows: ExpiredRow[]; limit: number; backup?: { path: string; rows: number } }
 
 export const engineCliOf = (root: string) => join(root, 'engine', 'node_modules', '@oh-my-pi', 'pi-mnemopi', 'src', 'cli.ts')
@@ -661,7 +661,8 @@ export async function expireUnused(options: ExpireOptions): Promise<ExpireReport
   const limit = Math.min(200, Math.max(1, Math.trunc(options.limit ?? SWEEP_LIMIT)))
   const report: ExpireReport = { dryRun: !options.apply, days: days.days, owner: options.owner, count: 0, rows: [], limit }
   if (!existsSync(join(options.store, 'mnemopi.db'))) return report
-  const cli = engineCliOf(options.root)
+  // A server names its engine (--cli): it is not under the data root there.
+  const cli = options.cli ?? engineCliOf(options.root)
   if (!existsSync(cli)) throw new Error(`the engine is not installed at ${cli}: run /mnemosyne-setup`)
   const ask = async (apply: boolean) => {
     const [answer] = await engineRun(cli, options.store, options.owner, [['mnemopi_expire_unused', expireRequest(days.days, apply, limit)]])
@@ -835,16 +836,17 @@ async function main(argv: readonly string[]) {
     process.stdout.write(`${JSON.stringify({ due: claimSweep(rest[0]) })}\n`)
   } else if (command === 'expire') {
     if (!store) throw new Error('--store <dir> is required')
-    const given: { apply: boolean; json: boolean; days: number; owner: string; root: string; limit?: number } = { apply: false, json: false, days: EXPIRE_DEFAULT_DAYS, owner: 'global', root: dirname(resolve(store)) }
+    const given: { apply: boolean; json: boolean; days: number; owner: string; root: string; limit?: number; cli?: string } = { apply: false, json: false, days: EXPIRE_DEFAULT_DAYS, owner: 'global', root: dirname(resolve(store)) }
     for (let i = 0; i < rest.length; i++) {
       const word = rest[i]!
       if (word === '--apply') given.apply = true
       else if (word === '--json') given.json = true
-      else if (word === '--days' || word === '--owner' || word === '--root' || word === '--limit') {
+      else if (word === '--days' || word === '--owner' || word === '--root' || word === '--limit' || word === '--cli') {
         const value = rest[++i]
         if (value === undefined || value.startsWith('-')) throw new Error(`${word} needs a value`)
         if (word === '--days') given.days = Number(value)
         else if (word === '--limit') given.limit = Number(value)
+        else if (word === '--cli') given.cli = value
         else if (word === '--owner') {
           if (!SESSION_ID.test(value)) throw new Error('--owner needs a plain owner id')
           given.owner = value
@@ -852,7 +854,7 @@ async function main(argv: readonly string[]) {
       } else throw new Error(`unknown option ${word}`)
     }
     if (given.limit !== undefined && (!Number.isInteger(given.limit) || given.limit < 1 || given.limit > 200)) throw new Error('--limit is a whole number from 1 to 200')
-    const report = await expireUnused({ store, root: given.root, owner: given.owner, days: given.days, apply: given.apply, ...(given.limit === undefined ? {} : { limit: given.limit }) })
+    const report = await expireUnused({ store, root: given.root, owner: given.owner, days: given.days, apply: given.apply, ...(given.limit === undefined ? {} : { limit: given.limit }), ...(given.cli === undefined ? {} : { cli: given.cli }) })
     // --json is for programs (the hook's sweep): ids, kinds and dates only, so no memory text can reach a log through it.
     process.stdout.write(given.json ? `${JSON.stringify({ ...report, rows: report.rows.map(({ preview: _preview, ...row }) => row) })}\n` : `${expireText(report, store, given.root)}\n`)
   } else if (command === 'save') {

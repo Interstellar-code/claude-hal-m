@@ -60,6 +60,7 @@ The local dashboard (no `--server`) is unchanged: 127.0.0.1, random token in the
   `{ stdout, stderr, exitCode }`, which `parseReplies` reads as if the engine ran locally.
 - `POST /api/plugin/memories` `{ args }`: `args[0]` is `first-prompt` or `row-info`; the server runs
   `bun bin/memories.ts --store <store> ...args` -> `{ stdout, stderr, exitCode }`.
+- `POST /api/plugin/project` `{ input }` (a project record) -> runs `bun bin/projects.ts write <root>/projects.json`; a PC sends it after its session start hello (0.36.1).
 - `POST /api/plugin/resolve` `{ input }` (a ResolveInput) -> runs `bun bin/projects.ts resolve <root>/projects.json <store>`
   with the input on stdin -> `{ stdout, stderr, exitCode }`.
 
@@ -90,3 +91,7 @@ Two userConfig fields: `serverUrl` (string) and `serverKey` (string, sensitive).
 model are installed at build time under `/opt/mnemosyne`; the data volume is `/data`. Compose runs a Tailscale
 sidecar (`tailscale/tailscale`, hostname `mnemosyne`, `tailscale serve` HTTPS 443 -> 127.0.0.1:8787) and the
 app with `network_mode: service:tailscale`. No published port.
+
+## Server upkeep (0.36.1)
+
+Once a day (the `<root>` sweep marker) the server backs the store up and runs the unused-expiry sweep for every owner (`MNEMOSYNE_EXPIRE_UNUSED_DAYS`, 90 by default, 0 off). Each plugin engine call leaves an activity line in the server log (client `claude-code`, `device` = the key name).

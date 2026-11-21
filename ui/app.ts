@@ -4268,7 +4268,7 @@ export async function main() {
     pill.title = 'This dashboard talks to your Mnemosyne server'
     const note = maybe('about-note')
     if (note) note.textContent = 'Runs on your Mnemosyne server, behind its password.'
-    byId('signout').hidden = false
+    signedInChrome(true)
     if (!session.signedIn) return showSignIn()
   } else token = found
   await start()
@@ -4298,8 +4298,15 @@ async function askSession() {
   }
 }
 
+/** The tab bar and Sign out show only while signed in: a signed-out page offers nothing but the sign-in card. */
+function signedInChrome(on: boolean) {
+  byId('tabs').hidden = !on
+  byId('signout').hidden = !on
+}
+
 /** Shows the sign-in card in place of the views (and the status line), with an optional line on top. */
 function showSignIn(line = '') {
+  signedInChrome(false)
   for (const view of VIEWS) byId(`view-${view}`).hidden = true
   byId('foot').hidden = true
   byId('status').hidden = true
@@ -4350,6 +4357,7 @@ async function signIn() {
     // After a session that ended, the page's state is from before: a fresh load is the clean start.
     if (booted) return location.reload()
     expired = false
+    signedInChrome(true)
     byId('signin').hidden = true
     byId<HTMLInputElement>('signin-password').value = ''
     submit.disabled = false

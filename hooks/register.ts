@@ -353,7 +353,7 @@ export function serverUrlOf(options: PluginOptions): string | undefined {
 }
 const clientMode = (options: PluginOptions) => serverUrlOf(options) !== undefined
 
-type RemoteOp = 'engine' | 'memories' | 'resolve' | 'hello'
+type RemoteOp = 'engine' | 'memories' | 'resolve' | 'project' | 'hello'
 // How long a remote call may take to open its connection; the request itself gets the caller's timeout.
 export const REMOTE_CONNECT_MS = 3_000
 // Session start's hello and /mnemosyne-setup's check.
@@ -428,7 +428,11 @@ async function helloAtStart($: EngineInterface, options: PluginOptions) {
       if (said.kind === 'offline') $.ui.toast(`Mnemosyne server ${url} is not reachable: memory is off until it is back.`)
       else if (said.kind === 'refused') $.ui.toast(`Mnemosyne server ${url} refused the key: check serverKey.`)
       else $.ui.toast(`Mnemosyne server ${url} did not answer: ${said.failed}`)
-    } else activity($, options, `memory ready on ${url}`, 'ready')
+    } else {
+      activity($, options, `memory ready on ${url}`, 'ready')
+      // The server's registry learns this project's name and kind (the map and project lists use them).
+      void registerProject($, options)
+    }
   } catch {
     // a UI failure must not break the session start
   }
@@ -975,7 +979,6 @@ async function registerProject($: EngineInterface, options: PluginOptions) {
     projectsSent.set(options, sent)
     if (me === GLOBAL_OWNER || sent.has(me)) return
     const repo = await $.session.repo()
-    const { root } = await paths($, options)
     const remote = repo ? normalizeRemote(repo.remote) : null
     const input = {
       owner: me,
@@ -985,8 +988,14 @@ async function registerProject($: EngineInterface, options: PluginOptions) {
       // A hash of the remote, so the next clone or worktree of it finds this owner (issue #3).
       remoteKey: remote === null ? null : remoteKey(remote),
     }
-    const argv = ['bun', `${slashes($.plugin.root)}/bin/projects.ts`, 'write', `${root}/${PROJECTS_FILE}`]
     sent.add(me)
+    // Client mode: the server keeps the registry (its map and project lists name the project from it).
+    if (clientMode(options)) {
+      void remoteCall($, options, 'project', { input }, RESOLVE_TIMEOUT_MS).catch(() => sent.delete(me))
+      return
+    }
+    const { root } = await paths($, options)
+    const argv = ['bun', `${slashes($.plugin.root)}/bin/projects.ts`, 'write', `${root}/${PROJECTS_FILE}`]
     void (async () => {
       for await (const _piece of $.process.spawn({ argv, input: JSON.stringify(input) })) {
         // drained only: the script writes nothing worth reading

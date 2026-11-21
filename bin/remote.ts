@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Plugin client mode (docs/plans/remote-server.md, "Plugin client mode"): one call to a Mnemosyne server.
 //
-//   bun bin/remote.ts <engine|memories|resolve|hello>
+//   bun bin/remote.ts <engine|memories|resolve|project|hello>
 //   stdin: { url, key, body, timeoutMs, connectMs? }
 //
 // A hook has no fetch, only subprocesses, so every remote call is one short Bun process. The key comes on
@@ -15,7 +15,7 @@
 // error); 77 the server refused the key (401); 1 anything else (a bad stdin, another HTTP status).
 import { connect } from 'node:net'
 
-export const OPS = ['engine', 'memories', 'resolve', 'hello'] as const
+export const OPS = ['engine', 'memories', 'resolve', 'project', 'hello'] as const
 export type Op = (typeof OPS)[number]
 export const EXIT_UNREACHABLE = 75
 export const EXIT_REFUSED = 77
