@@ -741,7 +741,7 @@ Set up, in an Unraid terminal (or `ssh root@<unraid>`):
    php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container HAL-M
    ```
    `rebuild_container` leaves a container stopped when it is not set to autostart: turn autostart on in the Docker tab, or run `docker start HAL-M`.
-4. `docker logs HAL-M` prints `To authenticate, visit: https://login.tailscale.com/a/...` the first time. Open it and approve the device `mnemosyne`. In the Tailscale admin console (Machines), use the device's menu to Disable key expiry, or it drops off the tailnet after 180 days. Tailscale must have MagicDNS and HTTPS certificates turned on.
+4. `docker logs HAL-M` prints `To authenticate, visit: https://login.tailscale.com/a/...` the first time. Open it and approve the device `hal-m`. In the Tailscale admin console (Machines), use the device's menu to Disable key expiry, or it drops off the tailnet after 180 days. Tailscale must have MagicDNS and HTTPS certificates turned on.
 5. Open `https://hal-m.<tailnet>.ts.net`, sign in, and go on with step 6 of the Dokploy steps above (device keys, then each PC's `serverUrl` and `serverKey`).
 
 What the template sets, and why:
