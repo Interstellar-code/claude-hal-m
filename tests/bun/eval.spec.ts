@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { compareRuns, goldScore, keyOf, logLines, overlap, parseGold, parseWeights, queriesOf, recallAt, recallIds, reciprocalRank, replay, snapshotStore, writePrivate, type Run } from '../../bin/eval'
+import { compareRuns, goldScore, keyOf, logLines, overlap, parseGold, parseWeights, queriesOf, evalRoot, recallAt, recallIds, reciprocalRank, replay, snapshotStore, writePrivate, type Run } from '../../bin/eval'
 import { DEFAULT_RECALL_WEIGHTS } from '../../hooks/engine'
 import { body, engineCall, ROOT, tempDir, toolCall } from './helpers'
 
@@ -126,5 +126,34 @@ describe('EVAL: replay on a snapshot of a real temp store', () => {
     writePrivate(file, '{"a":1}\n')
     expect(readFileSync(file, 'utf8')).toBe('{"a":1}\n')
     if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
+  })
+})
+
+
+// HAL-M Stage 2 (plan 3.2): the default root comes from the resolver, never a hand-built path.
+describe('EVAL: the default root', () => {
+  const temp = tempDir('eval-root')
+  afterAll(() => temp.dispose())
+  let n = 0
+  const home = () => {
+    const dir = join(temp.dir, `home-${n++}`)
+    mkdirSync(dir, { recursive: true })
+    return dir
+  }
+
+  test('a fresh home resolves to ~/.hal-m; only the 0.37 folder resolves to it', () => {
+    const fresh = home()
+    expect(evalRoot(undefined, fresh, {})).toBe(join(fresh, '.hal-m'))
+    const old = home()
+    mkdirSync(join(old, '.claude', 'mnemosyne', 'store'), { recursive: true })
+    expect(evalRoot(undefined, old, {})).toBe(join(old, '.claude', 'mnemosyne'))
+  })
+
+  test('--root wins over both env names; HALM_ROOT wins over MNEMOSYNE_ROOT, the old name is the fallback', () => {
+    const h = home()
+    expect(evalRoot('/flag/root', h, { HALM_ROOT: '/new/root', MNEMOSYNE_ROOT: '/old/root' })).toBe('/flag/root')
+    expect(evalRoot(undefined, h, { HALM_ROOT: '/new/root', MNEMOSYNE_ROOT: '/old/root' })).toBe('/new/root')
+    expect(evalRoot(undefined, h, { MNEMOSYNE_ROOT: '/old/root' })).toBe('/old/root')
+    expect(evalRoot(undefined, h, { HALM_ROOT: '', MNEMOSYNE_ROOT: '/old/root' })).toBe('/old/root')
   })
 })

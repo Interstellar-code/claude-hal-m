@@ -2,6 +2,7 @@
 // plus DOM built with createElement and textContent only (no classList, no
 // inline colours), so a stand-in document can test it. The server side is
 // ui/update-routes.ts; app.ts fetches, starts and polls.
+import { PLUGIN_ID } from '../hooks/names'
 
 export type UpdateState = 'starting' | 'running' | 'done' | 'failed' | 'blocked'
 export type UpdateStatus = { state: UpdateState; lines: string[]; code?: number; started: string; updated: string }
@@ -153,7 +154,7 @@ export function versionCell(info: UpdateInfo, host: UpdateHost): HTMLElement {
     return cell
   }
   if (!info.updatable) {
-    cell.append(el('span', 'Update with: claude plugin update mnemosyne@mnemosyne', 'muted small'), progress)
+    cell.append(el('span', `Update with: claude plugin update ${PLUGIN_ID}`, 'muted small'), progress)
     return cell
   }
   const ask = el('button', 'Update…', 'btn small')

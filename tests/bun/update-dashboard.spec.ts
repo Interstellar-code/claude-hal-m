@@ -3,14 +3,17 @@
 // JSON checks, and ui/update.ts (the version line, the confirm, the progress) on
 // a stand-in document. GitHub and the detached start are always faked.
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { newRootOf, oldRootOf, PLUGIN_ID } from '../../hooks/names'
 import { pluginVersion, startServer, type Started } from '../../ui/server'
 import {
   cacheHolds,
   CHECK_EVERY_MS,
   CHECK_NOW_MIN_MS,
+  claudeInstall,
   fetchLatest,
+  homeOfRoot,
   HANDOFF_FILE,
   type LaunchCommand,
   latestRelease,
@@ -146,6 +149,57 @@ describe('the handoff and the guards', () => {
     expect(updaterHome(root, ROOT)).toBeUndefined()
     expect(updaterHome(join(dir, 'elsewhere'), join(dir, 'elsewhere', 'plugin'))).toBeUndefined()
   })
+  test('updaterHome: <home>/.hal-m served from its own plugin copy (agy B2)', () => {
+    const { dir } = tempDir('update-home-new')
+    const root = newRootOf(dir)
+    mkdirSync(join(root, 'plugin', 'bin'), { recursive: true })
+    writeFileSync(join(root, 'plugin', 'bin', 'update.ts'), '')
+    expect(updaterHome(root, join(root, 'plugin'))).toBe(dir)
+    // The parent of the home is not a home: no updater there.
+    expect(updaterHome(join(dir, 'x', '.claude', 'mnemosyne'), join(dir, 'x', '.claude', 'mnemosyne', 'plugin'))).toBeUndefined()
+  })
+  test('updaterHome: a link between the spellings; the root and the plugin folder in either spelling (real paths)', () => {
+    const { dir } = tempDir('update-home-link')
+    const old = oldRootOf(dir)
+    mkdirSync(join(old, 'plugin', 'bin'), { recursive: true })
+    writeFileSync(join(old, 'plugin', 'bin', 'update.ts'), '')
+    symlinkSync(old, newRootOf(dir), 'dir')
+    // The resolver picks the new spelling; the runtime may hand the old one.
+    expect(updaterHome(newRootOf(dir), join(old, 'plugin'))).toBe(dir)
+    expect(updaterHome(old, join(newRootOf(dir), 'plugin'))).toBe(dir)
+    expect(updaterHome(old, join(old, 'plugin'))).toBe(dir)
+    expect(homeOfRoot(newRootOf(dir))).toBe(dir)
+  })
+  test('updaterHome: with two real roots only the one the resolver picks is the install', () => {
+    const { dir } = tempDir('update-home-both')
+    for (const root of [oldRootOf(dir), newRootOf(dir)]) {
+      mkdirSync(join(root, 'plugin', 'bin'), { recursive: true })
+      writeFileSync(join(root, 'plugin', 'bin', 'update.ts'), '')
+    }
+    // Neither holds a store: the resolver keeps the old root.
+    expect(updaterHome(oldRootOf(dir), join(oldRootOf(dir), 'plugin'))).toBe(dir)
+    expect(updaterHome(newRootOf(dir), join(newRootOf(dir), 'plugin'))).toBeUndefined()
+  })
+  test('claudeInstall: <home>/.claude/plugins/cache from either root spelling, a link, real paths (agy B2, re-check minor 2)', () => {
+    const { dir } = tempDir('update-claude-install')
+    const home = join(dir, 'home')
+    const cached = join(home, '.claude', 'plugins', 'cache', 'hal-m', 'hal-m', '0.38.0')
+    mkdirSync(cached, { recursive: true })
+    expect(claudeInstall(newRootOf(home), cached)).toBe(true)
+    expect(claudeInstall(oldRootOf(home), cached)).toBe(true)
+    // Not under the cache, or the cache folder itself, or a root no home can be told from.
+    expect(claudeInstall(newRootOf(home), join(home, 'plugins', 'cache', 'x'))).toBe(false)
+    expect(claudeInstall(newRootOf(home), join(home, '.claude', 'plugins', 'cache'))).toBe(false)
+    expect(claudeInstall(join(dir, 'data'), cached)).toBe(false)
+    // The home reached through a link: the plugin folder spelled through it still counts.
+    symlinkSync(home, join(dir, 'home-link'), 'dir')
+    expect(claudeInstall(newRootOf(home), join(dir, 'home-link', '.claude', 'plugins', 'cache', 'hal-m', 'hal-m', '0.38.0'))).toBe(true)
+    // The root a link to the 0.37 root: its real path names the home.
+    mkdirSync(oldRootOf(home), { recursive: true })
+    symlinkSync(oldRootOf(home), join(dir, 'root-link'), 'dir')
+    expect(homeOfRoot(join(dir, 'root-link'))).toBe(realpathSync(home))
+    expect(claudeInstall(join(dir, 'root-link'), cached)).toBe(true)
+  })
   test('running: not final, its updater alive, moved within 30 minutes', () => {
     const now = Date.UTC(2026, 10, 7, 12)
     const alive = (pid: number) => pid === 42
@@ -164,6 +218,9 @@ describe('the handoff and the guards', () => {
     const never = settle({ state: 'starting', lines: ['Starting'], started: at(61), updated: at(61) }, now, alive)!
     expect(never.state).toBe('failed')
     expect(never.lines.at(-1)).toContain('The updater stopped without finishing')
+    // No log path given: the data folder by name, never the 0.37 path.
+    expect(never.lines.at(-1)).toContain('update.log in the HAL-M data folder')
+    expect(settle({ state: 'starting', lines: [], started: at(61), updated: at(61) }, now, alive, '/h/.hal-m/update.log')!.lines.at(-1)).toContain('Its output is in /h/.hal-m/update.log;')
     expect(running({ state: 'starting', lines: [], started: at(61), updated: at(61) }, now, alive)).toBe(false)
     // Its pid is gone: dead at once.
     expect(settle({ state: 'running', lines: [], pid: 7, started: at(5), updated: at(5) }, now, alive)!.state).toBe('failed')
@@ -556,7 +613,8 @@ describe('the Version cell on a stand-in document', () => {
     await withDocument(() => {
       const cell = view.versionCell(info({ updatable: false }), host().host) as FakeNode
       expect(cell.all().some(node => node.tagName === 'button')).toBe(false)
-      expect(cell.textContent).toContain('claude plugin update')
+      expect(cell.textContent).toContain(`claude plugin update ${PLUGIN_ID}`)
+      expect(cell.textContent).not.toContain('mnemosyne@mnemosyne')
     })
   })
 

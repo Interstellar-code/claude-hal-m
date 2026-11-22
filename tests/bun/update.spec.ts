@@ -3,10 +3,11 @@
 // network, no process listing, no install. Release staging runs against a fake
 // runner and a fake fetch in a temp folder.
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { EMBEDDINGS_CACHE_DIR } from '../../hooks/engine'
-import { cmdWrapper } from '../../hooks/launcher'
+import { cmdWrapper, launcherFile, oldLauncherFile, shimText, shWrapper } from '../../hooks/launcher'
+import { modelCacheDir, newRootOf, oldRootOf } from '../../hooks/names'
 import { slashes } from '../../hooks/owner'
 import { cliOf } from '../../bin/install-engine'
 import {
@@ -22,8 +23,16 @@ import {
   nextStatus,
   classifyProcesses,
   compareVersions,
+  defaultModelCache,
   EXIT,
+  findTask,
+  forwardingScript,
+  forwardingVbs,
   homeLayout,
+  OLD_TASK_NAME,
+  SHORTCUT_NAME,
+  sourceProblem,
+  TASK_NAME,
   type InstallState,
   latestReleaseTag,
   launcherFor,
@@ -49,7 +58,8 @@ import {
 import { tempDir } from './helpers'
 
 const HOME = join(tempDir('update-home').dir, 'home')
-const layout = homeLayout(HOME, join(HOME, 'AppData', 'Roaming'))
+// No HALM_ROOT from the shell running the tests: the layout comes from the temp home alone.
+const layout = homeLayout(HOME, join(HOME, 'AppData', 'Roaming'), {})
 const NONE = { chats: [], dashboard: [], others: [] }
 
 describe('parseArgs', () => {
@@ -285,7 +295,8 @@ describe('the launcher', () => {
       guardMode: 'warn',
       vocabulary: 'D:/memory/vocabulary.json',
       root: 'D:/memory',
-      modelCacheDir: EMBEDDINGS_CACHE_DIR,
+      // The 0.37 relative default names the old root: it follows the resolved root (here the new one).
+      modelCacheDir: slashes(modelCacheDir(layout.root)),
     })
   })
   test('the rewrite uses the current templates (0.27.2 clears MNEMOPI_OWNER_PER_CALL)', () => {
@@ -344,13 +355,22 @@ describe('summary', () => {
 
 describe('the Windows shortcut scripts', () => {
   test('run the installed updater hidden, offer --stop-engines only after asking', () => {
-    const script = shortcutScript(homeLayout("C:\\Users\\o'neil"), 'C:\\bun.exe')
-    expect(script).toContain("$updater = 'C:\\Users\\o''neil\\.claude\\mnemosyne\\plugin\\bin\\update.ts'")
+    const home = homeLayout("C:\\Users\\o'neil", undefined, {})
+    const script = shortcutScript(home, 'C:\\bun.exe')
+    // A fresh home: the new root; the quote in the path doubled for PowerShell.
+    expect(home.root).toBe("C:\\Users\\o'neil\\.hal-m")
+    expect(script).toContain(`$updater = '${join(home.plugin, 'bin', 'update.ts').replace(/'/g, "''")}'`)
+    expect(script).toContain(`the Start Menu entry "${SHORTCUT_NAME}" runs it through update-hal-m.vbs`)
     expect(script).toContain(`if ($code -eq ${EXIT.blocked})`)
     expect(script).toContain("'YesNo'")
     expect(script).toContain("if ($answer -eq 'Yes') { & $PSCommandPath -StopEngines }")
     expect(script).toContain('"`r?`n"')
-    expect(shortcutVbs()).toContain('update-mnemosyne.ps1""", 0, False')
+    expect(shortcutVbs()).toContain('update-hal-m.ps1""", 0, False')
+    expect(SHORTCUT_NAME).toBe('Update HAL-M')
+  })
+  test('the 0.37 script names forward to the new scripts', () => {
+    expect(forwardingScript("C:\\Users\\o'neil\\.hal-m-ui\\update-hal-m.ps1")).toContain("& 'C:\\Users\\o''neil\\.hal-m-ui\\update-hal-m.ps1' @args")
+    expect(forwardingVbs('C:\\u\\.hal-m-ui\\update-hal-m.vbs')).toContain('.Run "wscript.exe //B //Nologo ""C:\\u\\.hal-m-ui\\update-hal-m.vbs""", 0, False')
   })
 })
 
@@ -505,5 +525,207 @@ describe('the launcher is replaced by rename', () => {
     expect(writeLauncher(blocked, 'three')).not.toBe(true)
     expect(existsSync(join(blocked, 'inside'))).toBe(true)
     expect(readdirSync(dir).filter(name => name.includes('.next'))).toEqual([])
+  })
+})
+
+// ---- HAL-M Stage 2: the data root, the launcher names, the dashboard task (docs/plans/hal-m-stage2.md 3.2, 3.4) ----
+
+/** A temp home: the 0.37 root, the new one, or the new one as a link to the old (what the session hook makes). */
+function stage2Home(kind: 'old' | 'new' | 'linked' | 'both' | 'none') {
+  const { dir } = tempDir('update-root')
+  const home = join(dir, 'home')
+  mkdirSync(home, { recursive: true })
+  if (kind === 'old' || kind === 'linked' || kind === 'both') mkdirSync(oldRootOf(home), { recursive: true })
+  if (kind === 'new' || kind === 'both') mkdirSync(newRootOf(home), { recursive: true })
+  if (kind === 'linked') symlinkSync(oldRootOf(home), newRootOf(home), 'dir')
+  return home
+}
+
+describe('homeLayout: the root from the resolver (F-B3, F-M5, A-B5)', () => {
+  test('a standalone 0.37 install with no link: the old root, every path under it', () => {
+    const home = stage2Home('old')
+    const l = homeLayout(home, undefined, {})
+    expect(l.root).toBe(oldRootOf(home))
+    expect(l.rootState).toBe('old-only')
+    expect(l.rootWarning).toBeUndefined()
+    expect(l.plugin).toBe(join(oldRootOf(home), 'plugin'))
+    expect(l.staging).toBe(join(oldRootOf(home), 'update-staging'))
+    expect(l.launcher).toBe(join(oldRootOf(home), 'bin', launcherFile(process.platform)))
+    expect(l.oldLauncher).toBe(join(oldRootOf(home), 'bin', oldLauncherFile(process.platform)))
+    // The updater never makes the link: nothing appeared at the new path.
+    expect(existsSync(newRootOf(home))).toBe(false)
+  })
+  test('the 0.37 parent staged 0.38 under <old>/update-staging and ran it with --from: the child finds its install and accepts the source', () => {
+    const home = stage2Home('old')
+    const staged = join(oldRootOf(home), 'update-staging', 'run-1-1')
+    mkdirSync(staged, { recursive: true })
+    const l = homeLayout(home, undefined, {})
+    expect(existsSync(l.root)).toBe(true)
+    expect(sourceProblem(staged, l)).toBeUndefined()
+    expect(sourceProblem(join(l.plugin, 'x'), l)).toContain('is inside')
+  })
+  test('linked (new -> old): the new spelling, every spelling known; staging under the old spelling stays valid', () => {
+    const home = stage2Home('linked')
+    const l = homeLayout(home, undefined, {})
+    expect(l.root).toBe(newRootOf(home))
+    expect(l.rootState).toBe('new-links-old')
+    expect(l.roots).toContain(newRootOf(home))
+    expect(l.roots).toContain(oldRootOf(home))
+    expect(l.roots).toContain(realpathSync(oldRootOf(home)))
+    const staged = join(oldRootOf(home), 'update-staging', 'run-2-2')
+    mkdirSync(staged, { recursive: true })
+    expect(sourceProblem(staged, l)).toBeUndefined()
+    // A source inside the plugin copy is refused whichever spelling names it (real paths).
+    mkdirSync(join(oldRootOf(home), 'plugin', 'x'), { recursive: true })
+    expect(sourceProblem(join(oldRootOf(home), 'plugin', 'x'), l)).toContain('is inside')
+    expect(sourceProblem(join(oldRootOf(home), 'engine'), l)).toContain('is inside')
+  })
+  test('HALM_ROOT, then MNEMOSYNE_ROOT: used as given, never linked', () => {
+    const home = stage2Home('old')
+    expect(homeLayout(home, undefined, { HALM_ROOT: '/data/hal-m' })).toMatchObject({ root: '/data/hal-m', rootState: 'explicit' })
+    expect(homeLayout(home, undefined, { MNEMOSYNE_ROOT: '/data/old' })).toMatchObject({ root: '/data/old', rootState: 'explicit' })
+    expect(homeLayout(home, undefined, { HALM_ROOT: '/data/hal-m', MNEMOSYNE_ROOT: '/data/old' }).root).toBe('/data/hal-m')
+    expect(homeLayout(home, undefined, { HALM_ROOT: '', MNEMOSYNE_ROOT: '/data/old' }).root).toBe('/data/old')
+  })
+  test('only the new root, or a fresh home: the new root', () => {
+    expect(homeLayout(stage2Home('new'), undefined, {}).rootState).toBe('new-only')
+    const fresh = stage2Home('none')
+    expect(homeLayout(fresh, undefined, {})).toMatchObject({ root: newRootOf(fresh), rootState: 'fresh' })
+  })
+  test('two real roots: the resolver warning is in the layout (printed once by the run)', () => {
+    const home = stage2Home('both')
+    const l = homeLayout(home, undefined, {})
+    expect(l.rootState).toBe('both-real')
+    expect(l.root).toBe(oldRootOf(home))
+    expect(l.rootWarning).toContain('two real folders')
+  })
+  test('the dashboard folder: the new one unless only the 0.37 one exists; both are kept', () => {
+    const home = stage2Home('old')
+    const fresh = homeLayout(home, undefined, {})
+    expect(fresh.uiDirs).toEqual([join(home, '.hal-m-ui'), join(home, '.claude', 'mnemosyne-ui')])
+    expect(fresh.uiDir).toBe(join(home, '.hal-m-ui'))
+    mkdirSync(join(home, '.claude', 'mnemosyne-ui'))
+    expect(homeLayout(home, undefined, {}).uiDir).toBe(join(home, '.claude', 'mnemosyne-ui'))
+    mkdirSync(join(home, '.hal-m-ui'))
+    expect(homeLayout(home, undefined, {}).uiDir).toBe(join(home, '.hal-m-ui'))
+  })
+})
+
+describe('the launcher files (F-M1)', () => {
+  test('the old-name launcher is read when the new one is missing; the new one wins; a shim is never read as settings', () => {
+    const home = stage2Home('old')
+    const l = homeLayout(home, undefined, {})
+    mkdirSync(join(l.root, 'bin'), { recursive: true })
+    writeFileSync(l.oldLauncher, 'OLD')
+    expect(readInstalled(l)).toMatchObject({ launcherText: 'OLD', shimText: 'OLD' })
+    writeFileSync(l.launcher, 'NEW')
+    expect(readInstalled(l)).toMatchObject({ launcherText: 'NEW', shimText: 'OLD' })
+    rmSync(l.launcher)
+    writeFileSync(l.oldLauncher, shimText(process.platform))
+    expect(readInstalled(l).launcherText).toBeUndefined()
+    expect(readInstalled(l).shimText).toBe(shimText(process.platform))
+  })
+  test('a 0.37 launcher read from the old name keeps a custom store through the first 0.38 run', () => {
+    const home = stage2Home('old')
+    const l = homeLayout(home, undefined, {})
+    mkdirSync(join(l.root, 'bin'), { recursive: true })
+    const old = shWrapper({ store: '/srv/memory/store', cli: '/x/cli.ts', proxy: '/x/mcp-proxy.ts', activity: '', embeddings: true, guardMode: 'warn', vocabulary: '/srv/memory/vocabulary.json', root: '/srv/memory', modelCacheDir: EMBEDDINGS_CACHE_DIR })
+    writeFileSync(l.oldLauncher, old)
+    expect(launcherFor(l, readInstalled(l).launcherText, false)).toMatchObject({ store: '/srv/memory/store', guardMode: 'warn', activity: '', root: '/srv/memory' })
+  })
+  test('a missing or stale shim makes the launcher part of the plan; a written one does not', () => {
+    const source: SourceState = { dir: '/src', pluginVersion: '0.38.0', engineBuild: 'b', hasUpdater: true }
+    const shim = shimText('win32')
+    const base = { source, expectedLauncher: 'L', expectedShim: shim, processes: NONE, windows: true, force: false, stopEngines: false }
+    const installed: InstallState = { pluginVersion: '0.38.0', engineBuild: 'b', launcherText: 'L' }
+    expect(planUpdate({ ...base, installed })).toMatchObject({ kind: 'update', launcher: true, engine: false, plugin: false })
+    expect(planUpdate({ ...base, installed: { ...installed, shimText: 'L' } })).toMatchObject({ kind: 'update', launcher: true })
+    expect(planUpdate({ ...base, installed: { ...installed, shimText: shim } }).kind).toBe('up-to-date')
+  })
+})
+
+describe('launcherFor: kept paths follow the resolved root (F-B3, A-M4)', () => {
+  /** A 0.37 launcher with every default under the old root (what 0.37 wrote on a Claude Desktop PC). */
+  const oldDefaults = (home: string) => {
+    const old = slashes(oldRootOf(home))
+    return shWrapper({ store: `${old}/store`, cli: `${old}/engine/cli.ts`, proxy: `${old}/plugin/bin/mcp-proxy.ts`, activity: `${old}/activity.jsonl`, embeddings: true, guardMode: 'strict', vocabulary: `${old}/vocabulary.json`, root: old, modelCacheDir: EMBEDDINGS_CACHE_DIR })
+  }
+  test('on the new root (linked): every old-root default moves onto it, the model cache too', () => {
+    const home = stage2Home('linked')
+    const l = homeLayout(home, undefined, {})
+    const root = slashes(newRootOf(home))
+    expect(launcherFor(l, oldDefaults(home), false)).toMatchObject({
+      store: `${root}/store`,
+      activity: `${root}/activity.jsonl`,
+      vocabulary: `${root}/vocabulary.json`,
+      root,
+      modelCacheDir: `${root}/model-cache`,
+    })
+  })
+  test('on the old root: the values and the relative model cache stay as written (no rewrite for the bytes)', () => {
+    const home = stage2Home('old')
+    const l = homeLayout(home, undefined, {})
+    const old = slashes(oldRootOf(home))
+    expect(launcherFor(l, oldDefaults(home), false)).toMatchObject({ store: `${old}/store`, root: old, modelCacheDir: EMBEDDINGS_CACHE_DIR })
+    expect(defaultModelCache(l)).toBe(EMBEDDINGS_CACHE_DIR)
+    expect(launcherFor(l, undefined, false).modelCacheDir).toBe(EMBEDDINGS_CACHE_DIR)
+  })
+  test('no launcher on the new root: the model cache under the root', () => {
+    const home = stage2Home('new')
+    const l = homeLayout(home, undefined, {})
+    expect(launcherFor(l, undefined, false).modelCacheDir).toBe(slashes(modelCacheDir(newRootOf(home))))
+  })
+  test('custom paths stay; the ~/ and relative old forms move', () => {
+    const home = stage2Home('new')
+    const l = homeLayout(home, undefined, {})
+    const text = ["export MNEMOPI_DATA_DIR='D:/memory/store'", "export MNEMOSYNE_VOCABULARY='~/.claude/mnemosyne/vocabulary.json'", 'export PI_CONFIG_DIR=/cache/models', ''].join('\n')
+    expect(launcherFor(l, text, false)).toMatchObject({ store: 'D:/memory/store', vocabulary: `${slashes(newRootOf(home))}/vocabulary.json`, modelCacheDir: '/cache/models' })
+    // ~/.claude/mnemosyne-ui only shares a prefix: not under the old root.
+    expect(launcherFor(l, "export MNEMOPI_DATA_DIR='~/.claude/mnemosyne-ui/store'\n", false).store).toBe('~/.claude/mnemosyne-ui/store')
+  })
+  test('HALM_<X> is read before MNEMOSYNE_<X>; an empty HALM_ACTIVITY_LOG (log off) wins over an old path', () => {
+    const text = ['export HALM_GUARD_MODE=warn', 'export MNEMOSYNE_GUARD_MODE=strict', 'export HALM_ACTIVITY_LOG=', "export MNEMOSYNE_ACTIVITY_LOG='/x/activity.jsonl'", "export HALM_ROOT='/r/new'", "export MNEMOSYNE_ROOT='/r/old'", "export MNEMOSYNE_VOCABULARY='/v/old.json'", ''].join('\n')
+    expect(launcherFor(layout, text, false)).toMatchObject({ guardMode: 'warn', activity: '', root: '/r/new', vocabulary: '/v/old.json' })
+    // An empty guard mode is "not set": the old name, then the default.
+    expect(launcherFor(layout, 'export HALM_GUARD_MODE=\nexport MNEMOSYNE_GUARD_MODE=warn\n', false).guardMode).toBe('warn')
+  })
+})
+
+describe('Windows: both dashboard folders, both root spellings, both task names (A-M8)', () => {
+  test('classifyProcesses: a 0.37 dashboard from the old folder and old root spelling is the dashboard; both updater scripts are left alone', () => {
+    const home = stage2Home('linked')
+    const l = homeLayout(home, undefined, {})
+    const old = oldRootOf(home)
+    const procs: Proc[] = [
+      { pid: 1, ppid: 0, command: `powershell.exe -File "${join(home, '.claude', 'mnemosyne-ui', 'run-ui.ps1')}"` },
+      { pid: 2, ppid: 1, command: `bun.exe "${join(old, 'plugin', 'ui', 'server.ts')}"` },
+      { pid: 3, ppid: 9, command: `bun "${join(old, 'plugin', 'bin', 'mcp-proxy.ts')}"` },
+      { pid: 4, ppid: 3, command: `bun ${cliOf(join(old, 'engine'))} mcp` },
+      { pid: 5, ppid: 9, command: `bun "${join(l.root, 'plugin', 'bin', 'mcp-proxy.ts')}"` },
+      { pid: 6, ppid: 9, command: `powershell.exe -File "${join(home, '.hal-m-ui', 'start-ui.cmd')}"` },
+      { pid: 7, ppid: 9, command: `powershell.exe -File "${join(old, 'plugin', 'update-mnemosyne.ps1')}"` },
+      { pid: 8, ppid: 9, command: `powershell.exe -File "${join(old, 'plugin', 'update-hal-m.ps1')}"` },
+      { pid: 10, ppid: 9, command: `editor "${join(old, 'plugin', 'ui', 'app.ts')}"` },
+    ]
+    const sorted = classifyProcesses(procs, l, false)
+    expect(sorted.dashboard.map(p => p.pid).sort()).toEqual([1, 2, 6])
+    expect(sorted.chats.map(chat => [chat.proxy?.pid, chat.engines.map(e => e.pid)])).toEqual([
+      [3, [4]],
+      [5, []],
+    ])
+    expect(sorted.others.map(p => p.pid)).toEqual([10])
+  })
+  test('classifyProcesses: a root spelling given in the layout matches case-insensitively on Windows', () => {
+    const l = { ...layout, roots: [layout.root, 'C:/Users/u/.claude/mnemosyne'] }
+    const proc: Proc = { pid: 1, ppid: 0, command: 'BUN "C:\\USERS\\U\\.CLAUDE\\MNEMOSYNE\\PLUGIN\\BIN\\MCP-PROXY.TS"' }
+    expect(classifyProcesses([proc], l, true).chats).toHaveLength(1)
+  })
+  test('the task: "HAL-M dashboard" first, then the 0.37 "Mnemosyne dashboard"', async () => {
+    const runnerWith = (names: string[]): Runner => async argv => ({ stdout: '', stderr: '', exitCode: names.includes(argv[3]!) ? 0 : 1 })
+    expect(TASK_NAME).toBe('HAL-M dashboard')
+    expect(OLD_TASK_NAME).toBe('Mnemosyne dashboard')
+    expect(await findTask(runnerWith([OLD_TASK_NAME]))).toBe(OLD_TASK_NAME)
+    expect(await findTask(runnerWith([TASK_NAME, OLD_TASK_NAME]))).toBe(TASK_NAME)
+    expect(await findTask(runnerWith([]))).toBeUndefined()
   })
 })

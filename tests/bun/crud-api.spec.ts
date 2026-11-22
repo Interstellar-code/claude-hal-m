@@ -21,18 +21,22 @@ const AWS_KEY = 'AKIAABCDEFGHIJKLMNOP'
 
 /** Runs with a temp HOME and embeddings off for the whole describe; restores both afterwards. */
 function useTempHome() {
-  const saved = { HOME: process.env.HOME, EMBEDDINGS: process.env.MNEMOSYNE_EMBEDDINGS }
+  // HALM_EMBEDDINGS (0.38); the old MNEMOSYNE_EMBEDDINGS is cleared too, so an inherited value cannot leak in.
+  const saved = { HOME: process.env.HOME, EMBEDDINGS: process.env.HALM_EMBEDDINGS, OLD_EMBEDDINGS: process.env.MNEMOSYNE_EMBEDDINGS }
   return {
     enter(embeddings?: string) {
       process.env.HOME = isolatedEnv('crud-api').HOME
-      if (embeddings === undefined) delete process.env.MNEMOSYNE_EMBEDDINGS
-      else process.env.MNEMOSYNE_EMBEDDINGS = embeddings
+      delete process.env.MNEMOSYNE_EMBEDDINGS
+      if (embeddings === undefined) delete process.env.HALM_EMBEDDINGS
+      else process.env.HALM_EMBEDDINGS = embeddings
     },
     leave() {
       if (saved.HOME === undefined) delete process.env.HOME
       else process.env.HOME = saved.HOME
-      if (saved.EMBEDDINGS === undefined) delete process.env.MNEMOSYNE_EMBEDDINGS
-      else process.env.MNEMOSYNE_EMBEDDINGS = saved.EMBEDDINGS
+      if (saved.EMBEDDINGS === undefined) delete process.env.HALM_EMBEDDINGS
+      else process.env.HALM_EMBEDDINGS = saved.EMBEDDINGS
+      if (saved.OLD_EMBEDDINGS === undefined) delete process.env.MNEMOSYNE_EMBEDDINGS
+      else process.env.MNEMOSYNE_EMBEDDINGS = saved.OLD_EMBEDDINGS
     },
   }
 }

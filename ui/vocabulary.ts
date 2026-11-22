@@ -156,7 +156,7 @@ export const countText = (count: number) => plural(count, 'memory', 'memories')
 
 /** The sentence under the heading: what the lists hold, or that there is no vocabulary yet. */
 export function vocabularyText(data: VocabData): string {
-  if (!data.exists) return 'There is no tag vocabulary yet. Run /mnemosyne-tags in Claude Code to make one.'
+  if (!data.exists) return 'There is no tag vocabulary yet. Run /hal-m-tags in Claude Code to make one.'
   return `${plural(data.tags.length, 'tag', 'tags')} in the vocabulary, ${plural(data.candidates.length, 'candidate', 'candidates')} waiting.`
 }
 

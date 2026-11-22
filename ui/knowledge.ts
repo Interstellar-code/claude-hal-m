@@ -161,8 +161,8 @@ export type ExtractionState = { mode: 'on' | 'off' | 'unknown'; status: string }
 
 /** The extraction line: a model id means it is on; `off` and `unknown` say how to turn it on (C11). */
 export function extractionState(extraction: string): ExtractionState {
-  if (extraction === 'off') return { mode: 'off', status: 'Extraction is off. To turn it on, set extractionModel in the plugin settings and restart the dashboard (/mnemosyne-ui).' }
-  if (extraction === 'unknown' || extraction === '') return { mode: 'unknown', status: 'This dashboard was started without the extraction setting, so it cannot say whether extraction is on. To be sure, set extractionModel in the plugin settings and restart the dashboard (/mnemosyne-ui).' }
+  if (extraction === 'off') return { mode: 'off', status: 'Extraction is off. To turn it on, set extractionModel in the plugin settings and restart the dashboard (/hal-m-ui).' }
+  if (extraction === 'unknown' || extraction === '') return { mode: 'unknown', status: 'This dashboard was started without the extraction setting, so it cannot say whether extraction is on. To be sure, set extractionModel in the plugin settings and restart the dashboard (/hal-m-ui).' }
   return { mode: 'on', status: `Extraction is on (model ${plainLabel(extraction, 60)}). It runs in the background after each save.` }
 }
 
@@ -171,10 +171,10 @@ export function notice(data: KnowledgeData): { title: string; body: string } | n
   const count = total(data)
   const state = extractionState(data.extraction)
   if (state.mode === 'off') {
-    return { title: 'Extraction is off.', body: `${count === 0 ? 'The store holds no knowledge items yet.' : `The ${count} items below were mined while it was on.`} Turn it on with extractionModel in the plugin settings, then restart the dashboard (/mnemosyne-ui); then run /mnemosyne-knowledge to backfill older memories.` }
+    return { title: 'Extraction is off.', body: `${count === 0 ? 'The store holds no knowledge items yet.' : `The ${count} items below were mined while it was on.`} Turn it on with extractionModel in the plugin settings, then restart the dashboard (/hal-m-ui); then run /hal-m-knowledge to backfill older memories.` }
   }
   if (count === 0) {
-    return { title: 'No knowledge items yet.', body: 'Items appear here once extraction has run on a saved memory. Check extractionModel in the plugin settings (restart the dashboard after changing it), or run /mnemosyne-knowledge to backfill older memories.' }
+    return { title: 'No knowledge items yet.', body: 'Items appear here once extraction has run on a saved memory. Check extractionModel in the plugin settings (restart the dashboard after changing it), or run /hal-m-knowledge to backfill older memories.' }
   }
   return null
 }

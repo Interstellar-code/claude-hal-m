@@ -5,8 +5,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { EMBEDDINGS_CACHE_DIR } from '../../hooks/engine'
-import { shWrapper } from '../../hooks/launcher'
+import { launcherText, shimText } from '../../hooks/launcher'
+import { modelCacheDir, OLD_ROOT_MARKER, ROOT_MARKER } from '../../hooks/names'
 import { configText, emptyConfig } from '../../hooks/settings'
 import { cliOf, installRoot, launcherOptions, LockBusy, lockTimingFromEnv, proxyClosure, rootLayout, windowsPathProblem, withInstallLock } from '../../bin/install-engine'
 import { body, engineCall, INSTALLER, isolatedEnv, ROOT, tempDir, toolCall } from './helpers'
@@ -16,7 +16,8 @@ const POSIX = process.platform !== 'win32'
 const mode = (path: string) => statSync(path).mode & 0o777
 
 // The proxy's closure as the review listed it (11 files), plus bin/lockfile.ts,
-// which bin/activity.ts imports since SA.2 moved the lock there.
+// which bin/activity.ts imports since SA.2 moved the lock there, and
+// hooks/names.ts, which bin/mcp-proxy.ts imports for envOf since 0.38 (A-M2).
 const EXPECTED_CLOSURE = [
   'bin/activity.ts',
   'bin/lockfile.ts',
@@ -27,6 +28,7 @@ const EXPECTED_CLOSURE = [
   'hooks/engine-build.ts',
   'hooks/guard.ts',
   'hooks/kinds.ts',
+  'hooks/names.ts',
   'hooks/settings.ts',
   'hooks/surface.ts',
   'hooks/tags.ts',
@@ -119,14 +121,18 @@ describe('--root with HOME at a fake home holding a .claude tree (a, c, g, h, i)
   })
 
   test('the root holds exactly the planned layout, and no lock, .next or .old', () => {
-    expect(readdirSync(root).sort()).toEqual(['.mnemosyne-root', 'activity.jsonl', 'bin', 'config.json', 'engine', 'model-cache', 'plugin', 'store', 'vocabulary.json'])
-    expect(readdirSync(layout.bin)).toEqual(['mnemosyne-mcp'])
+    // A new root gets only the new marker (A-m2); bin holds the launcher and the shim under 0.37's name (3.4).
+    expect(readdirSync(root).sort()).toEqual(['.hal-m-root', 'activity.jsonl', 'bin', 'config.json', 'engine', 'model-cache', 'plugin', 'store', 'vocabulary.json'])
+    expect(readdirSync(layout.bin).sort()).toEqual(['hal-m-mcp', 'mnemosyne-mcp'])
+    expect(layout.marker).toBe(join(root, ROOT_MARKER))
+    expect(layout.modelCache).toBe(modelCacheDir(root))
     expect(readdirSync(layout.plugin).sort()).toEqual(['bin', 'hooks'])
   })
 
-  test.if(POSIX)('(c) folders 0700, the launcher 0700, config, vocabulary and activity log 0600', () => {
+  test.if(POSIX)('(c) folders 0700, the launcher and the shim 0700, config, vocabulary and activity log 0600', () => {
     for (const dir of [root, layout.engine, layout.store, layout.modelCache, layout.plugin, layout.bin]) expect([dir, mode(dir)]).toEqual([dir, 0o700])
     expect(mode(layout.launcher)).toBe(0o700)
+    expect(mode(layout.oldLauncher)).toBe(0o700)
     for (const file of [layout.config, layout.vocabulary, layout.activity, layout.marker]) expect([file, mode(file)]).toEqual([file, 0o600])
   })
 
@@ -136,6 +142,17 @@ describe('--root with HOME at a fake home holding a .claude tree (a, c, g, h, i)
     const names = (replies.get(2)?.result?.tools ?? []).map((tool: { name: string }) => tool.name)
     expect(names).toContain('memory_remember')
     expect(names).toContain('memory_recall')
+    expect(treeHash(home)).toBe(before)
+  }, INSTALL_TIMEOUT)
+
+  test('the launcher is launcherText for the root, the shim under the old name is shimText, and the shim answers too', async () => {
+    expect(layout.launcher).toBe(join(root, 'bin', process.platform === 'win32' ? 'hal-m-mcp.cmd' : 'hal-m-mcp'))
+    expect(layout.oldLauncher).toBe(join(root, 'bin', process.platform === 'win32' ? 'mnemosyne-mcp.cmd' : 'mnemosyne-mcp'))
+    expect(readFileSync(layout.launcher, 'utf8')).toBe(launcherText(launcherOptions(layout, false), process.platform))
+    expect(readFileSync(layout.oldLauncher, 'utf8')).toBe(shimText(process.platform))
+    // An MCP config that still names bin/mnemosyne-mcp reaches the same server.
+    const { replies } = await launch(layout.oldLauncher, rootEnv(home), [INITIALIZE])
+    expect(replies.get(1)?.result?.serverInfo?.name).toBe('mnemosyne')
     expect(treeHash(home)).toBe(before)
   }, INSTALL_TIMEOUT)
 
@@ -153,24 +170,24 @@ describe('--root with HOME at a fake home holding a .claude tree (a, c, g, h, i)
   test('(i) the launcher under the root differs from the plugin launcher for the same options only in paths', () => {
     const written = readFileSync(layout.launcher, 'utf8')
     const ours = launcherOptions(layout, false)
-    expect(written).toBe(shWrapper(ours))
-    // The plugin's launcher for the same settings (embeddings off, strict, log on).
-    const pluginRoot = '/home/u/.claude/mnemosyne'
+    expect(written).toBe(launcherText(ours, 'linux'))
+    // The plugin's launcher for the same settings (embeddings off, strict, log on), under the new root.
+    const pluginRoot = '/home/u/.hal-m'
     const plugin = {
       store: `${pluginRoot}/store`,
       cli: `${pluginRoot}/engine/node_modules/@oh-my-pi/pi-mnemopi/src/cli.ts`,
-      proxy: '/plugins/mnemosyne/bin/mcp-proxy.ts',
+      proxy: '/plugins/hal-m/bin/mcp-proxy.ts',
       activity: `${pluginRoot}/activity.jsonl`,
       embeddings: false,
       guardMode: 'strict',
       vocabulary: `${pluginRoot}/vocabulary.json`,
       root: pluginRoot,
-      modelCacheDir: EMBEDDINGS_CACHE_DIR,
+      modelCacheDir: modelCacheDir(pluginRoot),
     }
-    // The root's cache folder is quoted and the plugin's default is not: that quoting is part of the path.
-    let mapped = written.split(`'${ours.modelCacheDir}'`).join(plugin.modelCacheDir)
+    // Both cache folders are absolute, so both are quoted the same way.
+    let mapped = written
     for (const key of ['cli', 'proxy', 'activity', 'vocabulary', 'store', 'modelCacheDir', 'root'] as const) mapped = mapped.split(ours[key]).join(plugin[key])
-    expect(mapped).toBe(shWrapper(plugin))
+    expect(mapped).toBe(launcherText(plugin, 'linux'))
   })
 
   test('(g) config.json and vocabulary.json are created when absent and kept byte for byte by a second install', async () => {
@@ -274,6 +291,7 @@ describe('(d) two installs at once into one root', () => {
     const note = '{"pid":1}\n'
     writeFileSync(layout.lock, note)
     const engineBefore = readdirSync(layout.engine).sort()
+    // The old name alone still sets the wait.
     const ran = await runRoot(['--root', root], rootEnv(home, { MNEMOSYNE_LOCK_WAIT_MS: '1500' }))
     expect(ran.exitCode).toBe(3)
     expect(ran.stderr.trim()).toBe(`install-engine: another install holds ${layout.lock}`)
@@ -281,6 +299,19 @@ describe('(d) two installs at once into one root', () => {
     expect(readdirSync(layout.engine).sort()).toEqual(engineBefore)
     rmSync(layout.lock)
   }, INSTALL_TIMEOUT)
+
+  test('HALM_LOCK_WAIT_MS sets the wait and wins over MNEMOSYNE_LOCK_WAIT_MS', async () => {
+    const note = '{"pid":1}\n'
+    writeFileSync(layout.lock, note)
+    // Were the old name read first, this would wait 10 minutes and time out.
+    const started = Date.now()
+    const ran = await runRoot(['--root', root], rootEnv(home, { HALM_LOCK_WAIT_MS: '1500', MNEMOSYNE_LOCK_WAIT_MS: '600000' }))
+    expect(ran.exitCode).toBe(3)
+    expect(ran.stderr.trim()).toBe(`install-engine: another install holds ${layout.lock}`)
+    expect(Date.now() - started).toBeLessThan(60_000)
+    expect(readFileSync(layout.lock, 'utf8')).toBe(note)
+    rmSync(layout.lock)
+  }, 90_000)
 })
 
 describe('(e) the install lock', () => {
@@ -459,7 +490,7 @@ describe('refusals', () => {
     expect(readFileSync(file, 'utf8')).toBe('x')
   })
 
-  test('MNEMOSYNE_LOCK_WAIT_MS: blank or bad keeps the default wait, a number sets it', () => {
+  test('HALM_LOCK_WAIT_MS (or MNEMOSYNE_LOCK_WAIT_MS): blank or bad keeps the default wait, a number sets it', () => {
     expect(lockTimingFromEnv(undefined)).toEqual({})
     expect(lockTimingFromEnv('')).toEqual({})
     expect(lockTimingFromEnv('  ')).toEqual({})
@@ -475,9 +506,53 @@ describe('refusals', () => {
     writeFileSync(join(root, 'notes.txt'), 'mine')
     const ran = await runRoot(['--root', root], rootEnv(join(temp.dir, 'home')))
     expect(ran.exitCode).toBe(1)
-    expect(ran.stderr.trim()).toBe(`install-engine: ${root} is not empty and has no .mnemosyne-root from an earlier install; pass an empty or new folder`)
+    expect(ran.stderr.trim()).toBe(`install-engine: ${root} is not empty and has no .hal-m-root (or .mnemosyne-root) from an earlier install; pass an empty or new folder`)
     expect(readdirSync(root)).toEqual(['notes.txt'])
     rmSync(join(temp.dir, 'r-busy'), { recursive: true })
+  })
+
+  test('a non-empty root with only 0.37\'s .mnemosyne-root is accepted: it gets .hal-m-root and keeps the old marker', async () => {
+    // A plugin root with the proxy closure but no engine copy: the install passes the marker
+    // check, marks the root, takes the lock, then stops at "no engine copy" without touching the rest.
+    const plugin = join(temp.dir, 'p-no-engine')
+    for (const rel of proxyClosure(ROOT)) {
+      mkdirSync(join(plugin, rel, '..'), { recursive: true })
+      writeFileSync(join(plugin, rel), readFileSync(join(ROOT, rel)))
+    }
+    const root = join(temp.dir, 'r-old-marker')
+    mkdirSync(root)
+    const oldMarker = '{"by":"claude-mnemosyne bin/install-engine.ts --root"}\n'
+    writeFileSync(join(root, OLD_ROOT_MARKER), oldMarker)
+    writeFileSync(join(root, 'notes.txt'), 'mine')
+    const error = await installRoot(plugin, root).catch(err => err)
+    expect(error.message).toBe(`no engine copy at ${join(plugin, 'engine')}`)
+    // The folders the locked step makes before install() runs; the lock itself is gone.
+    expect(readdirSync(root).sort()).toEqual(['.hal-m-root', '.mnemosyne-root', 'bin', 'model-cache', 'notes.txt', 'store'])
+    expect(existsSync(join(root, ROOT_MARKER))).toBe(true)
+    expect(readFileSync(join(root, OLD_ROOT_MARKER), 'utf8')).toBe(oldMarker)
+    expect(readFileSync(join(root, 'notes.txt'), 'utf8')).toBe('mine')
+    expect(existsSync(join(root, 'engine.lock'))).toBe(false)
+    rmSync(root, { recursive: true })
+    rmSync(plugin, { recursive: true })
+  })
+
+  test('a non-empty root with the new .hal-m-root alone is accepted too', async () => {
+    const plugin = join(temp.dir, 'p-no-engine-2')
+    for (const rel of proxyClosure(ROOT)) {
+      mkdirSync(join(plugin, rel, '..'), { recursive: true })
+      writeFileSync(join(plugin, rel), readFileSync(join(ROOT, rel)))
+    }
+    const root = join(temp.dir, 'r-new-marker')
+    mkdirSync(root)
+    writeFileSync(join(root, ROOT_MARKER), 'mine\n')
+    writeFileSync(join(root, 'notes.txt'), 'mine')
+    const error = await installRoot(plugin, root).catch(err => err)
+    expect(error.message).toBe(`no engine copy at ${join(plugin, 'engine')}`)
+    // The marker is created only when absent: an existing one is kept byte for byte, and no old one is added.
+    expect(readFileSync(join(root, ROOT_MARKER), 'utf8')).toBe('mine\n')
+    expect(existsSync(join(root, OLD_ROOT_MARKER))).toBe(false)
+    rmSync(root, { recursive: true })
+    rmSync(plugin, { recursive: true })
   })
 
   test('(j) on Windows a root or derived path holding ", % or ! is refused (the check alone)', () => {

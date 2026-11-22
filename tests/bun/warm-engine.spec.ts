@@ -41,6 +41,26 @@ function fakeProcess() {
 const tick = () => new Promise(resolve => setTimeout(resolve, 5))
 
 describe('the warm engine with a fake process', () => {
+  test('the model cache: HALM_MODEL_CACHE, then MNEMOSYNE_MODEL_CACHE, then the dashboard\'s modelCacheDir option', async () => {
+    const piOf = async (baseEnv: Record<string, string | undefined>, modelCacheDir?: string) => {
+      let seen: Record<string, string | undefined> = {}
+      const spawn: WarmSpawn = (_cmd, env) => {
+        seen = env
+        const fake = fakeProcess()
+        setTimeout(() => fake.answer(1, 'ok'), 1)
+        return fake.proc
+      }
+      const warm = createWarmEngine({ cli: 'cli.ts', store: '/store', spawn, baseEnv, ...(modelCacheDir ? { modelCacheDir } : {}) })
+      await warm.call('global', ['mnemopi_stats', {}])
+      warm.stop()
+      return seen.PI_CONFIG_DIR
+    }
+    expect(await piOf({ HALM_MODEL_CACHE: '/new', MNEMOSYNE_MODEL_CACHE: '/old' }, '/root/model-cache')).toBe('/new')
+    expect(await piOf({ MNEMOSYNE_MODEL_CACHE: '/old' }, '/root/model-cache')).toBe('/old')
+    expect(await piOf({ HALM_MODEL_CACHE: '', MNEMOSYNE_MODEL_CACHE: '/old' })).toBe('/old')
+    expect(await piOf({}, '/root/model-cache')).toBe('/root/model-cache')
+  })
+
   test('a call carries the owner, answers come back by id, one call at a time, one process for all', async () => {
     const fakes: ReturnType<typeof fakeProcess>[] = []
     const envs: Record<string, string | undefined>[] = []

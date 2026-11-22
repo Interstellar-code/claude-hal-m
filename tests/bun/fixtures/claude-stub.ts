@@ -3,16 +3,18 @@
 // ~/.claude/settings.json. Its "settings.json" is $HOME/.claude/settings.json of the temp HOME the
 // spec gives it; it keeps the file's other keys, as the real CLI does, and writes only
 // pluginConfigs["<id>"].options. The option schema is this plugin's own userConfig (plugin.json).
-//   CLAUDE_STUB_ID            the installed plugin id (default mnemosyne@mnemosyne); any other id is "not installed"
+//   CLAUDE_STUB_ID            the one installed plugin id; unset: hal-m@hal-m and the old mnemosyne@mnemosyne both
+//                             answer (each keeps its own pluginConfigs entry); any other id is "not installed"
 //   CLAUDE_STUB_SCHEMA_EXTRA  JSON object of extra schema fields, for example {"expireUnusedDays":{...}}
 //   CLAUDE_STUB_LOG           a file that gets one JSON line per call: { argv, home, keys }
 //   CLAUDE_STUB_MODE          ok (default) | refuse (a write exits 1) | drop (a write says ok and stores nothing) | garbage (--json is not JSON)
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { OLD_PLUGIN_ID, PLUGIN_ID } from '../../../hooks/names'
 
 const argv = process.argv.slice(2)
 const home = process.env.HOME ?? ''
-const id = process.env.CLAUDE_STUB_ID ?? 'mnemosyne@mnemosyne'
+const ids = process.env.CLAUDE_STUB_ID ? [process.env.CLAUDE_STUB_ID] : [PLUGIN_ID, OLD_PLUGIN_ID]
 const mode = process.env.CLAUDE_STUB_MODE ?? 'ok'
 const settingsFile = join(home, '.claude', 'settings.json')
 
@@ -40,8 +42,9 @@ const readSettings = (): Record<string, any> => {
 
 const [group, verb, target, flag] = argv
 if (group !== 'plugin' || verb !== 'configure' || !target) fail('stub: only `plugin configure <id> --json|--values-stdin`')
-if (target !== id) fail(`No installed plugin has the id "${target}". Use its full id (name@marketplace), as \`claude plugin list\` shows it.`)
+if (!ids.includes(target!)) fail(`No installed plugin has the id "${target}". Use its full id (name@marketplace), as \`claude plugin list\` shows it.`)
 
+const id = target!
 const fields = schema()
 const stored = (): Record<string, string> => readSettings().pluginConfigs?.[id]?.options ?? {}
 

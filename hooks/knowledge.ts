@@ -10,7 +10,7 @@
 //
 // The pending file is written BEFORE the model call and removed after the store
 // answers stored, empty or gone (or at the prompt step when the memory is gone),
-// so a cut call (Esc, a session end) leaves one file for /mnemosyne-knowledge to
+// so a cut call (Esc, a session end) leaves one file for /hal-m-knowledge to
 // finish, and a newer update's entry is never removed.
 
 /** One engine request: [tool, arguments]. */

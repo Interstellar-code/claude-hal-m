@@ -12,7 +12,7 @@ import { engineEnv, isolatedEnv, ROOT, runInstaller, tempDir, toolCall } from '.
 
 const PROXY = join(ROOT, 'bin', 'mcp-proxy.ts')
 
-/** One proxy process: sends `messages`, closes stdin, returns its replies by id. `log` is MNEMOSYNE_ACTIVITY_LOG; `extraEnv` adds variables such as MNEMOSYNE_GUARD_MODE. */
+/** One proxy process: sends `messages`, closes stdin, returns its replies by id. `log` is MNEMOSYNE_ACTIVITY_LOG (the old spelling, read as the fallback of HALM_ACTIVITY_LOG); `extraEnv` adds variables such as MNEMOSYNE_GUARD_MODE. */
 async function proxy(cli: string, store: string, messages: readonly object[], owner = 'global', log = '', extraEnv: Record<string, string> = {}) {
   const child = Bun.spawn([process.execPath, PROXY], {
     env: { ...(process.env as Record<string, string>), ...isolatedEnv(), ...engineEnv(store, owner), MNEMOSYNE_CLI: cli, MNEMOSYNE_ACTIVITY_LOG: log, ...extraEnv },
@@ -424,7 +424,7 @@ describe('the proxy against a real installed engine', () => {
         toolCall(2, 'memory_stats', {}),
       ])
       expect(replies.get(1).error.message).toContain(`needs the HAL-M engine build ${ENGINE_BUILD}`)
-      expect(replies.get(1).error.message).toContain('/mnemosyne-setup')
+      expect(replies.get(1).error.message).toContain('/hal-m-setup')
       expect(text(replies.get(2)).status).toBe('ok') // the other tools still work
     } finally {
       writeFileSync(pkgPath, original)
@@ -499,7 +499,7 @@ describe('the proxy against a real installed engine', () => {
       expect(reply.status).toBe('not_found')
       expect(reply.owner).toBe('project-alpha-1a2b')
       expect(reply.hint).toContain('belongs to project-alpha-1a2b, not to global')
-      expect(reply.hint).toContain('MNEMOSYNE_OWNER=project-alpha-1a2b')
+      expect(reply.hint).toContain('HALM_OWNER=project-alpha-1a2b')
     }
     const missing = text(replies.get(4))
     expect(missing.status).toBe('not_found')
@@ -670,7 +670,7 @@ describe('the proxy against a real installed engine', () => {
       )
       expect(replies.get(1).error.code).toBe(-32000)
       expect(replies.get(1).error.message).toContain(`memory_remember needs the HAL-M engine build ${ENGINE_BUILD}; installed is 18.12.3`)
-      expect(replies.get(1).error.message).toContain('/mnemosyne-setup')
+      expect(replies.get(1).error.message).toContain('/hal-m-setup')
       // the same error as the update refusal, apart from the tool name
       expect(replies.get(1).error.message.replace('memory_remember', 'memory_update')).toBe(replies.get(2).error.message)
       expect(replies.get(1).result).toBeUndefined()
@@ -814,17 +814,21 @@ for await (const chunk of Bun.stdin.stream()) {
   const readLog = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)) : [])
 
   /** The real proxy over raw stdin bytes; returns its forwarded lines, its replies to the client, and the activity lines it wrote. */
-  async function rawProxy(stdin: string, log: string) {
+  /** `env` adds or overrides variables; `drop` removes names from the child's environment (to run with only one spelling). */
+  async function rawProxy(stdin: string, log: string, env: Record<string, string> = {}, drop: string[] = []) {
     writeFileSync(capture, '')
+    const childEnv: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+      ...isolatedEnv(),
+      ...engineEnv(join(temp.dir, 'store'), 'global'),
+      MNEMOSYNE_CLI: fakeEngine,
+      MNEMOSYNE_ACTIVITY_LOG: log,
+      MNEMOSYNE_CAPTURE: capture,
+      ...env,
+    }
+    for (const name of drop) delete childEnv[name]
     const child = Bun.spawn([process.execPath, PROXY], {
-      env: {
-        ...(process.env as Record<string, string>),
-        ...isolatedEnv(),
-        ...engineEnv(join(temp.dir, 'store'), 'global'),
-        MNEMOSYNE_CLI: fakeEngine,
-        MNEMOSYNE_ACTIVITY_LOG: log,
-        MNEMOSYNE_CAPTURE: capture,
-      },
+      env: childEnv,
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -860,6 +864,43 @@ for await (const chunk of Bun.stdin.stream()) {
     const { log: lines } = await rawProxy(`${initialize({ name: 'codex-mcp-client', version: '1.0.0' })}\n${recall()}\n`, log)
     expect(lines).toHaveLength(1)
     expect(lines[0]).toMatchObject({ action: 'recall', origin: 'external', client: 'codex-mcp-client' })
+  })
+
+  // HAL-M Stage 2 (plan 3.3): HALM_<X> first, MNEMOSYNE_<X> as the fallback; an empty HALM_ACTIVITY_LOG is "log off".
+  test('HALM.1: HALM_CLI and HALM_ACTIVITY_LOG alone run the proxy and write the log', async () => {
+    const log = join(temp.dir, 'logs-halm-new', 'activity.jsonl')
+    const { replies, log: lines } = await rawProxy(`${initialize()}\n${recall()}\n`, '', { HALM_CLI: fakeEngine, HALM_ACTIVITY_LOG: log }, ['MNEMOSYNE_CLI', 'MNEMOSYNE_ACTIVITY_LOG'])
+    expect(replies.get(2)?.result).toBeDefined()
+    expect(readLog(log)).toHaveLength(1)
+    expect(lines).toEqual([])
+  })
+
+  test('HALM.2: the old MNEMOSYNE_CLI and MNEMOSYNE_ACTIVITY_LOG still work when no HALM_ name is set', async () => {
+    const log = join(temp.dir, 'logs-halm-old', 'activity.jsonl')
+    const { replies, log: lines } = await rawProxy(`${initialize()}\n${recall()}\n`, log, {}, ['HALM_CLI', 'HALM_ACTIVITY_LOG'])
+    expect(replies.get(2)?.result).toBeDefined()
+    expect(lines).toHaveLength(1)
+  })
+
+  test('HALM.3: HALM_ACTIVITY_LOG wins over an old path; empty HALM_ACTIVITY_LOG is off even with an old path set', async () => {
+    const oldLog = join(temp.dir, 'logs-halm-both-old', 'activity.jsonl')
+    const newLog = join(temp.dir, 'logs-halm-both-new', 'activity.jsonl')
+    const both = await rawProxy(`${initialize()}\n${recall()}\n`, oldLog, { HALM_ACTIVITY_LOG: newLog })
+    expect(both.log).toEqual([])
+    expect(readLog(newLog)).toHaveLength(1)
+    const offLog = join(temp.dir, 'logs-halm-off', 'activity.jsonl')
+    const off = await rawProxy(`${initialize()}\n${recall()}\n`, offLog, { HALM_ACTIVITY_LOG: '' })
+    expect(off.replies.get(2)?.result).toBeDefined()
+    expect(existsSync(offLog)).toBe(false)
+  })
+
+  test('HALM.4: with neither CLI name set the proxy stops and names HALM_CLI and hal-m-mcp', async () => {
+    const withoutCli = (from: Record<string, string>) => Object.fromEntries(Object.entries(from).filter(([key]) => key !== 'HALM_CLI' && key !== 'MNEMOSYNE_CLI'))
+    const child = Bun.spawn([process.execPath, PROXY], { env: { ...withoutCli(process.env as Record<string, string>), ...isolatedEnv() }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
+    child.stdin.end()
+    const [, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain('HALM_CLI is not set: run this through hal-m-mcp.')
   })
 
   test('CTX.2.a2: a client that sends no clientInfo is logged as unknown', async () => {

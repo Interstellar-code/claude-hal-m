@@ -10,6 +10,7 @@
 // The functions are pure except the `draw*` builders, which make elements with createElement and
 // textContent only (no HTML is ever parsed from data; the CSP refuses inline styles and scripts).
 // ui/app.ts fetches the reply and passes in a SettingsHost for the network, the clipboard and the browser.
+import { commandName, oldCommandName } from '../hooks/names'
 import { bytes } from './health'
 
 export type Group = { id: string; label: string }
@@ -830,11 +831,14 @@ function drawBrowserRows(host: SettingsHost): HTMLElement[] {
 // ---- Setup and backups (UI.3) ----
 
 export const SETUP_COMMANDS: readonly { command: string; what: string }[] = [
-  { command: '/mnemosyne-setup', what: 'Installs or repairs the engine, the model and the wrapper.' },
-  { command: '/mnemosyne-embed', what: 'Turns on meaning search and builds the vectors.' },
-  { command: '/mnemosyne-tags', what: 'Reviews and tidies the tag vocabulary.' },
-  { command: '/mnemosyne-knowledge', what: 'Extracts facts and preferences from memories.' },
+  { command: `/${commandName('setup')}`, what: 'Installs or repairs the engine, the model and the wrapper.' },
+  { command: `/${commandName('embed')}`, what: 'Turns on meaning search and builds the vectors.' },
+  { command: `/${commandName('tags')}`, what: 'Reviews and tidies the tag vocabulary.' },
+  { command: `/${commandName('knowledge')}`, what: 'Extracts facts and preferences from memories.' },
 ]
+
+/** Said once under the list: the 0.37 command names stay as aliases. */
+export const OLD_COMMANDS_NOTE = `The old names (/${oldCommandName('setup')} and the rest) still work.`
 
 type SetupFacts = {
   engine?: { installed?: boolean; build?: string | null; expected?: string; current?: boolean }
@@ -904,6 +908,7 @@ function drawSetup(rows: readonly SettingRow[], view: SettingsView, host: Settin
       list.append(li)
     }
     card.append(list)
+    card.append(el('p', OLD_COMMANDS_NOTE, 'set-help small muted'))
     out.push(card)
   }
   if (backups !== undefined) {

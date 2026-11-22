@@ -27,11 +27,13 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { Database } from 'bun:sqlite'
 import { EMBEDDINGS_CACHE_DIR, EMBEDDINGS_MODEL } from '../hooks/engine'
 import { INSTALL_CHECK_TIMEOUT_MS, INSTALL_LOCK_WAIT_MS, INSTALL_STEP_TIMEOUT_MS } from '../hooks/engine-build'
-import { cmdWrapper, shWrapper } from '../hooks/launcher'
+import { launcherFile, launcherText, oldLauncherFile, shimText } from '../hooks/launcher'
+import { envOf, modelCacheDir, OLD_ROOT_MARKER, resolveRootSync, ROOT_MARKER, type RootFs } from '../hooks/names'
 import { slashes } from '../hooks/owner'
 import { configText, emptyConfig } from '../hooks/settings'
 import { VOCAB_FILE } from '../hooks/vocab'
 import { takeLock } from './lockfile'
+import { nodeRootFs } from './migrate-root'
 import { configFile } from './settings'
 import { initVocabulary } from './vocab'
 
@@ -342,8 +344,9 @@ export async function install(pluginRoot: string, engineDir: string, storeDir: s
 // LOCK_REFRESH_MS, so a healthy long install is never stale, and removes it in a
 // finally, after a failed install too. A second install polls every
 // LOCK_POLL_MS for up to LOCK_WAIT_MS (longer than the 240 s install step plus
-// the 300 s check), then gives up with LockBusy. /mnemosyne-setup passes a
-// shorter wait (SETUP_LOCK_WAIT_MS) through MNEMOSYNE_LOCK_WAIT_MS. SIGTERM and
+// the 300 s check), then gives up with LockBusy. /hal-m-setup passes a
+// shorter wait (SETUP_LOCK_WAIT_MS) through HALM_LOCK_WAIT_MS (the hook sets
+// MNEMOSYNE_LOCK_WAIT_MS to the same value; HALM_ wins when both are set). SIGTERM and
 // SIGINT remove a held lock before the process exits.
 export const LOCK_STALE_MS = 30 * 60_000
 export const LOCK_WAIT_MS = INSTALL_LOCK_WAIT_MS
@@ -351,7 +354,7 @@ export const LOCK_POLL_MS = 1_000
 export const LOCK_REFRESH_MS = 60_000
 export type LockTiming = { waitMs?: number; pollMs?: number; staleMs?: number; refreshMs?: number }
 
-/** MNEMOSYNE_LOCK_WAIT_MS as a lock timing; empty, blank or not a number keeps the default wait. */
+/** HALM_LOCK_WAIT_MS (or MNEMOSYNE_LOCK_WAIT_MS), read with envOf, as a lock timing; empty, blank or not a number keeps the default wait. */
 export function lockTimingFromEnv(value: string | undefined): LockTiming {
   if (value === undefined || value.trim() === '') return {}
   const waitMs = Number(value)
@@ -432,9 +435,11 @@ export function proxyClosure(pluginRoot: string, entry = 'bin/mcp-proxy.ts') {
   return [...seen].sort()
 }
 
-// Marks a folder as a root this installer made: a non-empty --root without it
-// is refused, so a typo cannot fill an unrelated folder (or a home) with files.
-export const ROOT_MARKER = '.mnemosyne-root'
+// A root's marker (hooks/names.ts ROOT_MARKER, .hal-m-root) marks a folder as a
+// root this installer made: a non-empty --root with neither it nor 0.37's
+// OLD_ROOT_MARKER (.mnemosyne-root) is refused, so a typo cannot fill an
+// unrelated folder (or a home) with files. A new root gets .hal-m-root; a 0.37
+// root keeps its .mnemosyne-root (never deleted) and gets .hal-m-root beside it.
 
 /** Every path under a standalone root (`--root`). */
 export function rootLayout(root: string, store = join(root, 'store')) {
@@ -442,15 +447,18 @@ export function rootLayout(root: string, store = join(root, 'store')) {
     root,
     engine: join(root, 'engine'),
     store,
-    modelCache: join(root, 'model-cache'),
+    modelCache: modelCacheDir(root),
     plugin: join(root, 'plugin'),
     bin: join(root, 'bin'),
-    launcher: join(root, 'bin', `mnemosyne-mcp${IS_WINDOWS ? '.cmd' : ''}`),
+    // The launcher (bin/hal-m-mcp, .cmd on Windows) and, under 0.37's name, the shim that runs it (3.4).
+    launcher: join(root, 'bin', launcherFile(process.platform)),
+    oldLauncher: join(root, 'bin', oldLauncherFile(process.platform)),
     config: configFile(root),
     vocabulary: join(root, VOCAB_FILE),
     activity: join(root, 'activity.jsonl'),
     lock: join(root, 'engine.lock'),
     marker: join(root, ROOT_MARKER),
+    oldMarker: join(root, OLD_ROOT_MARKER),
   }
 }
 
@@ -480,9 +488,11 @@ const createOnly = (file: string, text: string) => {
  *   store/               (or --store) the memory store
  *   model-cache/         PI_CONFIG_DIR, absolute, so the engine never looks under $HOME
  *   plugin/{bin,hooks}/  the proxy's import closure, replaced whole at each install
- *   bin/mnemosyne-mcp    the launcher (.cmd on Windows), rewritten at each install, 0700
+ *   bin/hal-m-mcp        the launcher (.cmd on Windows), rewritten at each install, 0700
+ *   bin/mnemosyne-mcp    the shim under 0.37's name that runs it, rewritten at each install, 0700
  *   config.json, vocabulary.json, activity.jsonl   created once, 0600; existing ones are kept
- *   .mnemosyne-root      the marker, 0600; a non-empty root without it is refused
+ *   .hal-m-root          the marker, 0600; a non-empty root with neither it nor
+ *                        0.37's .mnemosyne-root is refused (that one is kept as it is)
  * Folders are 0700 on POSIX. A same-build rerun is a full reinstall.
  */
 export async function installRoot(pluginRoot: string, rootDir: string, options: { store?: string; embeddings?: boolean; lock?: LockTiming } = {}) {
@@ -502,14 +512,15 @@ export async function installRoot(pluginRoot: string, rootDir: string, options: 
     if (isInside(store, folder)) throw new InstallError(`the store ${store} is inside ${folder}; refusing to install there`)
   }
   if (existsSync(root) && !statSync(root).isDirectory()) throw new InstallError(`--root ${root} is a file, not a folder`)
-  if (existsSync(root) && !existsSync(layout.marker) && readdirSync(root).length > 0) {
-    throw new InstallError(`${root} is not empty and has no ${ROOT_MARKER} from an earlier install; pass an empty or new folder`)
+  if (existsSync(root) && !existsSync(layout.marker) && !existsSync(layout.oldMarker) && readdirSync(root).length > 0) {
+    throw new InstallError(`${root} is not empty and has no ${ROOT_MARKER} (or ${OLD_ROOT_MARKER}) from an earlier install; pass an empty or new folder`)
   }
   const closure = proxyClosure(resolve(pluginRoot))
   secureDir(root)
   // Before the lock, so a second install that starts now finds the root marked.
+  // A 0.37 root (only .mnemosyne-root) gets the new marker too; its old one stays.
   try {
-    createOnly(layout.marker, `${JSON.stringify({ by: 'claude-mnemosyne bin/install-engine.ts --root', created: new Date().toISOString() })}\n`)
+    createOnly(layout.marker, `${JSON.stringify({ by: 'HAL-M bin/install-engine.ts --root', created: new Date().toISOString() })}\n`)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
   }
@@ -536,8 +547,10 @@ export async function installRoot(pluginRoot: string, rootDir: string, options: 
       rmSync(old, { recursive: true, force: true })
 
       const launcher = launcherOptions(layout, options.embeddings === true)
-      writeFileSync(layout.launcher, IS_WINDOWS ? cmdWrapper(launcher) : shWrapper(launcher))
-      if (!IS_WINDOWS) chmodSync(layout.launcher, 0o700)
+      // T1's generators (hooks/launcher.ts): the launcher, and the shim under 0.37's name for MCP configs that still name it.
+      writeFileSync(layout.launcher, launcherText(launcher, process.platform))
+      writeFileSync(layout.oldLauncher, shimText(process.platform))
+      if (!IS_WINDOWS) for (const file of [layout.launcher, layout.oldLauncher]) chmodSync(file, 0o700)
 
       createOnly(layout.config, configText(emptyConfig()))
       // Seeded from the store, which must exist first (bin/vocab.ts).
@@ -550,6 +563,27 @@ export async function installRoot(pluginRoot: string, rootDir: string, options: 
     },
     options.lock,
   )
+}
+
+/**
+ * PI_CONFIG_DIR for the plugin form's check (/hal-m-setup, the auto-update):
+ * the value hooks/register.ts gives the engine at run time, so a model the
+ * check downloads is the one the plugin finds. 0.37's HOME-relative
+ * EMBEDDINGS_CACHE_DIR while the data root is the 0.37 folder, else
+ * modelCacheDir(root). The root comes from the one resolver (read only), as
+ * register.ts resolves it: HOME (USERPROFILE on Windows), no explicit root. A
+ * fresh ~/.hal-m install so never creates ~/.claude/mnemosyne by downloading
+ * the model there (that would leave two real roots). No usable home: the 0.37
+ * value, as before.
+ */
+export function pluginModelCacheDir(env: Readonly<Record<string, string | undefined>>, fs: RootFs = nodeRootFs, platform: string = process.platform) {
+  const windows = platform === 'win32'
+  const home = slashes(env.HOME || (windows ? (env.USERPROFILE ?? '') : ''))
+  if (!home || !(isAbsolute(home) || (windows && /^[A-Za-z]:\//.test(home)))) return EMBEDDINGS_CACHE_DIR
+  const decision = resolveRootSync(fs, home, { platform: windows ? 'win32' : 'posix' })
+  // The resolver's own answer, compared as register.ts compares it: the old root is chosen exactly as oldRootOf(home).
+  const root = slashes(decision.root)
+  return root === slashes(decision.oldRoot) ? EMBEDDINGS_CACHE_DIR : modelCacheDir(root)
 }
 
 /** The launcher's options for a standalone root: forward slashes on every OS, as the plugin writes them. */
@@ -610,7 +644,7 @@ if (import.meta.main && process.argv[2] === 'prune-logs') {
 } else if (import.meta.main) {
   const args = process.argv.slice(2)
   // A script that would rather not wait can shorten the lock wait (milliseconds).
-  const lock = lockTimingFromEnv(process.env.MNEMOSYNE_LOCK_WAIT_MS)
+  const lock = lockTimingFromEnv(envOf('LOCK_WAIT_MS', process.env))
   try {
     if (args.includes('--root')) {
       const flags: { root?: string; store?: string; embeddings?: boolean } = {}
@@ -628,9 +662,10 @@ if (import.meta.main && process.argv[2] === 'prune-logs') {
       console.log(JSON.stringify({ ok: true, ...done }))
     } else {
       const [pluginRoot = '', engineDir = '', storeDir = '', embeddingsArg = ''] = args
-      // The 4th argument is "embeddings" when /mnemosyne-setup's option is on:
-      // the check then also downloads the model once and proves a clean exit.
-      const run = () => install(pluginRoot, engineDir, storeDir, embeddingsArg === 'embeddings')
+      // The 4th argument is "embeddings" when /hal-m-setup's option is on:
+      // the check then also downloads the model once and proves a clean exit,
+      // into the model cache the plugin uses at run time.
+      const run = () => install(pluginRoot, engineDir, storeDir, embeddingsArg === 'embeddings', pluginModelCacheDir(process.env))
       // The lock sits beside the engine folder; a path install() will refuse anyway takes none.
       const engine = isAbsolute(engineDir) ? resolve(engineDir) : ''
       const done = engine && existsSync(dirname(engine)) ? await withInstallLock(`${engine}.lock`, run, lock) : await run()

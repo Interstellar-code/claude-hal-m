@@ -1,5 +1,5 @@
 // Claude HAL-M — a read-only look at the store, for the tag backfill (plan
-// phase TAGS). A hook cannot read SQLite, so /mnemosyne-tags runs this file:
+// phase TAGS). A hook cannot read SQLite, so /hal-m-tags runs this file:
 //   bun bin/memories.ts --store <dir> list --untagged   untagged memories, as JSON
 //   bun bin/memories.ts --store <dir> list --all        every memory, as JSON (what a retag proposes for)
 //   bun bin/memories.ts --store <dir> get <id>...       those memories, as JSON
@@ -34,6 +34,7 @@ import { buildRequests, engineEnv, parseReplies } from '../hooks/engine'
 import { BLOCK_PINNED_MAX, EXPIRE_DEFAULT_DAYS, expireRequest, expireSetting, parseExpireReply, parsePending, SESSION_CLAIM_STALE_MS, SESSION_CLAIM_SUFFIX, SESSION_BACKOFF_MAX_MS, SESSION_ID, SESSION_MAX_ATTEMPTS, SESSION_PENDING_DIR, sessionBackoffMs, SWEEP_LIMIT, SWEEP_LOCK, SWEEP_LOCK_STALE_MS, SWEEP_MARKER, sweepDue, sweepMarkerText } from '../hooks/session'
 import type { BlockRead, ExpiredRow, PendingSession } from '../hooks/session'
 import { cleanTags, MAX_TAGS, normalizeTag } from '../hooks/tags'
+import { commandName } from '../hooks/names'
 import { readConfig } from './settings'
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -182,7 +183,7 @@ export function saveProposals(file: string, text: string) {
 //
 // A background extraction that is cut (Esc, a session end) leaves one small file
 // per memory: <root>/knowledge-pending/<memory id>.json, mode 0600, holding
-// { id, owner, sha256 }. /mnemosyne-knowledge finishes them.
+// { id, owner, sha256 }. /hal-m-knowledge finishes them.
 
 export const PENDING_DIR = 'knowledge-pending'
 
@@ -663,7 +664,7 @@ export async function expireUnused(options: ExpireOptions): Promise<ExpireReport
   if (!existsSync(join(options.store, 'mnemopi.db'))) return report
   // A server names its engine (--cli): it is not under the data root there.
   const cli = options.cli ?? engineCliOf(options.root)
-  if (!existsSync(cli)) throw new Error(`the engine is not installed at ${cli}: run /mnemosyne-setup`)
+  if (!existsSync(cli)) throw new Error(`the engine is not installed at ${cli}: run /${commandName('setup')}`)
   const ask = async (apply: boolean) => {
     const [answer] = await engineRun(cli, options.store, options.owner, [['mnemopi_expire_unused', expireRequest(days.days, apply, limit)]])
     if (answer instanceof Error) throw new Error(`the engine refused the sweep: ${answer.message.slice(0, 200)}`)

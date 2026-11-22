@@ -58,7 +58,7 @@ export function countNote(shown: number, total: number, mode: string | undefined
   return `${of}${how ? ` ${how}` : ''}.${skippedNote}`
 }
 
-export const MEANING_OFF_HINT = 'Embeddings are off. Run /mnemosyne-setup to turn them on.'
+export const MEANING_OFF_HINT = 'Embeddings are off. Run /hal-m-setup to turn them on.'
 
 // ---- 0.19.0: recent queries, the result sort, facets and the score ring ----
 

@@ -4,6 +4,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { COMMAND_NAMES, oldCommandName, PLUGIN_ID } from '../../hooks/names'
 import { startServer } from '../../ui/server'
 import { ROOT, tempDir } from './helpers'
 
@@ -12,7 +13,8 @@ const { bannerLines, checkItem, checkValue, drawGroups, drawTop, factLines, filt
 
 const CLI = join(ROOT, 'engine', 'src', 'cli.ts')
 const STUB = join(ROOT, 'tests', 'bun', 'fixtures', 'claude-stub.ts')
-const PLUGIN_ID = 'mnemosyne@mnemosyne'
+// The setup card's commands: the new /hal-m-* names (the old /mnemosyne-* names stay as aliases).
+const SETUP_CMDS = ['setup', 'embed', 'tags', 'knowledge'].map(key => `/${COMMAND_NAMES.find(item => item.key === key)!.name}`)
 const MARKUP = '<img src=x onerror=alert(1)>'
 
 // ---- A DOM-free stand-in document ----
@@ -741,12 +743,17 @@ describe('UI.3: Setup and backups, and This browser', () => {
     await withDocument(async () => {
       const cards = drawGroups(data, newView(), sent.host) as FakeNode[]
       const setup = cards.find(card => card.find('h2')!.textContent === 'Setup')!
-      for (const command of ['/mnemosyne-setup', '/mnemosyne-embed', '/mnemosyne-tags', '/mnemosyne-knowledge']) {
+      expect(SETUP_CMDS).toEqual(['/hal-m-setup', '/hal-m-embed', '/hal-m-tags', '/hal-m-knowledge'])
+      for (const command of SETUP_CMDS) {
         expect(setup.all().some(node => node.tagName === 'code' && node.textContent === command)).toBe(true)
       }
       for (const copy of setup.findAll('button').filter(button => button.textContent === 'Copy')) copy.fire('click')
       await settle()
-      expect(sent.copied).toEqual(['/mnemosyne-setup', '/mnemosyne-embed', '/mnemosyne-tags', '/mnemosyne-knowledge'])
+      expect(sent.copied).toEqual(SETUP_CMDS)
+      // The old names are named once, in a note under the list, not as rows to copy.
+      const texts = setup.findAll('p').map(node => node.textContent)
+      expect(texts.filter(text => text.includes(`/${oldCommandName('setup')}`))).toHaveLength(1)
+      expect(setup.all().some(node => node.tagName === 'code' && node.textContent.startsWith('/mnemosyne-'))).toBe(false)
       expect(sent.posted).toHaveLength(0)
       // No button anywhere on this card runs setup or rebuilds vectors: only Copy and Back up now.
       // Only the last copied command's button says Copied (#33).
@@ -820,7 +827,7 @@ describe('UI.3: Setup and backups, and This browser', () => {
       copy.fire('click')
       await settle()
       expect(copy.textContent).toContain('Copy failed')
-      expect(setup.all().some(node => node.tagName === 'code' && node.textContent === '/mnemosyne-setup')).toBe(true)
+      expect(setup.all().some(node => node.tagName === 'code' && node.textContent === '/hal-m-setup')).toBe(true)
     })
   })
 

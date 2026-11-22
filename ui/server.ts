@@ -17,7 +17,7 @@
 // body, and each one that reaches the engine leaves an activity line, origin ui.
 //
 // Two modes:
-//   bun ui/server.ts --hold   what /mnemosyne-ui starts. The host's spawn closes
+//   bun ui/server.ts --hold   what /hal-m-ui starts. The host's spawn closes
 //                             a child's stdin from the start, so this holder
 //                             starts the server below with stdin as a pipe it
 //                             keeps open, and passes its output through.
@@ -34,9 +34,10 @@
 //                             names a live session still using it: then it stays
 //                             and exits when the last of them is gone.
 //
-// Environment: MNEMOSYNE_ROOT (<root>, where ui.json lives), MNEMOSYNE_STORE,
-// MNEMOSYNE_CLI, MNEMOSYNE_ACTIVITY_LOG (empty when the log is off),
-// MNEMOSYNE_PLUGIN_ROOT; MNEMOSYNE_UI_PARENT_CHECK_MS (default 10000, held to
+// Environment (each HALM_<X>, else the old MNEMOSYNE_<X>; hooks/names.ts envOf):
+// HALM_ROOT (<root>, where ui.json lives), HALM_STORE, HALM_CLI,
+// HALM_ACTIVITY_LOG (empty when the log is off), HALM_PLUGIN_ROOT;
+// HALM_UI_PARENT_CHECK_MS (default 10000, held to
 // 100 ms - 10 s) sets how often the parent (and, once the starter is gone,
 // the users) is checked.
 import { Database } from 'bun:sqlite'
@@ -58,7 +59,8 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join, resolve, sep } from 'node:path'
 import { appendActivity } from '../bin/activity'
 import { liveUsers, UI_USERS } from '../bin/ui-users'
 import { hasTagSql, tagsSql, untaggedSql } from '../bin/memories'
@@ -76,6 +78,7 @@ import { expiresInDaysProblem, isKind, KIND_LIST, validUntilFor } from '../hooks
 import { cleanTags, normalizeTag } from '../hooks/tags'
 import { tagRules, VOCAB_FILE } from '../hooks/vocab'
 import { CORE_SPREAD } from './map-layout'
+import { childEnv, commandName, envOf, modelCacheDir as modelCacheOf, newRootOf, oldRootOf, OWNER_HEADER, OWNER_HEADERS } from '../hooks/names'
 import { settingsRoutes } from './settings-routes'
 import type { SettingsDeps } from './settings-routes'
 import { takeHandoff, type UpdateDeps, updateRoutes } from './update-routes'
@@ -96,6 +99,7 @@ import {
   passwordMatches,
   PLUGIN_BODY_MAX,
   publicUrlOf,
+  revokeSessions,
   runPluginEngine,
   pluginActivity,
   runPluginMemories,
@@ -180,21 +184,22 @@ export type Config = {
   mode?: ServerMode
 }
 
-// version: the plugin version this server runs (UIVER.1), so /mnemosyne-ui can replace a server an older plugin started.
+// version: the plugin version this server runs (UIVER.1), so /hal-m-ui can replace a server an older plugin started.
 export type State = { port: number; token: string; pid: number; version?: string }
 
 export function configFromEnv(env: Record<string, string | undefined>): Config {
-  const root = env.MNEMOSYNE_ROOT ?? ''
-  const store = env.MNEMOSYNE_STORE ?? ''
-  if (!root || !store) throw new Error('MNEMOSYNE_ROOT and MNEMOSYNE_STORE must be set.')
+  const root = envOf('ROOT', env) ?? ''
+  const store = envOf('STORE', env) ?? ''
+  if (!root || !store) throw new Error('HALM_ROOT and HALM_STORE must be set (or the MNEMOSYNE_ names).')
   return {
     root,
     store,
-    cli: env.MNEMOSYNE_CLI ?? '',
-    activityLog: env.MNEMOSYNE_ACTIVITY_LOG ?? '',
-    pluginRoot: env.MNEMOSYNE_PLUGIN_ROOT ?? join(UI_DIR, '..'),
-    pluginId: env.MNEMOSYNE_PLUGIN_ID || undefined,
-    claudeCli: env.MNEMOSYNE_CLAUDE_CLI || undefined,
+    cli: envOf('CLI', env) ?? '',
+    // Empty is a value here: the log is off (envOf keeps an empty HALM_ACTIVITY_LOG over an old path).
+    activityLog: envOf('ACTIVITY_LOG', env) ?? '',
+    pluginRoot: envOf('PLUGIN_ROOT', env) ?? join(UI_DIR, '..'),
+    pluginId: envOf('PLUGIN_ID', env) || undefined,
+    claudeCli: envOf('CLAUDE_CLI', env) || undefined,
   }
 }
 
@@ -230,16 +235,42 @@ export function openStore(store: string): Database | null {
   return db
 }
 
+/** Whether two paths name the same folder: equal real paths (resolve() when one is missing), case-folded on Windows. */
+export function sameFolder(a: string, b: string, platform: string = process.platform): boolean {
+  const real = (path: string) => {
+    try {
+      return realpathSync(path)
+    } catch {
+      return resolve(path)
+    }
+  }
+  const x = real(a)
+  const y = real(b)
+  return platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
+}
+
+/**
+ * The model cache (PI_CONFIG_DIR) the dashboard's engines use when HALM_MODEL_CACHE is not set (plan 3.2 item 5). On the
+ * old root, or a folder that is the same one through a link, it stays the engine's default (.claude/mnemosyne/model-cache
+ * from HOME: undefined here), as the hooks pass it. On the new default root (~/.hal-m, a real folder) it is
+ * <root>/model-cache. Any other root keeps the engine's default too; the launcher's HALM_MODEL_CACHE names it then.
+ */
+export function rootModelCache(root: string | undefined, home: string = homedir()): string | undefined {
+  if (!root) return undefined
+  if (sameFolder(root, oldRootOf(home))) return undefined
+  return sameFolder(root, newRootOf(home)) ? modelCacheOf(root) : undefined
+}
+
 // Per-process engine settings: `keywordOnly` runs this process with embeddings off.
 export type RunOptions = { keywordOnly?: boolean }
 
-// True when this server started with embeddings on (MNEMOSYNE_EMBEDDINGS=on, from hooks/ui-launch.ts).
-export const embeddingsOn = (env: Record<string, string | undefined> = process.env) => env.MNEMOSYNE_EMBEDDINGS === 'on'
+// True when this server started with embeddings on (HALM_EMBEDDINGS=on, or the old name, from hooks/ui-launch.ts).
+export const embeddingsOn = (env: Record<string, string | undefined> = process.env) => envOf('EMBEDDINGS', env) === 'on'
 
 // One engine process for `requests`, as `owner`: the server's own environment
 // with engineEnv laid over it, as the hooks send it.
 export async function runEngine(
-  config: Pick<Config, 'cli' | 'store'>,
+  config: Pick<Config, 'cli' | 'store'> & { root?: string },
   requests: readonly EngineRequest[],
   owner: string,
   baseEnv: Record<string, string | undefined> = process.env,
@@ -247,11 +278,12 @@ export async function runEngine(
   runOptions: RunOptions = {},
 ): Promise<(string | Error)[]> {
   // C11: the embeddings setting this server started with, passed by hooks/ui-launch.ts
-  // (MNEMOSYNE_EMBEDDINGS). 'on' only when /mnemosyne-setup downloaded the model.
+  // (HALM_EMBEDDINGS). 'on' only when /hal-m-setup downloaded the model.
   // `keywordOnly` turns it off for this one process (a keyword search), never the server's own setting.
   const embeddings = embeddingsOn(baseEnv) && runOptions.keywordOnly !== true
   // Server mode: the model cache baked into the image (an absolute PI_CONFIG_DIR), not one under $HOME.
-  const modelCacheDir = baseEnv.MNEMOSYNE_MODEL_CACHE || undefined
+  // Otherwise the one under the dashboard's root (rootModelCache).
+  const modelCacheDir = envOf('MODEL_CACHE', baseEnv) || rootModelCache(config.root)
   const child = Bun.spawn([process.execPath, config.cli, 'mcp'], {
     env: { ...baseEnv, ...engineEnv(config.store, owner, { embeddings, ...(modelCacheDir ? { modelCacheDir } : {}) }) },
     stdin: 'pipe',
@@ -1150,7 +1182,7 @@ export type GalaxyLink = { a: string; b: string; pairs: { older: string; newer: 
 
 // Below this many vectors the map keeps its topic layout: too few points to read.
 export const MIN_MEANING_VECTORS = 10
-// The cached meaning layout, under the dashboard's root (MNEMOSYNE_ROOT), owner-only.
+// The cached meaning layout, under the dashboard's root (HALM_ROOT), owner-only.
 export const MEANING_CACHE = 'meaning.json'
 // Bumped when the layout's maths or constants change: an older cache file is then a miss
 // instead of a stale layout (review LOW-1). 3: pairs go down to LINK_FLOOR (map.linkScore).
@@ -1972,7 +2004,7 @@ export function knowledgeText(text: unknown): string {
  * A legacy table or working_memory without a column reads NULL there (or 0 recalls), never an error.
  */
 export function knowledgeList(db: Database | null, limit = GALAXY_LIMIT): Answer {
-  const extraction = process.env.MNEMOSYNE_EXTRACTION || 'unknown'
+  const extraction = envOf('EXTRACTION', process.env) || 'unknown'
   const lists = (): Record<KnowledgeList, KnowledgeItem[]> => ({ facts: [], preferences: [], instructions: [], timelines: [], relations: [] })
   const counts = (): Record<KnowledgeList, number> => ({ facts: 0, preferences: 0, instructions: 0, timelines: 0, relations: 0 })
   const result = lists()
@@ -2363,7 +2395,7 @@ type Views = {
   // An activity line, origin ui; `extra` adds keys after the C3 ones.
   log: (fields: ActivityFields, extra?: Record<string, unknown>) => void
   // One engine process, within the server's cap on live engine processes.
-  run: (config: Pick<Config, 'cli' | 'store'>, requests: readonly EngineRequest[], owner: string, runOptions?: RunOptions) => Promise<(string | Error)[]>
+  run: (config: Pick<Config, 'cli' | 'store'> & { root?: string }, requests: readonly EngineRequest[], owner: string, runOptions?: RunOptions) => Promise<(string | Error)[]>
   // True while a search runs: one at a time.
   searching: boolean
   // 0.27.2: the one warm engine meaning searches use (null: one process per owner, as before).
@@ -2407,7 +2439,7 @@ async function search(views: Views, text: string): Promise<Answer> {
   const asked = body.mode
   if (asked !== undefined && asked !== 'keyword' && asked !== 'hybrid') return { status: 400, body: { error: "mode must be 'keyword' or 'hybrid'" } }
   const mode: SearchMode = asked ?? (embeddings ? 'hybrid' : 'keyword')
-  if (mode === 'hybrid' && !embeddings) return { status: 400, body: { error: 'Searching by meaning needs embeddings, which are off. Run /mnemosyne-setup to turn them on.' } }
+  if (mode === 'hybrid' && !embeddings) return { status: 400, body: { error: `Searching by meaning needs embeddings, which are off. Run /${commandName('setup')} to turn them on.` } }
   if (typeof query !== 'string' || query.trim() === '' || query.length > MAX_QUERY_CHARS) {
     return { status: 400, body: { error: `query must be a non-empty string of at most ${MAX_QUERY_CHARS} characters` } }
   }
@@ -2769,7 +2801,7 @@ async function restoreMemory(views: Views, text: string): Promise<Answer> {
 
 // ---- The vocabulary (CRUDX.4): bin/vocab.ts is the one writer of <root>/vocabulary.json ----
 
-const NO_VOCABULARY = { status: 409, body: { error: 'There is no tag vocabulary yet. Run /mnemosyne-tags first to make one.' } }
+const NO_VOCABULARY = { status: 409, body: { error: `There is no tag vocabulary yet. Run /${commandName('tags')} first to make one.` } }
 const vocabularyFileOf = (root: string) => join(root, VOCAB_FILE)
 // A description is a short plain line.
 export const VOCAB_DESCRIPTION_MAX = 200
@@ -2888,11 +2920,11 @@ export function devStamp(started: number, dir: string = UI_DIR): string {
   return hash.digest('hex').slice(0, 16)
 }
 
-// Dev mode's settings from the environment: only when MNEMOSYNE_UI_DEV is 1, a port from 1024 to 65535 and a token of 32+ characters.
+// Dev mode's settings from the environment: only when HALM_UI_DEV is 1, a port from 1024 to 65535 and a token of 32+ characters.
 export function devOptions(env: Record<string, string | undefined>): Pick<ServerOptions, 'dev' | 'port' | 'token'> {
-  if (env.MNEMOSYNE_UI_DEV !== '1') return {}
-  const port = Number(env.MNEMOSYNE_UI_PORT)
-  const token = env.MNEMOSYNE_UI_TOKEN ?? ''
+  if (envOf('UI_DEV', env) !== '1') return {}
+  const port = Number(envOf('UI_PORT', env))
+  const token = envOf('UI_TOKEN', env) ?? ''
   return { dev: true, port: Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : undefined, token: token.length >= 32 ? token : undefined }
 }
 
@@ -2923,7 +2955,7 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     run: (cfg, requests, owner, runOptions) => engines.run(() => runEngine(cfg, requests, owner, process.env, engineTimeoutMs, runOptions)),
     searching: false,
     writes: limiter(1),
-    warm: options.warm !== undefined ? options.warm : embeddingsOn() && config.cli !== '' && supportsOwnerPerCall(engine) ? createWarmEngine({ cli: config.cli, store: config.store }) : null,
+    warm: options.warm !== undefined ? options.warm : embeddingsOn() && config.cli !== '' && supportsOwnerPerCall(engine) ? createWarmEngine({ cli: config.cli, store: config.store, modelCacheDir: rootModelCache(config.root) }) : null,
   }
   const settings = settingsRoutes(config, fields => log(fields, { client: 'dashboard' }), options.settings)
   const streams = new Set<() => void>()
@@ -3162,8 +3194,8 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     }
     if (path === '/mcp') {
       if (request.method !== 'POST') return reply(null, 405, { Allow: 'POST' })
-      const owner = request.headers.get('mnemosyne-owner')?.trim() || 'global'
-      if (!OWNER.test(owner)) return json({ error: 'Mnemosyne-Owner must be global or a project-... id' }, 400)
+      const owner = ownerHeader(request)
+      if (!OWNER.test(owner)) return json({ error: `${OWNER_HEADER} must be global or a project-... id` }, 400)
       let payload: unknown
       try {
         payload = await jsonBody(request)
@@ -3212,6 +3244,8 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     if (request.method !== 'POST') return notAllowed('POST')
     if (!sameOrigin(request)) return json({ error: 'forbidden origin' }, 403)
     if (path === '/api/logout') {
+      // The session is revoked whichever of the four cookie names carried it, then all four are cleared.
+      revokeSessions(request, session)
       const headers = new Headers({ ...SECURITY_HEADERS, 'Content-Type': 'application/json; charset=utf-8' })
       for (const cookie of clearCookies()) headers.append('Set-Cookie', cookie)
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers })
@@ -3246,7 +3280,7 @@ export async function startServer(config: Config, options: ServerOptions = {}): 
     port: mode ? mode.port : (options.port ?? 0),
     maxRequestBodySize: mode ? PLUGIN_BODY_MAX : 64 * 1024,
     fetch(request, server) {
-      // DNS rebinding: a page on another name that resolves here is refused (server mode: MNEMOSYNE_HOSTS, when set).
+      // DNS rebinding: a page on another name that resolves here is refused (server mode: HALM_HOSTS, when set).
       if (!allowedHost(request)) return json({ error: 'forbidden' }, 403)
       if (request.method === 'OPTIONS') return notAllowed()
       const url = new URL(request.url)
@@ -3317,11 +3351,28 @@ function vendor(dir: string, name: string) {
   }
 }
 
-// How often the parent is checked: MNEMOSYNE_UI_PARENT_CHECK_MS held to 100 ms - 10 s, else 10 s.
-export function parentCheckMs(value: string | undefined = process.env.MNEMOSYNE_UI_PARENT_CHECK_MS) {
+// How often the parent is checked: HALM_UI_PARENT_CHECK_MS (or the old name) held to 100 ms - 10 s, else 10 s.
+export function parentCheckMs(value: string | undefined = envOf('UI_PARENT_CHECK_MS', process.env)) {
   const ms = Number(value)
   if (!value || !Number.isFinite(ms)) return DEFAULT_PARENT_CHECK_MS
   return Math.min(DEFAULT_PARENT_CHECK_MS, Math.max(MIN_PARENT_CHECK_MS, Math.round(ms)))
+}
+
+/** The /mcp owner: the HAL-M-Owner header, else the old Mnemosyne-Owner (header names ignore case), else global. */
+export function ownerHeader(request: Request): string {
+  for (const name of OWNER_HEADERS) {
+    const value = request.headers.get(name)?.trim()
+    if (value) return value
+  }
+  return 'global'
+}
+
+/**
+ * Server mode's environment: the activity log defaults to <root>/activity.jsonl unless HALM_ACTIVITY_LOG (or the old
+ * name) is set, and an empty value keeps it off. Built with childEnv, so only HALM_ACTIVITY_LOG is left set.
+ */
+export function daemonEnv(env: Record<string, string | undefined>): Record<string, string> {
+  return childEnv(env, { ACTIVITY_LOG: envOf('ACTIVITY_LOG', env) ?? join(envOf('ROOT', env) ?? '', 'activity.jsonl') })
 }
 
 // Calls `gone` once the process that started this one has exited (it is then
@@ -3337,7 +3388,7 @@ function watchParent(gone: () => void) {
 async function serve() {
   const config = configFromEnv(process.env)
   // After an update from the Update button: the old server's port and token, once, so its open page reloads into this one.
-  const handoff = process.env.MNEMOSYNE_UI_DEV === '1' ? undefined : takeHandoff(config.root)
+  const handoff = envOf('UI_DEV', process.env) === '1' ? undefined : takeHandoff(config.root)
   let started: Started
   try {
     started = await startServer(config, handoff ?? devOptions(process.env))
@@ -3393,7 +3444,7 @@ async function serve() {
 async function serveDaemon() {
   const mode = serverModeFromEnv(process.env)
   if (mode instanceof Error) throw mode
-  const env = { ...process.env, MNEMOSYNE_ACTIVITY_LOG: process.env.MNEMOSYNE_ACTIVITY_LOG ?? join(process.env.MNEMOSYNE_ROOT ?? '', 'activity.jsonl') }
+  const env = daemonEnv(process.env)
   const config = { ...configFromEnv(env), mode }
   const started = await startServer(config)
   let stopping = false
@@ -3407,7 +3458,7 @@ async function serveDaemon() {
   process.stdout.write(`${JSON.stringify({ server: true, bind: mode.bind, port: started.port, pid: process.pid, embeddings: embeddingsOn() })}\n`)
 }
 
-// What /mnemosyne-ui spawns: holds the server's stdin open and passes its output
+// What /hal-m-ui spawns: holds the server's stdin open and passes its output
 // through. When this process is stopped or orphaned it leaves, and the server (whose
 // stdin then closes) decides: it ends unless other sessions still use it.
 async function hold() {

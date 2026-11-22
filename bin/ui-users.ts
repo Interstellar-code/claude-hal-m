@@ -6,7 +6,7 @@
 // live when its process still runs (`kill -0`) and still has the start time recorded with it (so a pid
 // reused after a crash does not count), so a session that crashed without a session.end
 // cannot keep the server up; a user whose pid could not be read is kept for UNKNOWN_PID_MAX_MS after
-// it last opened or reused the dashboard (each /mnemosyne-ui call lists it again with a fresh `at`).
+// it last opened or reused the dashboard (each /hal-m-ui call lists it again with a fresh `at`).
 //
 // The hooks cannot write files atomically, so they run this file as a script:
 //   bun bin/ui-users.ts add <file> <session> <pid|->        prints {"live":<n>}

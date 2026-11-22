@@ -18,13 +18,15 @@
 // saved). memory_update needs no kind, and this plugin's engine build.
 // Saves (remember, and update with content) pass hooks/guard.ts first: a secret or
 // size block is a -32602 error; a warned save is too in strict guard mode (the
-// default; MNEMOSYNE_GUARD_MODE, set by mnemosyne-mcp) unless the call passes
+// default; HALM_GUARD_MODE, set by hal-m-mcp) unless the call passes
 // confirm: true, and in warn mode it is stored with metadata.guard.
-// Each call of the six tools is recorded in MNEMOSYNE_ACTIVITY_LOG (empty: off)
+// Each call of the six tools is recorded in HALM_ACTIVITY_LOG (empty: off)
 // as one activity line with origin external, written once its reply is read.
 // An update or forget of another owner's memory answers not_found from the engine; the proxy then
 // adds whose memory it is (`owner`, `hint`), read-only from the store (OWNERHINT).
-// Run by ~/.claude/mnemosyne/bin/mnemosyne-mcp, which sets the environment.
+// Run by <data root>/bin/hal-m-mcp (an older bin/mnemosyne-mcp is a shim that
+// runs it), which sets the environment. Every MNEMOSYNE_<X> it reads is read as
+// HALM_<X> first, the old name being the fallback (hooks/names.ts envOf).
 import { Database } from 'bun:sqlite'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -39,6 +41,7 @@ import { rowInfo } from './row-info'
 import { cleanTags } from '../hooks/tags'
 import { tagRules } from '../hooks/vocab'
 import { appendActivity } from './activity'
+import { commandName, envOf, KEPT } from '../hooks/names'
 import { readConfig } from './settings'
 import { parseConfig } from '../hooks/settings'
 import type { ResolvedSettings } from '../hooks/settings'
@@ -64,19 +67,20 @@ const CONFIRM_PROPERTY = {
   type: 'boolean',
   description: 'Send true to save text the guard warned about (only after a refusal that asked for it). Secrets and size blocks cannot be confirmed.',
 }
-const cli = process.env.MNEMOSYNE_CLI
-if (!cli) throw new Error('MNEMOSYNE_CLI is not set: run this through mnemosyne-mcp.')
+const cli = envOf('CLI', process.env)
+if (!cli) throw new Error('HALM_CLI is not set: run this through hal-m-mcp.')
 const owner = process.env.MNEMOPI_SESSION_ID || 'global'
 const isGlobalOwner = owner === 'global'
-const activityLog = process.env.MNEMOSYNE_ACTIVITY_LOG ?? ''
-// The guardMode option, set by mnemosyne-mcp: strict (default, also when unset) or warn.
-// The vocabulary file its tags are cleaned with (set by mnemosyne-mcp; empty: none). Read at each call, never fatal:
+// Empty HALM_ACTIVITY_LOG is a value: the log is off, even with an old MNEMOSYNE_ACTIVITY_LOG path inherited.
+const activityLog = envOf('ACTIVITY_LOG', process.env) ?? ''
+// The guardMode option, set by hal-m-mcp: strict (default, also when unset) or warn.
+// The vocabulary file its tags are cleaned with (set by hal-m-mcp; empty: none). Read at each call, never fatal:
 // no file or a file that cannot be read gives no aliases. The owner's project name is dropped from every tag list.
-const vocabularyFile = process.env.MNEMOSYNE_VOCABULARY ?? ''
-// The folder that holds config.json (set by mnemosyne-mcp; an older wrapper sets only the vocabulary file, which sits in the same folder).
+const vocabularyFile = envOf('VOCABULARY', process.env) ?? ''
+// The folder that holds config.json (set by hal-m-mcp; an older wrapper sets only the vocabulary file, which sits in the same folder).
 // The settings are read at each call and each tools/list, like the vocabulary: a change applies without a restart. Never fatal:
 // no folder, no file or a broken file gives the defaults, which are the numbers that were hard-coded before (C3).
-const configRoot = process.env.MNEMOSYNE_ROOT || (vocabularyFile === '' ? '' : dirname(vocabularyFile))
+const configRoot = envOf('ROOT', process.env) || (vocabularyFile === '' ? '' : dirname(vocabularyFile))
 const settingsNow = () => (configRoot === '' ? parseConfig(undefined) : readConfig(configRoot))
 function tagRulesNow() {
   let text: string | undefined
@@ -87,7 +91,7 @@ function tagRulesNow() {
   }
   return tagRules(text, owner)
 }
-const strictGuard = (process.env.MNEMOSYNE_GUARD_MODE ?? '').trim().toLowerCase() !== 'warn'
+const strictGuard = (envOf('GUARD_MODE', process.env) ?? '').trim().toLowerCase() !== 'warn'
 // The client's self-declared name, from its initialize request (CTX.2); unknown until it says.
 let client = 'unknown'
 
@@ -110,7 +114,7 @@ const build = installedBuild(cli)
 
 // OWNERHINT: the engine changes only its own owner's rows, so an update or forget of another
 // owner's memory answers not_found although recall shows the memory (every global-scope row is
-// recalled by every owner). The proxy then looks the id up, read-only, in the store mnemosyne-mcp
+// recalled by every owner). The proxy then looks the id up, read-only, in the store hal-m-mcp
 // names (MNEMOPI_DATA_DIR; the bank is always `default`), and says whose it is. Never fatal: no
 // store, a locked file or a missing row gives no hint and the reply stays as the engine sent it.
 const storeDb = process.env.MNEMOPI_DATA_DIR ? join(process.env.MNEMOPI_DATA_DIR, 'mnemopi.db') : ''
@@ -149,7 +153,7 @@ function infoOfMemory(dbPath: string, id: unknown): RowInfo | undefined {
 }
 const otherOwnerHint = (memoryOwner: string, ownOwner: string) =>
   `This memory belongs to ${memoryOwner}, not to ${ownOwner}, the owner this MCP server writes as, so it can only be read here. ` +
-  `Change it from the HAL-M dashboard, from a Claude Code session in that project, or through a server started with MNEMOSYNE_OWNER=${memoryOwner}.`
+  `Change it from the HAL-M dashboard, from a Claude Code session in that project, or through a server started with HALM_OWNER=${memoryOwner}.`
 
 const engine = Bun.spawn(['bun', cli, 'mcp'], { stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' })
 const listIds = new Set<unknown>()
@@ -252,7 +256,7 @@ void (async () => {
       }
       if ((name === 'memory_update' || name === 'memory_remember') && build !== ENGINE_BUILD) {
         // memory_remember too: an older engine's 24 h trim deletes every row whose trust tier is not IMPORTED, which a save of this build's is not.
-        const reason = `${name} needs the HAL-M engine build ${ENGINE_BUILD}; installed is ${build}. Run /mnemosyne-setup in Claude Code.`
+        const reason = `${name} needs the HAL-M engine build ${ENGINE_BUILD}; installed is ${build}. Run /${commandName('setup')} in Claude Code.`
         // A refused save logs no memory text: the line is built from no arguments.
         refuse(message.id, action, name === 'memory_remember' ? {} : given, { code: -32000, message: reason })
         continue
@@ -429,7 +433,7 @@ for await (const line of lines(engine.stdout)) {
       // M2: only the tools on the allow-list are listed (all six, by default).
       .filter((tool: { name: string }) => ALLOWED.has(tool.name) && (settings.tools.externalAllow as readonly string[]).includes(tool.name))
   }
-  if (message?.result?.serverInfo?.name === 'mnemopi') message.result.serverInfo.name = 'mnemosyne'
+  if (message?.result?.serverInfo?.name === 'mnemopi') message.result.serverInfo.name = KEPT.serverInfoName
   const text = message?.result?.content?.[0]
   const call = pending.get(message?.id)
   pending.delete(message?.id)

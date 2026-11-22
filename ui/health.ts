@@ -128,12 +128,12 @@ export function findings(data: HealthData, meaning = false): Finding[] {
   const total = data.total
   const missingKnowledge = Math.max(0, total - data.coverage.knowledge)
   if (total > 0 && missingKnowledge > 0)
-    out.push({ level: 'watch', title: `${plural(missingKnowledge, 'memory has', 'memories have')} no knowledge extracted`, detail: `${data.coverage.knowledge} of ${total} done. Extraction runs on save; these predate it or failed. /mnemosyne-knowledge fills them.`, action: 'knowledge', actionLabel: 'Open Knowledge' })
+    out.push({ level: 'watch', title: `${plural(missingKnowledge, 'memory has', 'memories have')} no knowledge extracted`, detail: `${data.coverage.knowledge} of ${total} done. Extraction runs on save; these predate it or failed. /hal-m-knowledge fills them.`, action: 'knowledge', actionLabel: 'Open Knowledge' })
   else if (total > 0) out.push({ level: 'ok', title: 'Knowledge extracted from every memory', detail: '', action: '', actionLabel: '' })
   if (data.neverCount > 0) out.push({ level: 'watch', title: `${plural(data.neverCount, 'live memory has', 'live memories have')} never been recalled`, detail: 'They are in the Review queue, with the new ones marked.', action: 'review', actionLabel: 'Open Review' })
   else if (total > 0) out.push({ level: 'ok', title: 'Every live memory has been recalled', detail: '', action: '', actionLabel: '' })
   const untagged = Math.max(0, total - data.coverage.tagged)
-  if (untagged > 0) out.push({ level: 'watch', title: `${plural(untagged, 'memory has', 'memories have')} no topic tag`, detail: 'Run /mnemosyne-tags, or see them in the Review queue No tags.', action: 'review', actionLabel: 'Open Review' })
+  if (untagged > 0) out.push({ level: 'watch', title: `${plural(untagged, 'memory has', 'memories have')} no topic tag`, detail: 'Run /hal-m-tags, or see them in the Review queue No tags.', action: 'review', actionLabel: 'Open Review' })
   else if (total > 0) out.push({ level: 'ok', title: 'Every memory has a topic tag', detail: '', action: '', actionLabel: '' })
   if (embeddingsOn(data, meaning)) out.push({ level: 'ok', title: 'Meaning search is on', detail: '', action: '', actionLabel: '' })
   else out.push({ level: 'info', title: 'Meaning search is off', detail: EMBEDDINGS_HINT, action: '', actionLabel: '' })
@@ -185,7 +185,7 @@ export function coverageBars(data: HealthData, meaning = false): Coverage[] {
       pct: percent(tagged, total),
       good: total > 0 && tagged === total,
       done: all(tagged),
-      note: tagged === 0 ? 'No memory has tags yet. Run /mnemosyne-tags to tag them.' : tagged < total ? `${plural(total - tagged, 'memory has', 'memories have')} no tag. Run /mnemosyne-tags to tag them.` : 'Every memory has a topic tag.',
+      note: tagged === 0 ? 'No memory has tags yet. Run /hal-m-tags to tag them.' : tagged < total ? `${plural(total - tagged, 'memory has', 'memories have')} no tag. Run /hal-m-tags to tag them.` : 'Every memory has a topic tag.',
     },
     {
       label: 'Knowledge extracted',
@@ -193,7 +193,7 @@ export function coverageBars(data: HealthData, meaning = false): Coverage[] {
       pct: percent(knowledge, total),
       good: total > 0 && knowledge > 0,
       done: all(knowledge),
-      note: knowledge === 0 ? 'No memory has had facts, preferences or instructions mined yet. Set extractionModel and restart the dashboard, or run /mnemosyne-knowledge.' : `${plural(knowledge, 'memory has', 'memories have')} knowledge mined from ${knowledge === 1 ? 'it' : 'them'}.`,
+      note: knowledge === 0 ? 'No memory has had facts, preferences or instructions mined yet. Set extractionModel and restart the dashboard, or run /hal-m-knowledge.' : `${plural(knowledge, 'memory has', 'memories have')} knowledge mined from ${knowledge === 1 ? 'it' : 'them'}.`,
     },
     {
       label: 'Embeddings (meaning search)',
@@ -209,7 +209,7 @@ export function coverageBars(data: HealthData, meaning = false): Coverage[] {
       pct: percent(provenance, total),
       good: total > 0 && provenance > 0,
       done: all(provenance),
-      note: provenance === 0 ? 'Author and certainty are not recorded on save yet. To turn it on, update the plugin and run /mnemosyne-setup: saves made after that record who wrote them.' : `${plural(provenance, 'memory records', 'memories record')} who wrote ${provenance === 1 ? 'it' : 'them'}.`,
+      note: provenance === 0 ? 'Author and certainty are not recorded on save yet. To turn it on, update the plugin and run /hal-m-setup: saves made after that record who wrote them.' : `${plural(provenance, 'memory records', 'memories record')} who wrote ${provenance === 1 ? 'it' : 'them'}.`,
     },
     {
       label: 'Recalled at least once',

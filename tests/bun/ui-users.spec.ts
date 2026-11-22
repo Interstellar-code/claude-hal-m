@@ -416,6 +416,7 @@ describe('the server stays up while a listed session lives (real processes)', ()
       env: {
         ...(process.env as Record<string, string>),
         ...isolatedEnv(),
+        // The old MNEMOSYNE_ names on purpose: a 0.37 launcher's environment still starts the server (read as a fallback).
         MNEMOSYNE_ROOT: root,
         MNEMOSYNE_STORE: join(temp.dir, 'store'),
         MNEMOSYNE_CLI: CLI,

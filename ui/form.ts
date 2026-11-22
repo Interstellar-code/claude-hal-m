@@ -277,7 +277,7 @@ export function buildForm(host: FormHost, memory?: FormMemory): BuiltForm {
     const outside = own.filter(tag => !offered.some(item => item.tag === tag))
     if (outside.length > 0) groups.push({ id: 'current', label: 'On this memory, not in the vocabulary', glyph: '', help: '', tags: outside.map(tag => ({ tag, ns: null })) })
     const parts: HTMLElement[] = []
-    if (groups.length === 0) parts.push(el('p', vocabulary === null ? 'The tag vocabulary could not be read, so no tags are offered.' : 'There is no tag vocabulary yet. Run /mnemosyne-tags in Claude Code to make one.', 'muted small'))
+    if (groups.length === 0) parts.push(el('p', vocabulary === null ? 'The tag vocabulary could not be read, so no tags are offered.' : 'There is no tag vocabulary yet. Run /hal-m-tags in Claude Code to make one.', 'muted small'))
     for (const group of groups) {
       const set = el('fieldset', undefined, 'tag-group')
       set.dataset.ns = group.id

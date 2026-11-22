@@ -17,6 +17,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRequests, DEFAULT_RECALL_WEIGHTS, engineEnv, parseReplies, type RecallWeights } from '../hooks/engine'
+import { commandName } from '../hooks/names'
+import { dataRoot } from './migrate-root'
 import { engineCliOf } from './memories'
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -223,7 +225,7 @@ export function writePrivate(file: string, text: string) {
 export function snapshotStore(store: string): string {
   const db = join(store, 'mnemopi.db')
   if (!existsSync(db)) throw new Error(`no store at ${db}`)
-  const dir = mkdtempSync(join(tmpdir(), 'mnemosyne-eval-'))
+  const dir = mkdtempSync(join(tmpdir(), 'hal-m-eval-'))
   const source = new Database(db, { readonly: true })
   try {
     source.run(`VACUUM INTO '${join(dir, 'mnemopi.db').replace(/'/g, "''")}'`)
@@ -314,14 +316,21 @@ function scoreLines(label: string, s: GoldScore): string[] {
   return [`${label}: ${s.queries} gold queries${s.missing > 0 ? ` (${s.missing} not in the run)` : ''} · recall@1 ${pct(s.recallAt1)} · recall@5 ${pct(s.recallAt5)} · recall@k ${pct(s.recallAtK)} · hit@k ${pct(s.hitAtK)} · MRR ${s.mrr.toFixed(3)}`]
 }
 
+/**
+ * The HAL-M root the harness works in: --root as given, else HALM_ROOT (or MNEMOSYNE_ROOT), else the root the
+ * resolver picks from the disk (~/.hal-m, or the 0.37 folder when only that exists). Read-only: never links.
+ */
+export const evalRoot = (flagRoot: string | undefined, home: string = homedir(), env: Record<string, string | undefined> = process.env) =>
+  dataRoot(home, env, flagRoot).root
+
 async function main(argv: readonly string[]) {
   const { cmd, rest, flags } = parseArgs(argv)
-  const root = flags.get('root') ?? join(homedir(), '.claude', 'mnemosyne')
+  const root = evalRoot(flags.get('root'))
   const store = flags.get('store') ?? join(root, 'store')
   const dir = evalDirOf(root)
   const mode = (flags.get('mode') ?? 'keyword') as 'keyword' | 'hybrid'
   if (mode !== 'keyword' && mode !== 'hybrid') throw new Error('--mode is keyword or hybrid')
-  if (mode === 'hybrid' && !existsSync(join(root, 'embeddings.json'))) throw new Error('hybrid needs embeddings: run /mnemosyne-setup (no embeddings.json in the root)')
+  if (mode === 'hybrid' && !existsSync(join(root, 'embeddings.json'))) throw new Error(`hybrid needs embeddings: run /${commandName('setup')} (no embeddings.json in the root)`)
   const cli = flags.get('cli') ?? engineCliOf(root)
   const k = Math.min(50, Math.max(1, Math.trunc(Number(flags.get('k') ?? 10)) || 10))
   const weights = flags.has('weights') ? parseWeights(flags.get('weights')!) : DEFAULT_RECALL_WEIGHTS
@@ -340,7 +349,7 @@ async function main(argv: readonly string[]) {
   }
 
   if (cmd === 'run' || cmd === 'gold-draft') {
-    if (!existsSync(cli)) throw new Error(`the engine is not installed at ${cli}: run /mnemosyne-setup`)
+    if (!existsSync(cli)) throw new Error(`the engine is not installed at ${cli}: run /${commandName('setup')}`)
     const captured = readQueries(join(dir, 'queries.jsonl'))
     const top = cmd === 'gold-draft' ? Math.max(1, Math.trunc(Number(flags.get('top') ?? 30)) || 30) : Infinity
     const wanted = new Map<string, { owner: string; query: string }>()
