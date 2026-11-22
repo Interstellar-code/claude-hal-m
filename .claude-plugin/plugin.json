@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "mnemosyne",
+  "name": "hal-m",
   "displayName": "HAL-M",
   "version": "0.37.0",
   "description": "Long-term memory for Claude Code across sessions and repos, on its own private copy of the HAL-M Memory engine and its own store.",
@@ -62,8 +62,8 @@
     "memoryDir": {
       "title": "Memory store",
       "type": "string",
-      "default": "~/.claude/mnemosyne/store",
-      "description": "Leave empty for the default: ~/.claude/mnemosyne/store (macOS, Linux) or %USERPROFILE%\\.claude\\mnemosyne\\store (Windows). Or give an absolute path, or one starting with ~/."
+      "default": "~/.hal-m/store",
+      "description": "Leave empty for the default: ~/.hal-m/store (macOS, Linux) or %USERPROFILE%\\.hal-m\\store (Windows), inside the HAL-M data folder (still ~/.claude/mnemosyne until ~/.hal-m links to it). Or give an absolute path, or one starting with ~/."
     },
     "rememberTerms": {
       "title": "Remember terms",

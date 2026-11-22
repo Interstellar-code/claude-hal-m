@@ -80,10 +80,10 @@ describe('another owner (KNOWX: extraction runs as the row owner)', () => {
     expect(knowledgeRows(host, stranger)).toEqual([])
 
     // The backfill finds the stranger's memory and extracts it AS other-project, never as project A.
-    const dry = await host.command('mnemosyne-knowledge', '')
+    const dry = await host.command('hal-m-knowledge', '')
     expect(dry.text).toContain('- other-project: 1 memory with no knowledge')
     expect(dry.text).not.toContain(`- ${ownerA}:`)
-    const applied = await host.command('mnemosyne-knowledge', 'apply')
+    const applied = await host.command('hal-m-knowledge', 'apply')
     expect(applied.text).toContain('Extracted knowledge for 1 of 1 memory')
     const backfill = host.extractLines().filter(line => line.origin === 'backfill')
     expect(backfill).toHaveLength(1)
@@ -116,7 +116,7 @@ describe('a memory forgotten mid-flight', () => {
 })
 
 describe('a stale engine', () => {
-  test('UPGRADE.1 (was KNOWX stale engine): a save on a not-current engine is refused with /mnemosyne-setup: no row, no pending file, no model call, no extract line', async () => {
+  test('UPGRADE.1 (was KNOWX stale engine): a save on a not-current engine is refused with /hal-m-setup: no row, no pending file, no model call, no extract line', async () => {
     const host = await open({ model: () => ({ isAnswered: true, text: GOOD_REPLY }) })
     // The host's fake engine (engineBuild) has an empty cli.ts. To drive a save on a not-current engine, put a
     // package.json of an old build next to the REAL engine sources (so a save would work if it were not refused).
@@ -129,7 +129,7 @@ describe('a stale engine', () => {
 
     // An older engine's 24 h trim would delete the save, so it is refused before any engine process.
     const refused = await host.tool('memory_remember', { kind: 'fact', content: 'Saved on an old engine' })
-    expect(refused.deny).toContain('/mnemosyne-setup')
+    expect(refused.deny).toContain('/hal-m-setup')
     expect(refused.deny).toContain('out of date')
     expect(refused.result).toBeUndefined()
     expect(host.engineRuns()).toEqual([])
@@ -190,14 +190,14 @@ describe('a lost call finished by the backfill', () => {
     expect(host.pending()).toEqual([`${id}.json`])
     expect(host.model.length).toBe(1)
 
-    const dry = await host.command('mnemosyne-knowledge', '')
+    const dry = await host.command('hal-m-knowledge', '')
     expect(dry.text).toContain('no model call')
     expect(dry.text).toContain('1 pending entry')
     expect(host.model.length).toBe(1)
     expect(host.pending()).toEqual([`${id}.json`])
     expect(knowledgeRows(host, id)).toEqual([])
 
-    const applied = await host.command('mnemosyne-knowledge', 'apply')
+    const applied = await host.command('hal-m-knowledge', 'apply')
     expect(applied.text).toContain('Extracted knowledge for 1 of 1 memory')
     expect(host.model.length).toBe(2)
     expect(host.pending()).toEqual([])

@@ -581,7 +581,7 @@ The ranking weights are sent with every recall and also pinned in the engine's e
 | `showActivity` | on | on, status, off | `on`: a dim line in the conversation when HAL-M recalls, plus a status line under the prompt. `status`: the status line only. `off`: silent. |
 | `activityLog` | on | on, off | `on`: each memory call adds one line to `~/.claude/mnemosyne/activity.jsonl` (see [Activity log](#activity-log)). `off`: nothing is written. |
 | `guardMode` | strict | strict, warn | `strict`: a save the guard warns about is refused until it is sent again with `confirm: true`. `warn`: it is saved at once, flagged, and the reply shows the warnings (see [The save guard](#the-save-guard)). Secrets and empty, very short or over-length text are refused in both. |
-| `memoryDir` | ~/.claude/mnemosyne/store | text | Where memories are stored: an absolute path or one starting with `~/`. |
+| `memoryDir` | ~/.hal-m/store | text | Where memories are stored: an absolute path or one starting with `~/`. |
 | `rememberTerms` | remember:, remember that, note that, save to memory | list of terms | A prompt that starts with one of these is saved. `none` turns it off. |
 | `recallTerms` | recall:, what do you remember about, check memory | list of terms | A prompt that starts with one of these looks up memories. `none` turns it off. |
 | `externalMcp` | off | on, off | Lets other MCP clients use the same memory (see [Use the memory from other tools](#use-the-memory-from-other-tools)). |

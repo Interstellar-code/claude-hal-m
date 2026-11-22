@@ -1,11 +1,11 @@
 {
-  "name": "mnemosyne",
+  "name": "hal-m",
   "owner": {
     "name": "Interstellar-code"
   },
   "plugins": [
     {
-      "name": "mnemosyne",
+      "name": "hal-m",
       "source": "./",
       "description": "Long-term memory for Claude Code across sessions and repos, on its own private copy of the HAL-M Memory engine and its own store."
     }

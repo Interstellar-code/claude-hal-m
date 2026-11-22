@@ -8,6 +8,6 @@ export type PendingTrigger = Readonly<Record<string, true>>
 
 declare module 'claude-code' {
   interface PluginState {
-    mnemosyne: { recalled: Recalled; pendingTrigger: PendingTrigger }
+    'hal-m': { recalled: Recalled; pendingTrigger: PendingTrigger }
   }
 }

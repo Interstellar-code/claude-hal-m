@@ -2,6 +2,8 @@
 // bin/memories.ts and the engine are the real ones over a temp HOME; only the
 // model call is a stand-in (see knowledge-host.ts).
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { GOOD_REPLY, makeHost, until } from './knowledge-host'
 import type { Host } from './knowledge-host'
 
@@ -32,5 +34,27 @@ describe('finding 1: pending files through the real bin/memories.ts', () => {
     const line = await until('the extract line', () => host.extractLines()[0])
     expect(line).toMatchObject({ action: 'extract', ok: true, count: 1, ids: [id] })
     expect(host.pending()).toEqual([])
+  })
+})
+
+describe('T2: the HAL-M data root through the real hooks', () => {
+  test('T2: a temp home with only ~/.hal-m (new-only): a save and a recall work, with the store under home/.hal-m/store', async () => {
+    const host = await open({ layout: 'new' })
+    const newRoot = join(host.home, '.hal-m')
+    const oldRoot = join(host.home, '.claude', 'mnemosyne')
+    expect(host.store).toBe(join(newRoot, 'store'))
+    expect(existsSync(oldRoot)).toBe(false)
+    const saved = await host.tool('memory_remember', { kind: 'fact', content: 'The HAL-M data folder holds the store now' })
+    expect(saved.result).toContain('memory_id')
+    const id = JSON.parse(saved.result!).memory_id as string
+    await host.settled()
+    const recalled = await host.tool('memory_recall', { query: 'HAL-M data folder store' })
+    expect(recalled.result).toContain(id)
+    // The engine ran on the new store, and nothing was made or used under the 0.37 folder.
+    expect(existsSync(join(newRoot, 'store', 'mnemopi.db'))).toBe(true)
+    expect(existsSync(oldRoot)).toBe(false)
+    const childEnvs = host.runs.map(run => Object.values(run.env ?? {}).join('\n'))
+    expect(childEnvs.some(text => text.includes(join(newRoot, 'store')))).toBe(true)
+    expect(childEnvs.filter(text => text.includes(oldRoot))).toEqual([])
   })
 })

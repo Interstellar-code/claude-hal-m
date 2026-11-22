@@ -1,15 +1,16 @@
 // Claude HAL-M — the hooks module.
 //
 // Long-term memory on the HAL-M Memory engine, in a home of its own: the
-// engine is a private copy under ~/.claude/mnemosyne/engine (installed by
-// /mnemosyne-setup) and the store defaults to ~/.claude/mnemosyne/store. See
-// DESIGN.md.
+// engine is a private copy under <root>/engine (installed by /hal-m-setup) and
+// the store defaults to <root>/store. <root> is ~/.hal-m, or the 0.37 folder
+// ~/.claude/mnemosyne until the link to it exists (hooks/names.ts resolveRoot,
+// bin/migrate-root.ts). See DESIGN.md.
 //
 // Every call is one `bun cli.ts mcp` process answering bare `tools/call`
 // requests, built and read by hooks/engine.ts (shared with the dashboard server).
 // The owner id (global, or the repo's) rides on MNEMOPI_SESSION_ID: recall
 // reads that owner's rows plus every `scope: 'global'` row, and forget deletes
-// only the owner's. Embeddings are off until /mnemosyne-setup downloads the
+// only the owner's. Embeddings are off until /hal-m-setup downloads the
 // model and engineEnv turns them on; MNEMOPI_NO_EMBEDDINGS=1 keeps recall
 // full-text only otherwise (DESIGN §2.5).
 import { atom, read, update } from 'claude-code'
@@ -104,7 +105,25 @@ import type { TagRules } from './tags'
 import { parseVocabulary, tagRules, VOCAB_FILE } from './vocab'
 import type { Vocabulary } from './vocab'
 import { openDashboard, stopDashboard } from './ui-launch'
-import { cmdWrapper, shWrapper } from './launcher'
+import { launcherFile, launcherText, oldLauncherFile, shimText } from './launcher'
+import {
+  COMMAND_NAMES,
+  DEFAULT_MEMORY_DIR,
+  hookChildEnv,
+  isDefaultMemoryDir,
+  KEPT,
+  modelCacheDir,
+  newRootOf,
+  OLD_PLUGIN_ID,
+  OLD_TOOL_PREFIX,
+  oldRootOf,
+  pickEnv,
+  rebasePath,
+  resolveRoot,
+  stripStderrPrefix,
+  TOOL_PREFIX,
+} from './names'
+import type { AsyncRootFs, CommandKey, RootDecision } from './names'
 import { GLOBAL_OWNER, normalizeRemote, ownerId, remoteKey, remoteOwnerId, slashes } from './owner'
 import { PROJECTS_FILE, projectName, remoteHostOf } from './projects'
 
@@ -112,9 +131,9 @@ export { ENGINE_BUILD } from './engine-build'
 // The upstream base version; the plugin's own build of it is ENGINE_BUILD (engine/UPSTREAM.md).
 export const ENGINE_VERSION = '18.12.3'
 const ENGINE_PACKAGE = '@oh-my-pi/pi-mnemopi'
-const NOT_INSTALLED = 'HAL-M Memory engine not installed: ask the user to run /mnemosyne-setup.'
+const NOT_INSTALLED = 'HAL-M Memory engine not installed: ask the user to run /hal-m-setup.'
 // memory_remember is refused on a stale engine too: that engine's 24 h trim deletes every row whose trust tier is not IMPORTED, and a save made with this build's honest provenance is not.
-const NOT_CURRENT = `HAL-M Memory engine is out of date (memory_remember and memory_update need build ${ENGINE_BUILD}; an older engine would delete this plugin's saves after 24 hours): ask the user to run /mnemosyne-setup.`
+const NOT_CURRENT = `HAL-M Memory engine is out of date (memory_remember and memory_update need build ${ENGINE_BUILD}; an older engine would delete this plugin's saves after 24 hours): ask the user to run /hal-m-setup.`
 
 // Where a person typed the prompt; another plugin's or session's text never triggers a save.
 const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
@@ -124,7 +143,7 @@ const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
 const tagCountText = (most: number) => (most >= 2 ? `2 to ${most}` : '1')
 function rulesSection(settings: ResolvedSettings) {
   const on = (tool: ToolName) => settings.tools[tool]
-  const names = [`mcp__mnemosyne__memory_remember`, ...(on('memory_recall') ? ['_recall'] : []), ...(on('memory_update') ? ['_update'] : []), ...(on('memory_forget') ? ['_forget'] : [])]
+  const names = [`${TOOL_PREFIX}memory_remember`, ...(on('memory_recall') ? ['_recall'] : []), ...(on('memory_update') ? ['_update'] : []), ...(on('memory_forget') ? ['_forget'] : [])]
   const closeMemory = on('memory_update')
     ? `${on('memory_recall') ? 'recall first, and if a close memory exists, ' : 'if a close memory exists, '}update it (or save the new fact with replaces: the old id, which retires the old one) instead of saving another.`
     : `${on('memory_recall') ? 'recall first, and if a close memory exists, ' : 'if a close memory exists, '}save the new fact with replaces: the old id, which retires the old one, instead of saving another.`
@@ -138,20 +157,21 @@ function rulesSection(settings: ResolvedSettings) {
     ...(on('memory_recall') ? ['- Recall before answering about past decisions or preferences ("what did we…", "how do I usually…").'] : []),
     `- ${[...(on('memory_update') ? ['To change or tag a fact, update it by id and owner with memory_update.'] : []), ...(on('memory_forget') ? ['Use memory_forget only to delete.'] : []), `Never save a near-duplicate: ${closeMemory}`].join(' ')}`,
   ]
-  return { id: 'mnemosyne:rules', scope: 'session', text: lines.join('\n') } as const
+  return { id: KEPT.rulesSectionId, scope: 'session', text: lines.join('\n') } as const
 }
 
 // The heading of the first-prompt recall: names only the tools this session has (M1). With update and forget both on it is the 0.8.4 text, byte for byte.
 function recallHeading(has: (tool: ToolName) => boolean) {
-  const rowTools = [...(has('memory_update') ? ['mcp__mnemosyne__memory_update'] : []), ...(has('memory_forget') ? [has('memory_update') ? '_forget' : 'mcp__mnemosyne__memory_forget'] : [])]
+  const rowTools = [...(has('memory_update') ? [`${TOOL_PREFIX}memory_update`] : []), ...(has('memory_forget') ? [has('memory_update') ? '_forget' : `${TOOL_PREFIX}memory_forget`] : [])]
   const note = rowTools.length === 0 ? '' : `; ${rowTools.join(' and ')} ${rowTools.length === 1 ? 'takes' : 'take'} the id and owner`
   return `Long-term memories that may be relevant (HAL-M${note}):`
 }
 
-const recalled = atom({ plugin: 'mnemosyne', key: 'recalled' } as const, {} as Recalled)
+// The state is keyed by the plugin's name (hooks/names.ts PLUGIN_NAME), written as a literal: the host's scan reads it.
+const recalled = atom({ plugin: 'hal-m', key: 'recalled' } as const, {} as Recalled)
 // A remember phrase matched this turn: the first MAIN-THREAD save of the turn is
 // the human's, and consumes it (KNOWX.1). A subagent's save never does.
-const pendingTrigger = atom({ plugin: 'mnemosyne', key: 'pendingTrigger' } as const, {} as PendingTrigger)
+const pendingTrigger = atom({ plugin: 'hal-m', key: 'pendingTrigger' } as const, {} as PendingTrigger)
 
 const CONFIRM_PROPERTY = {
   type: 'boolean',
@@ -306,15 +326,44 @@ function normalize(path: string) {
   return `${path.startsWith('/') ? '/' : ''}${parts.join('/')}`
 }
 
+// The home folder: HOME first, even on Windows (F-m6), then USERPROFILE on Windows. Forward slashes; may be empty or relative.
+const homeOf = async ($: EngineInterface, windows: boolean) =>
+  slashes((await $.env.get('HOME')) || (windows ? ((await $.env.get('USERPROFILE')) ?? '') : ''))
+
+// The host's file calls as the root resolver's file API (hooks/names.ts). lstat does not follow a link: a path that does not stat
+// (a dangling link) is looked up in its folder's listing. A stat without realPath (it leads somewhere) answers the path itself.
+const hostRootFs = ($: EngineInterface): AsyncRootFs => ({
+  lstat: async path => {
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    if (stat !== undefined) return { link: stat.isLink === true }
+    const cut = path.lastIndexOf('/')
+    const entries = await $.fs.list(path.slice(0, cut) || '/').catch(() => [])
+    const entry = entries.find(item => item.name === path.slice(cut + 1))
+    return entry === undefined ? null : { link: entry.isLink === true }
+  },
+  stat: path => $.fs.stat(path).then(stat => ({ dir: stat.kind === 'dir' }), () => null),
+  realpath: path => $.fs.stat(path, { resolve: true }).then(stat => slashes(stat.realPath ?? path), () => null),
+})
+
+/** The data root by the state table of hooks/names.ts (3.2 item 1): the new path only once it exists, else the 0.37 folder. */
+const rootDecision = ($: EngineInterface, home: string, windows: boolean): Promise<RootDecision> =>
+  resolveRoot(hostRootFs($), home, { platform: windows ? 'win32' : 'posix' })
+
 // Rejects with a message the person can act on; every caller turns it into text.
 async function paths($: EngineInterface, options: PluginOptions) {
   const windows = await isWindows($)
-  const home = slashes((await $.env.get('HOME')) || (windows ? ((await $.env.get('USERPROFILE')) ?? '') : ''))
+  const home = await homeOf($, windows)
   if (!isAbsolute(home)) throw new Error(`${windows ? 'USERPROFILE' : 'HOME'} is not set to an absolute path.`)
-  const root = `${home}/.claude/mnemosyne`
+  const decision = await rootDecision($, home, windows)
+  const root = slashes(decision.root)
+  const oldRoot = slashes(oldRootOf(home))
   const engine = `${root}/engine`
-  const dir = slashes(typeof options.memoryDir === 'string' && options.memoryDir.trim() ? options.memoryDir.trim() : '~/.claude/mnemosyne/store')
-  const store = dir === '~' || dir.startsWith('~/') ? `${home}${dir.slice(1)}` : dir
+  // The default store, under either default literal (0.37's setup wrote ~/.claude/mnemosyne/store into settings), is <root>/store;
+  // a custom store at or under the 0.37 folder follows the root, the same folder through the link (3.2 item 5, F-B3).
+  const raw = typeof options.memoryDir === 'string' ? options.memoryDir.trim() : ''
+  const dir = isDefaultMemoryDir(raw) ? `${root}/store` : slashes(raw)
+  const expanded = dir === '~' || dir.startsWith('~/') ? `${home}${dir.slice(1)}` : dir
+  const store = slashes(rebasePath(expanded, home, root, { platform: windows ? 'win32' : 'posix' }))
   if (!isAbsolute(store)) throw new Error(`memoryDir must be absolute or start with ~/ (got "${dir}").`)
   if (windows && /["%]/.test(store)) throw new Error('memoryDir must not contain " or % on Windows.')
   // One store, one writer: the ~/.omp database must never get a second one (DESIGN §2.6).
@@ -323,10 +372,13 @@ async function paths($: EngineInterface, options: PluginOptions) {
   if (fold(store) === fold(omp) || fold(store).startsWith(`${fold(omp)}/`)) throw new Error('memoryDir must not be inside ~/.omp.')
   // Setup replaces these folders whole: a store inside one would be deleted.
   // Case is ignored, as the macOS and Windows file systems do (Engine/ is engine/).
+  // The engine folder under every spelling of the root (the resolved one, the 0.37 folder, ~/.hal-m): through the link they are one (F-m7).
   const lower = normalize(store).toLowerCase()
-  for (const folder of [engine, `${engine}.next`, `${engine}.old`].map(f => f.toLowerCase())) {
+  const engines = [...new Set([root, oldRoot, slashes(newRootOf(home))])].map(base => `${base}/engine`)
+  for (const folder of engines.flatMap(f => [f, `${f}.next`, `${f}.old`]).map(f => f.toLowerCase())) {
     if (lower === folder || lower.startsWith(`${folder}/`)) throw new Error(`memoryDir must not be inside the engine folder (${engine}).`)
   }
+  const platform = windows ? 'win32' : 'posix'
   return {
     windows,
     home,
@@ -334,8 +386,81 @@ async function paths($: EngineInterface, options: PluginOptions) {
     engine,
     cli: `${engine}/node_modules/${ENGINE_PACKAGE}/src/cli.ts`,
     store,
-    wrapper: `${root}/bin/mnemosyne-mcp${windows ? '.cmd' : ''}`,
+    // The externalMcp launcher and the shim under its 0.37 name (3.4, hooks/launcher.ts).
+    wrapper: `${root}/bin/${launcherFile(platform)}`,
+    oldWrapper: `${root}/bin/${oldLauncherFile(platform)}`,
     activity: `${root}/activity.jsonl`,
+    // PI_CONFIG_DIR: 0.37's HOME-relative constant while the root is the 0.37 folder (the same bytes as before), else <root>/model-cache.
+    modelCache: root === oldRoot ? EMBEDDINGS_CACHE_DIR : modelCacheDir(root),
+  }
+}
+
+// ---- The data-root link (docs/plans/hal-m-stage2.md 3.2 items 2-4, 7; R1) ----
+//
+// First thing at session start, in local and client mode alike: when only the 0.37 folder exists, bin/migrate-root.ts makes
+// ~/.hal-m a link to it (a hook has no symlink call). Nothing moves. Only an installed plugin (under ~/.claude/plugins) links by
+// default; a --plugin-dir load (a builder, a test session) links only with HALM_NO_MIGRATE=0, and HALM_NO_MIGRATE=1 turns it off
+// everywhere. Never from a plugin inside the data folder. A data-folder warning (two real folders, a foreign link) shows at
+// every start until a person resolves it.
+export const LINK_TIMEOUT_MS = 10_000
+// Per plugin instance: a link that failed is reported once, not at every /clear.
+const linkReported = new WeakSet<object>()
+
+async function linkAllowed($: EngineInterface, home: string, windows: boolean) {
+  const fold = (path: string) => (windows ? path.toLowerCase() : path)
+  const plugin = fold(slashes($.plugin.root))
+  const inside = (base: string) => plugin === fold(base) || plugin.startsWith(`${fold(base)}/`)
+  if (inside(slashes(oldRootOf(home))) || inside(slashes(newRootOf(home)))) return false
+  // Literal names: the host lists the variables a module reads (hooks/names.ts pickEnv applies the HALM_-first rule).
+  const [value, oldValue] = await Promise.all([$.env.get('HALM_NO_MIGRATE').catch(() => undefined), $.env.get('MNEMOSYNE_NO_MIGRATE').catch(() => undefined)])
+  const flag = pickEnv('NO_MIGRATE', value ?? undefined, oldValue ?? undefined)
+  if (flag !== undefined) return flag.trim() === '0'
+  return inside(`${home}/.claude/plugins`)
+}
+
+/** Makes the link when the state table allows it, then warns about a data-folder problem. Never throws. */
+export async function linkRoot($: EngineInterface, options: PluginOptions) {
+  try {
+    const windows = await isWindows($)
+    const home = await homeOf($, windows)
+    if (!isAbsolute(home)) return
+    let decision = await rootDecision($, home, windows)
+    const linkable = decision.link || (decision.state === 'both-real' && decision.root === decision.oldRoot)
+    if (linkable && (await linkAllowed($, home, windows))) {
+      const ran = await $.process.run(['bun', `${slashes($.plugin.root)}/bin/migrate-root.ts`, home], { timeoutMs: LINK_TIMEOUT_MS })
+      let outcome: { action?: unknown; error?: unknown } = {}
+      try {
+        outcome = JSON.parse(ran.stdout.trim().split('\n').pop() ?? '{}')
+      } catch {
+        outcome = {}
+      }
+      if ((ran.exitCode !== 0 || outcome.action === 'failed') && !linkReported.has(options)) {
+        linkReported.add(options)
+        const why = typeof outcome.error === 'string' ? outcome.error : ran.stderr.trim()
+        $.ui.toast(`HAL-M: could not link ${slashes(newRootOf(home))} to ${slashes(oldRootOf(home))}; still using the old folder.${why ? `\n${why.slice(0, 200)}` : ''}`)
+      }
+      decision = await rootDecision($, home, windows)
+    }
+    if (decision.warning !== undefined) $.ui.toast(decision.warning)
+  } catch {
+    // the link is retried at the next session start; it must never break this one
+  }
+}
+
+// 6.3 (F-M6): per plugin instance, the sessions already told that the 0.37 plugin's tools are in the session too.
+const warnedOld = new WeakMap<object, Set<string>>()
+
+/** Two plugins answering every save and recall: says so once per session. Never throws. */
+async function warnOldPlugin($: EngineInterface, options: PluginOptions) {
+  try {
+    const session = (await $.session.id().catch(() => undefined)) ?? ''
+    const told = warnedOld.get(options) ?? new Set<string>()
+    warnedOld.set(options, told)
+    if (told.has(session)) return
+    told.add(session)
+    $.ui.toast(`HAL-M: the old plugin ${OLD_PLUGIN_ID} is also on in this session, so memories can be saved and recalled twice. Turn it off: claude plugin disable ${OLD_PLUGIN_ID}`)
+  } catch {
+    // a UI failure must not break the prompt
   }
 }
 
@@ -356,7 +481,7 @@ const clientMode = (options: PluginOptions) => serverUrlOf(options) !== undefine
 type RemoteOp = 'engine' | 'memories' | 'resolve' | 'project' | 'hello'
 // How long a remote call may take to open its connection; the request itself gets the caller's timeout.
 export const REMOTE_CONNECT_MS = 3_000
-// Session start's hello and /mnemosyne-setup's check.
+// Session start's hello and /hal-m-setup's check.
 export const HELLO_TIMEOUT_MS = 3_000
 export const OFFLINE_MS = 60_000
 const REMOTE_UNREACHABLE = 75
@@ -380,7 +505,7 @@ const offlineUntil = new WeakMap<object, number>()
 /**
  * One call to the server through bin/remote.ts. Resolves the run (the server's stdout, stderr and exit code, replayed) for any
  * answer; rejects with a RemoteError when the server is unreachable (and marks memory offline) or refuses the key. `force`
- * skips the offline check (/mnemosyne-setup's deliberate look).
+ * skips the offline check (/hal-m-setup's deliberate look).
  */
 async function remoteCall($: EngineInterface, options: PluginOptions, op: RemoteOp, body: unknown, timeoutMs: number, force = false) {
   const url = serverUrlOf(options)
@@ -398,7 +523,7 @@ async function remoteCall($: EngineInterface, options: PluginOptions, op: Remote
   if (ran.exitCode === REMOTE_UNREACHABLE) {
     offlineUntil.set(options, Date.now() + OFFLINE_MS)
     progress($, 'memory offline')
-    const reason = ran.stderr.trim().replace(/^mnemosyne server unreachable:\s*/i, '').slice(0, 200)
+    const reason = stripStderrPrefix(ran.stderr.trim(), 'server unreachable').slice(0, 200)
     throw new RemoteError(`${OFFLINE_ERROR}${reason ? `: ${reason}` : ''}`, 'offline')
   }
   // The server answered: memory is back.
@@ -438,9 +563,9 @@ async function helloAtStart($: EngineInterface, options: PluginOptions) {
   }
 }
 
-// ---- Embeddings (EMB): local only, downloaded once by /mnemosyne-setup ----------
+// ---- Embeddings (EMB): local only, downloaded once by /hal-m-setup ----------
 
-// The setup marker /mnemosyne-setup writes after downloading the model; its
+// The setup marker /hal-m-setup writes after downloading the model; its
 // presence plus the model files is what lets an engine run turn embeddings on.
 export const EMBEDDINGS_MARKER = 'embeddings.json'
 // The 5 files fastembed writes under <cache>/<repo with / -> _>/ for bge-small.
@@ -483,7 +608,7 @@ const platformOf = async ($: EngineInterface): Promise<Platform> => {
   }
 }
 
-// HARDEN.3: what /mnemosyne-setup says about platforms, on every reply.
+// HARDEN.3: what /hal-m-setup says about platforms, on every reply.
 const PLATFORM_NOTE = 'Platforms: embeddings are tested on macOS Apple Silicon only; Linux and Windows are untested.'
 const INTEL_MAC_NOTE = 'Embeddings are not supported on an Intel Mac (darwin x64) and stay off.'
 
@@ -501,8 +626,8 @@ async function pruneLogs($: EngineInterface, options: PluginOptions) {
 }
 
 /**
- * Whether the model is downloaded: /mnemosyne-setup wrote its marker AND every
- * model file is present. /mnemosyne-setup only downloads when the option is on
+ * Whether the model is downloaded: /hal-m-setup wrote its marker AND every
+ * model file is present. /hal-m-setup only downloads when the option is on
  * (by 'on', or 'auto' on macOS arm64), so the marker's presence already encodes
  * that decision — including the platform one. No platform probe runs here, so
  * this stays a cheap check on every engine call.
@@ -557,7 +682,7 @@ const weightArgs = (settings: ResolvedSettings) => ({ vec_weight: settings.recal
 
 /**
  * Writes <root>/embeddings.json (0600), the setup marker: it names the model
- * /mnemosyne-setup downloaded, and engineEnv checks it plus the model files
+ * /hal-m-setup downloaded, and engineEnv checks it plus the model files
  * before turning embeddings on. A new file renamed over the old one, so a
  * half-written marker never counts.
  */
@@ -637,11 +762,12 @@ async function secure($: EngineInterface, options: PluginOptions) {
 // port, so no token: access is whoever can run files as this user, guarded by
 // the folder modes above.
 async function syncWrapper($: EngineInterface, options: PluginOptions) {
-  const { root, cli, store, wrapper, windows, activity: log } = await paths($, options)
+  const { root, cli, store, wrapper, oldWrapper, windows, activity: log, modelCache } = await paths($, options)
   // Rewritten at each session start, so an updated plugin's proxy path stays current.
   const proxy = `${slashes($.plugin.root)}/bin/mcp-proxy.ts`
   if (options.externalMcp !== true) {
-    await bunFs($, 'fs.rmSync(a[0], { force: true })', wrapper)
+    // Off removes both: the launcher and the shim under the old name (3.4 item 2, A-M5).
+    await bunFs($, 'for (const f of a) fs.rmSync(f, { force: true })', wrapper, oldWrapper)
     return
   }
   await bunFs($, `fs.mkdirSync(a[0], { recursive: true }); ${windows ? '' : 'fs.chmodSync(a[0], 0o700);'}`, `${root}/bin`)
@@ -650,9 +776,17 @@ async function syncWrapper($: EngineInterface, options: PluginOptions) {
   // The same env the hooks send: local-only embedding pins, embeddings on only
   // when the model is downloaded (EMB.3.a2).
   const embeddings = await embeddingsOn($, options)
-  const launcher = { store, cli, proxy, activity, embeddings, guardMode: guardModeOf(options), vocabulary: `${root}/${VOCAB_FILE}`, root, modelCacheDir: EMBEDDINGS_CACHE_DIR }
-  const text = windows ? cmdWrapper(launcher) : shWrapper(launcher)
-  await bunFs($, `fs.writeFileSync(a[0], a[1]); ${windows ? '' : 'fs.chmodSync(a[0], 0o700);'}`, wrapper, text)
+  const launcher = { store, cli, proxy, activity, embeddings, guardMode: guardModeOf(options), vocabulary: `${root}/${VOCAB_FILE}`, root, modelCacheDir: modelCache }
+  const platform = windows ? 'win32' : 'posix'
+  // The launcher, then the old-name shim that runs it (MCP configs that name mnemosyne-mcp keep working); both from T1's generators.
+  await bunFs(
+    $,
+    `fs.writeFileSync(a[0], a[1]); fs.writeFileSync(a[2], a[3]); ${windows ? '' : 'fs.chmodSync(a[0], 0o700); fs.chmodSync(a[2], 0o700);'}`,
+    wrapper,
+    launcherText(launcher, platform),
+    oldWrapper,
+    shimText(platform),
+  )
 }
 
 async function isInstalled($: EngineInterface, options: PluginOptions) {
@@ -685,7 +819,7 @@ async function installedBuild($: EngineInterface, options: PluginOptions): Promi
 
 /**
  * AUTO.1: whether `installed` is an older build of the same engine than ENGINE_BUILD (same base, lower -mnemosyne.N). Only then
- * does session start update it: a newer engine (a session still on an older plugin) or an unreadable build is left to /mnemosyne-setup,
+ * does session start update it: a newer engine (a session still on an older plugin) or an unreadable build is left to /hal-m-setup,
  * so two plugin versions never reinstall over each other.
  */
 export function isOlderBuild(installed: string | undefined): boolean {
@@ -761,12 +895,12 @@ async function runAll(
     const ran = await remoteCall($, options, 'engine', { owner: id, requests: buildRequests(requests), timeoutMs }, timeoutMs + 5_000)
     return parseReplies(requests.length, ran.stdout, ran.exitCode, ran.stderr)
   }
-  const [id, { cli, store }, settings] = await Promise.all([as ?? owner($, options), paths($, options), settingsFor($, options)])
+  const [id, { cli, store, modelCache }, settings] = await Promise.all([as ?? owner($, options), paths($, options), settingsFor($, options)])
   const embeddings = await embeddingsOn($, options)
   const ran = await $.process.run(['bun', cli, 'mcp'], {
     stdin: buildRequests(requests),
     // The ranking weights are pinned from the settings (R5.2): a shell variable cannot change recall.
-    env: engineEnv(store, id, { embeddings, weights: weightsOf(settings) }),
+    env: engineEnv(store, id, { embeddings, weights: weightsOf(settings), modelCacheDir: modelCache }),
     timeoutMs,
   })
   return parseReplies(requests.length, ran.stdout, ran.exitCode, ran.stderr)
@@ -872,10 +1006,10 @@ function compact(recall: string, note = false): CompactRow[] {
   }))
 }
 
-// What /mnemosyne-setup saves into blank settings, so the settings screen shows
+// What /hal-m-setup saves into blank settings, so the settings screen shows
 // a value to edit: it draws text and list fields only once they hold one.
 const DEFAULTS: Readonly<Record<string, string>> = {
-  memoryDir: '~/.claude/mnemosyne/store',
+  memoryDir: DEFAULT_MEMORY_DIR,
   rememberTerms: 'remember:, remember that, note that, save to memory',
   recallTerms: 'recall:, what do you remember about, check memory',
 }
@@ -914,7 +1048,7 @@ function activity($: EngineInterface, options: PluginOptions, line: string, stat
 //   await  $.process.run awaited, capped at 1 s
 // `spawn` is the default because the host documents that a spawned child's loop
 // runs on after the hook returns; it says nothing either way about an
-// un-awaited run. MNEMOSYNE_ACTIVITY_APPEND in Claude Code's environment picks
+// un-awaited run. HALM_ACTIVITY_APPEND (or MNEMOSYNE_ACTIVITY_APPEND) in Claude Code's environment picks
 // a fallback; DEFAULT_APPEND otherwise.
 export const APPEND_MODES = ['run', 'spawn', 'await'] as const
 type AppendMode = (typeof APPEND_MODES)[number]
@@ -931,7 +1065,9 @@ async function record($: EngineInterface, options: PluginOptions, entries: reado
   try {
     const [{ activity: log }, asked, me] = await Promise.all([
       paths($, options),
-      $.env.get('MNEMOSYNE_ACTIVITY_APPEND').catch(() => undefined),
+      Promise.all([$.env.get('HALM_ACTIVITY_APPEND').catch(() => undefined), $.env.get('MNEMOSYNE_ACTIVITY_APPEND').catch(() => undefined)]).then(([value, oldValue]) =>
+        pickEnv('ACTIVITY_APPEND', value ?? undefined, oldValue ?? undefined),
+      ),
       entries.every(entry => entry.owner) ? undefined : owner($, options).catch(() => GLOBAL_OWNER),
     ])
     // The session id is best-effort: a failure to read it must never drop the line (CTX.3.a3).
@@ -1006,9 +1142,9 @@ async function registerProject($: EngineInterface, options: PluginOptions) {
   }
 }
 
-// ---- /mnemosyne-tags: the one-time tag backfill (hooks/backfill.ts, bin/memories.ts) ----
+// ---- /hal-m-tags: the one-time tag backfill (hooks/backfill.ts, bin/memories.ts) ----
 
-const TAGS_USAGE = 'Usage: /mnemosyne-tags (a dry run: Haiku proposes tags for the untagged memories, nothing is written), /mnemosyne-tags retag (a dry run: tags and a kind for every memory, from the vocabulary, nothing is written) or /mnemosyne-tags apply (backs the store up, then writes the saved proposals).'
+const TAGS_USAGE = 'Usage: /hal-m-tags (a dry run: Haiku proposes tags for the untagged memories, nothing is written), /hal-m-tags retag (a dry run: tags and a kind for every memory, from the vocabulary, nothing is written) or /hal-m-tags apply (backs the store up, then writes the saved proposals).'
 // apply's one engine process per owner may carry every proposal of that owner.
 const APPLY_TIMEOUT_MS = 120_000
 const MEMORIES_TIMEOUT_MS = 60_000
@@ -1116,7 +1252,7 @@ export async function tagsDryRun($: EngineInterface, options: PluginOptions, sig
   // VOCAB.3: the tagger chooses from the vocabulary when there is one; without it the tags are free-form.
   const vocabulary = await readVocabulary($, root)
   // A retag exists to bring tags onto the vocabulary; without one it would only swap free-form tags for others.
-  if (retag && vocabulary === undefined) return `A retag needs the tag vocabulary (${root}/vocabulary.json): create it once with  bun ${slashes($.plugin.root)}/bin/vocab.ts --store <your store folder> init  and check it with  list , then run /mnemosyne-tags retag again.`
+  if (retag && vocabulary === undefined) return `A retag needs the tag vocabulary (${root}/vocabulary.json): create it once with  bun ${slashes($.plugin.root)}/bin/vocab.ts --store <your store folder> init  and check it with  list , then run /hal-m-tags retag again.`
   const system = systemPrompt(vocabulary)
   progress($, `tagging 0/${rows.length}`)
   await pool(rows, BACKFILL_CONCURRENCY, signal, async (row, i) => {
@@ -1146,7 +1282,7 @@ export async function tagsDryRun($: EngineInterface, options: PluginOptions, sig
   })
   if (signal.aborted) {
     progress($, 'tagging stopped')
-    return `Stopped after ${done} of ${rows.length} memories. Nothing was saved and no memory was changed; run /mnemosyne-tags again.`
+    return `Stopped after ${done} of ${rows.length} memories. Nothing was saved and no memory was changed; run /hal-m-tags again.`
   }
   const proposals = proposed.filter((p): p is Proposal => p !== undefined)
   const byId = new Map(rows.map(row => [row.id, row]))
@@ -1169,7 +1305,7 @@ export async function tagsDryRun($: EngineInterface, options: PluginOptions, sig
     ...(blockedNote ? [blockedNote] : []),
     ...(proposals.some(p => p.candidates !== undefined) ? [`New tags proposed (counted when you apply; a tag proposed for ${(await settingsFor($, options)).tags.autoAdmitCount} memories is admitted): ${[...new Set(proposals.flatMap(p => p.candidates ?? []))].join(', ')}.`] : []),
     ...(vocabulary === undefined ? [`No tag vocabulary yet, so these tags are free-form. Create it once with: bun ${slashes($.plugin.root)}/bin/vocab.ts --store <your store folder> init`] : []),
-    `Saved to ${root}/${PROPOSALS_FILE} (ids, owners, tags and a hash of each text; never the text). Run /mnemosyne-tags apply to write them.${retag ? ' Apply backs the store up first, replaces tags only on memories unchanged since this run, and fills a kind only where a memory has none.' : ''}`,
+    `Saved to ${root}/${PROPOSALS_FILE} (ids, owners, tags and a hash of each text; never the text). Run /hal-m-tags apply to write them.${retag ? ' Apply backs the store up first, replaces tags only on memories unchanged since this run, and fills a kind only where a memory has none.' : ''}`,
   ].join('\n')
 }
 
@@ -1275,14 +1411,14 @@ export async function extraction($: EngineInterface, options: PluginOptions, id:
   ])
 }
 
-// ---- /mnemosyne-knowledge: the backfill (KNOWX.3) ----
+// ---- /hal-m-knowledge: the backfill (KNOWX.3) ----
 
 export const KNOWLEDGE_USAGE =
-  'Usage: /mnemosyne-knowledge (a dry run: counts pending entries and memories with no knowledge; nothing is written) or /mnemosyne-knowledge apply (extracts for them).'
+  'Usage: /hal-m-knowledge (a dry run: counts pending entries and memories with no knowledge; nothing is written) or /hal-m-knowledge apply (extracts for them).'
 
-// /mnemosyne-embed: fills vectors for memories saved before embeddings were on.
+// /hal-m-embed: fills vectors for memories saved before embeddings were on.
 export const EMBED_USAGE =
-  'Usage: /mnemosyne-embed (a dry run: how many memories have no vector), /mnemosyne-embed apply (fills the missing vectors) or /mnemosyne-embed rebuild (also allows a model change, which wipes and rebuilds every vector).'
+  'Usage: /hal-m-embed (a dry run: how many memories have no vector), /hal-m-embed apply (fills the missing vectors) or /hal-m-embed rebuild (also allows a model change, which wipes and rebuilds every vector).'
 // One engine process embeds every missing memory; the model is loaded once.
 export const REEMBED_TIMEOUT_MS = 600_000
 
@@ -1325,13 +1461,13 @@ async function knowledgeSurvey($: EngineInterface, options: PluginOptions) {
 }
 
 /**
- * /mnemosyne-knowledge with no argument: per owner, how many memories have no
+ * /hal-m-knowledge with no argument: per owner, how many memories have no
  * knowledge and how many pending entries wait. No model call, no write.
  */
 export async function knowledgeDryRun($: EngineInterface, options: PluginOptions) {
   const model = extractionModelOf(options)
   if (extractionOff(model)) return 'Knowledge extraction is off (extractionModel is "off"): set it, then try again.'
-  if (!(await isCurrent($, options))) return 'The HAL-M engine is out of date (the backfill needs the knowledge tools): run /mnemosyne-setup, then try again.'
+  if (!(await isCurrent($, options))) return 'The HAL-M engine is out of date (the backfill needs the knowledge tools): run /hal-m-setup, then try again.'
   const { root, pending, rows } = await knowledgeSurvey($, options)
   const empty = await readEmptyFile($, root)
   const perOwner = new Map<string, { missing: number; pending: number; empty: number; forgotten: number }>()
@@ -1360,12 +1496,12 @@ export async function knowledgeDryRun($: EngineInterface, options: PluginOptions
   return [
     'Knowledge extraction dry run: no model call, nothing written.',
     ...lines,
-    'Run /mnemosyne-knowledge apply to extract. Try apply on a copy of the store first.',
+    'Run /hal-m-knowledge apply to extract. Try apply on a copy of the store first.',
   ].join('\n')
 }
 
 /**
- * /mnemosyne-knowledge apply: finishes the pending entries first (each from its
+ * /hal-m-knowledge apply: finishes the pending entries first (each from its
  * current content and current sha256, so a changed memory is redone), then the
  * older memories with no knowledge. Per owner, in batches of KNOWLEDGE_BATCH memories:
  * one engine process for the prompts, one memories call writing the pending
@@ -1376,7 +1512,7 @@ export async function knowledgeDryRun($: EngineInterface, options: PluginOptions
 export async function knowledgeApply($: EngineInterface, options: PluginOptions, signal: AbortSignal) {
   const model = extractionModelOf(options)
   if (extractionOff(model)) return 'Knowledge extraction is off (extractionModel is "off"): set it, then try again.'
-  if (!(await isCurrent($, options))) return 'The HAL-M engine is out of date (the backfill needs the knowledge tools): run /mnemosyne-setup, then try again.'
+  if (!(await isCurrent($, options))) return 'The HAL-M engine is out of date (the backfill needs the knowledge tools): run /hal-m-setup, then try again.'
   const { root, pending, rows } = await knowledgeSurvey($, options)
   const empty = await readEmptyFile($, root)
   const counts = { stored: 0, empty: 0, failed: 0, stale: 0, gone: 0, notReached: 0 }
@@ -1398,7 +1534,7 @@ export async function knowledgeApply($: EngineInterface, options: PluginOptions,
   }
   if (targets.length === 0) return 'Nothing to extract: every memory has knowledge, and no pending entry waits.'
   // C9: the backup comes before the first model call and write; a failed backup stops the run.
-  const stopped = await backupFirst($, options, '/mnemosyne-knowledge apply')
+  const stopped = await backupFirst($, options, '/hal-m-knowledge apply')
   if (stopped !== undefined) return stopped
 
   // Per owner, in the order found, KNOWLEDGE_BATCH memories to a batch.
@@ -1466,7 +1602,7 @@ export async function knowledgeApply($: EngineInterface, options: PluginOptions,
   return [
     `Extracted knowledge for ${counts.stored} of ${plural(targets.length, 'memory', 'memories')}.`,
     `Outcomes: ${counts.empty} found nothing (noted, skipped while the text is unchanged), ${counts.stale} changed mid-run (run apply again), ${counts.gone} gone, ${counts.failed} failed.`,
-    ...(counts.notReached > 0 ? [`Stopped early: ${plural(counts.notReached, 'memory', 'memories')} not reached; run /mnemosyne-knowledge apply again to finish.`] : []),
+    ...(counts.notReached > 0 ? [`Stopped early: ${plural(counts.notReached, 'memory', 'memories')} not reached; run /hal-m-knowledge apply again to finish.`] : []),
   ].join('\n')
 }
 
@@ -1478,7 +1614,7 @@ export async function knowledgeApply($: EngineInterface, options: PluginOptions,
 export async function tagsApply($: EngineInterface, options: PluginOptions, signal: AbortSignal) {
   const { root } = await paths($, options)
   const file = `${root}/${PROPOSALS_FILE}`
-  if (!(await $.fs.stat(file).then(() => true, () => false))) return 'No saved proposals: run /mnemosyne-tags (the dry run) first.'
+  if (!(await $.fs.stat(file).then(() => true, () => false))) return 'No saved proposals: run /hal-m-tags (the dry run) first.'
   let proposals: Proposal[]
   let retag = false
   try {
@@ -1486,11 +1622,11 @@ export async function tagsApply($: EngineInterface, options: PluginOptions, sign
     proposals = saved.proposals
     retag = saved.mode === 'retag'
   } catch (err) {
-    return `The saved proposals cannot be used (${(err as Error).message}): run /mnemosyne-tags again.`
+    return `The saved proposals cannot be used (${(err as Error).message}): run /hal-m-tags again.`
   }
-  if (proposals.length === 0) return 'The saved proposals list is empty: run /mnemosyne-tags again.'
+  if (proposals.length === 0) return 'The saved proposals list is empty: run /hal-m-tags again.'
   // C9: the backup comes before the first write; a failed backup stops the run.
-  const stopped = await backupFirst($, options, '/mnemosyne-tags apply')
+  const stopped = await backupFirst($, options, '/hal-m-tags apply')
   if (stopped !== undefined) return stopped
   const byOwner = new Map<string, Proposal[]>()
   for (const proposal of proposals) byOwner.set(proposal.owner, [...(byOwner.get(proposal.owner) ?? []), proposal])
@@ -1562,12 +1698,12 @@ export async function tagsApply($: EngineInterface, options: PluginOptions, sign
       ? `Skipped: ${counts.gone} gone, ${counts.same} already as proposed, ${counts.untaggable} cannot be tagged (metadata is not a JSON object), ${counts.changed} changed since the dry run (text or tags).`
       : `Skipped: ${counts.gone} gone, ${counts.tagged} already tagged, ${counts.untaggable} cannot be tagged (metadata is not a JSON object), ${counts.changed} changed since the dry run.`,
     ...(failed > 0 ? [`${plural(failed, 'update')} failed (${firstError}).`] : []),
-    ...(notReached > 0 ? [`Stopped early: ${plural(notReached, 'memory', 'memories')} not reached; run /mnemosyne-tags apply again to finish.`] : []),
+    ...(notReached > 0 ? [`Stopped early: ${plural(notReached, 'memory', 'memories')} not reached; run /hal-m-tags apply again to finish.`] : []),
     ...counted,
   ].join('\n')
 }
 
-// ---- /mnemosyne-import: documents and session logs, through the guard (plan phase IMPORT) ----
+// ---- /hal-m-import: documents and session logs, through the guard (plan phase IMPORT) ----
 
 const IMPORT_CLI_TIMEOUT_MS = 60_000
 // One engine process answers a batch of similar or remember requests; the longest wait is the batch's.
@@ -1583,7 +1719,7 @@ async function importCli($: EngineInterface, options: PluginOptions, args: reado
     ...(stdin === undefined ? {} : { stdin }),
     timeoutMs,
   })
-  if (ran.exitCode !== 0) throw new Error(ran.stderr.trim().replace(/^mnemosyne import: /, '').slice(-300) || `bin/import.ts ${args[0]} failed (exit ${ran.exitCode})`)
+  if (ran.exitCode !== 0) throw new Error(stripStderrPrefix(ran.stderr.trim(), 'import').slice(-300) || `bin/import.ts ${args[0]} failed (exit ${ran.exitCode})`)
   if (ran.isStdoutTruncated) throw new Error(`the output of bin/import.ts ${args[0]} was cut at 4 MiB`)
   return ran.stdout
 }
@@ -1644,7 +1780,7 @@ async function evaluateDoc($: EngineInterface, options: PluginOptions, path: str
 
 const nearLine = (checked: boolean) => (checked ? 'Near-duplicate check: on (a close match is a warning).' : 'Near-duplicate check: skipped (embeddings are off, or setting G5 is off); exact repeats are still caught per owner.')
 
-/** /mnemosyne-import doc <path>: the dry run. Writes the proposals file (hashes and verdicts, never text) and no memory. */
+/** /hal-m-import doc <path>: the dry run. Writes the proposals file (hashes and verdicts, never text) and no memory. */
 export async function importDocDryRun($: EngineInterface, options: PluginOptions, rawPath: string) {
   const { root } = await paths($, options)
   const path = await docPathOf($, rawPath)
@@ -1660,11 +1796,11 @@ export async function importDocDryRun($: EngineInterface, options: PluginOptions
   const strict = guardModeOf(options) === 'strict'
   return [
     `Dry run for ${basenameOf(path)}: ${plural(counts.total, 'chunk')}${read.skippedEmpty > 0 ? ` (${plural(read.skippedEmpty, 'heading')} with no text under ${read.skippedEmpty === 1 ? 'it was' : 'them were'} skipped)` : ''}. No memory was changed.`,
-    `Would save ${counts.allow} clean${counts.replace > 0 ? ` (${counts.replace} of the chunks replace a row from an earlier import of this file: the old row is retired, not deleted, and can be restored)` : ''}; ${counts.warn} with a warning${counts.warn > 0 ? (strict ? ' (guard mode strict: saved only with /mnemosyne-import apply confirm)' : ' (guard mode warn: saved and flagged in metadata.guard)') : ''}; ${counts.unchanged} already in the store (skipped); ${counts.block} blocked (never saved).`,
+    `Would save ${counts.allow} clean${counts.replace > 0 ? ` (${counts.replace} of the chunks replace a row from an earlier import of this file: the old row is retired, not deleted, and can be restored)` : ''}; ${counts.warn} with a warning${counts.warn > 0 ? (strict ? ' (guard mode strict: saved only with /hal-m-import apply confirm)' : ' (guard mode warn: saved and flagged in metadata.guard)') : ''}; ${counts.unchanged} already in the store (skipped); ${counts.block} blocked (never saved).`,
     ...entryLines(entries),
     nearLine(nearChecked),
     `Saved to ${root}/${IMPORT_PROPOSALS_FILE} (path, headings, hashes and verdicts; never the text).`,
-    saveable === 0 ? 'Nothing to import.' : `Run /mnemosyne-import apply to save ${strict && counts.warn > 0 ? `the ${counts.allow} clean chunks (add confirm for the ${counts.warn} with a warning)` : `${saveable} chunks`}. Apply backs the store up first and stops if that fails.`,
+    saveable === 0 ? 'Nothing to import.' : `Run /hal-m-import apply to save ${strict && counts.warn > 0 ? `the ${counts.allow} clean chunks (add confirm for the ${counts.warn} with a warning)` : `${saveable} chunks`}. Apply backs the store up first and stops if that fails.`,
   ].join('\n')
 }
 
@@ -1673,7 +1809,7 @@ export async function importDocDryRun($: EngineInterface, options: PluginOptions
 // empties it, and apply then asks for a new dry run.
 const sessionPending = new Map<string, { sessionId: string; items: Map<string, SessionCandidate> }>()
 
-/** /mnemosyne-import session <id | last>: asks Haiku for up to 5 durable memories, checks each, writes a proposals file (hashes only) and no memory. */
+/** /hal-m-import session <id | last>: asks Haiku for up to 5 durable memories, checks each, writes a proposals file (hashes only) and no memory. */
 export async function importSessionDryRun($: EngineInterface, options: PluginOptions, target: string, signal: AbortSignal) {
   const { root, home } = await paths($, options)
   const model = extractionModelOf(options)
@@ -1684,7 +1820,7 @@ export async function importSessionDryRun($: EngineInterface, options: PluginOpt
   const projects = `${home}/.claude/projects`
   const current = await $.session.id().catch(() => undefined)
   // `last` skips the running session; if its id is unknown, the newest file may be the running one.
-  if (target === 'last' && !current) return 'The running session\'s id is not known, so "last" could pick the session in progress. Give the session id: /mnemosyne-import session <id>. Nothing was read.'
+  if (target === 'last' && !current) return 'The running session\'s id is not known, so "last" could pick the session in progress. Give the session id: /hal-m-import session <id>. Nothing was read.'
   const read = JSON.parse(await importCli($, options, ['session', '--projects', projects, '--cwd', slashes(await $.session.cwd()), ...(current === undefined ? [] : ['--current', current]), target])) as SessionRead
   if (read.text === '') return `Session ${read.sessionId} has no conversation text to read; nothing to import.`
   const vocabulary = await readVocabulary($, root)
@@ -1719,11 +1855,11 @@ export async function importSessionDryRun($: EngineInterface, options: PluginOpt
   })
   return [
     `Dry run for session ${read.sessionId}: ${plural(candidates.length, 'memory', 'memories')} proposed from ${plural(read.turns, 'turn')}${read.truncated ? ` (the newest ${read.turns} of ${read.totalTurns}; the text is capped)` : ''}. No memory was changed.`,
-    `Would save ${counts.allow} clean; ${counts.warn} with a warning${counts.warn > 0 ? (strict ? ' (guard mode strict: saved only with /mnemosyne-import apply confirm)' : ' (guard mode warn: saved and flagged in metadata.guard)') : ''}; ${counts.unchanged} already in the store (skipped); ${counts.block} blocked (never saved).`,
+    `Would save ${counts.allow} clean; ${counts.warn} with a warning${counts.warn > 0 ? (strict ? ' (guard mode strict: saved only with /hal-m-import apply confirm)' : ' (guard mode warn: saved and flagged in metadata.guard)') : ''}; ${counts.unchanged} already in the store (skipped); ${counts.block} blocked (never saved).`,
     ...lines,
     nearLine(nearChecked),
     `Saved to ${root}/${IMPORT_PROPOSALS_FILE} (hashes and verdicts; never the text). The memories themselves are kept in this Claude Code process until another dry run replaces them, so apply can be repeated (for confirm); text already saved is skipped.`,
-    counts.allow + counts.warn === 0 ? 'Nothing to import.' : 'Run /mnemosyne-import apply to save them. Apply backs the store up first and stops if that fails.',
+    counts.allow + counts.warn === 0 ? 'Nothing to import.' : 'Run /hal-m-import apply to save them. Apply backs the store up first and stops if that fails.',
   ].join('\n')
 }
 
@@ -1796,7 +1932,7 @@ async function retireImported($: EngineInterface, options: PluginOptions, saved:
 }
 
 /**
- * /mnemosyne-import apply: saves what the last dry run checked. The store is backed up first (C9) and nothing is read
+ * /hal-m-import apply: saves what the last dry run checked. The store is backed up first (C9) and nothing is read
  * or written if that fails. Every candidate is checked again with the settings read now: the guard, the near-duplicate
  * check and the rows an earlier import left. Only candidates whose text the dry run saw are saved (a chunk edited since
  * is skipped). A document's chunks are read again from the file; a session's memories come from the dry run in this process.
@@ -1807,15 +1943,15 @@ export async function importApply($: EngineInterface, options: PluginOptions, co
   try {
     proposalText = await $.fs.read(`${root}/${IMPORT_PROPOSALS_FILE}`)
   } catch {
-    return 'There is no dry run to apply. Run /mnemosyne-import doc <path> or /mnemosyne-import session <id | last> first.'
+    return 'There is no dry run to apply. Run /hal-m-import doc <path> or /hal-m-import session <id | last> first.'
   }
   const proposal = parseImportProposal(proposalText)
   if (proposal === undefined) return `${root}/${IMPORT_PROPOSALS_FILE} is not a proposal this version can apply; run the dry run again.`
   const pending = proposal.kind === 'session' ? sessionPending.get(root) : undefined
   if (proposal.kind === 'session' && (pending === undefined || pending.sessionId !== proposal.sessionId)) {
-    return 'The memories of the last session dry run are no longer in this Claude Code process (their text is never written to a file): run /mnemosyne-import session <id | last> again, then apply.'
+    return 'The memories of the last session dry run are no longer in this Claude Code process (their text is never written to a file): run /hal-m-import session <id | last> again, then apply.'
   }
-  const stopped = await backupFirst($, options, '/mnemosyne-import apply')
+  const stopped = await backupFirst($, options, '/hal-m-import apply')
   if (stopped !== undefined) return stopped
   const settings = await settingsFor($, options)
   const approved = new Set(proposal.chunks.filter(chunk => chunk.verdict === 'allow' || chunk.verdict === 'warn').map(chunk => chunk.sha256))
@@ -1872,12 +2008,12 @@ export async function importApply($: EngineInterface, options: PluginOptions, co
   progress($, `${plural(saved.length, noun, nouns)} imported`)
   return [
     `Imported ${plural(saved.length, noun, nouns)} of ${label} (${plural(todo.length, noun, nouns)} ${todo.length === 1 ? 'was' : 'were'} due).`,
-    `Skipped: ${skipped.unchanged} already in the store, ${skipped.blocked} blocked, ${skipped.edited} edited since the dry run (run it again), ${skipped.confirm} with a warning (resend as /mnemosyne-import apply confirm to save them).`,
+    `Skipped: ${skipped.unchanged} already in the store, ${skipped.blocked} blocked, ${skipped.edited} edited since the dry run (run it again), ${skipped.confirm} with a warning (resend as /hal-m-import apply confirm to save them).`,
     ...(pairs > 0 ? [`Replaced ${retired.length / 2} of ${plural(pairs, 'earlier chunk')}: each old row is retired, not deleted, and can be restored.${retireFailed > 0 ? ` ${plural(retireFailed, 'retire')} failed; the new chunks are saved and the old rows were left as they were.` : ''}`] : []),
     ...(kept > 0 ? [`${plural(kept, noun, nouns)} already stored as retired or expired memories, left as they are (restore one from the dashboard to bring it back).`] : []),
     ...(failed > 0 ? [`${plural(failed, 'save')} failed (${firstError}).`] : []),
-    ...(notReached > 0 ? [`Stopped early: ${plural(notReached, noun, nouns)} not reached; run /mnemosyne-import apply again to finish.`] : []),
-    'Knowledge is not extracted from imported memories (no model call each): /mnemosyne-knowledge does that when you want it.',
+    ...(notReached > 0 ? [`Stopped early: ${plural(notReached, noun, nouns)} not reached; run /hal-m-import apply again to finish.`] : []),
+    'Knowledge is not extracted from imported memories (no model call each): /hal-m-knowledge does that when you want it.',
   ].join('\n')
 }
 
@@ -1914,20 +2050,20 @@ function track<T>(options: PluginOptions, work: Promise<T>): Promise<T> {
   return work
 }
 
-// Runs bin/install-engine.ts for /mnemosyne-setup and the auto-update: builds <engine>.next from the plugin's engine/ and swaps it in only once it answers.
+// Runs bin/install-engine.ts for /hal-m-setup and the auto-update: builds <engine>.next from the plugin's engine/ and swaps it in only once it answers.
 async function runInstaller($: EngineInterface, options: PluginOptions, embeddings: boolean) {
   const { engine, store } = await paths($, options)
   const root = slashes($.plugin.root)
   return $.process.run(
     ['bun', `${root}/bin/install-engine.ts`, root, engine, store, ...(embeddings ? ['embeddings'] : [])],
     // Another install's lock is waited for only briefly, so this one still ends inside SETUP_TIMEOUT_MS.
-    { timeoutMs: SETUP_TIMEOUT_MS, env: { MNEMOSYNE_LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS) } },
+    { timeoutMs: SETUP_TIMEOUT_MS, env: hookChildEnv({ LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS) }) },
   )
 }
 
 // Per plugin instance: the auto-update running now, so a save on a stale engine can wait for it instead of being refused.
 const updating = new WeakMap<object, Promise<boolean>>()
-// Per plugin instance: an auto-update failed, so later session starts in this process (/clear) do not rerun it; /mnemosyne-setup retries.
+// Per plugin instance: an auto-update failed, so later session starts in this process (/clear) do not rerun it; /hal-m-setup retries.
 const updateFailed = new WeakSet<object>()
 // How long memory_remember and memory_update wait for a running auto-update before they refuse.
 export const UPDATE_WAIT_MS = 60_000
@@ -1938,8 +2074,8 @@ const LOCK_BUSY_EXIT = 3
 
 /**
  * AUTO.1: an installed engine older than ENGINE_BUILD (the plugin was updated) is updated in the background at session start,
- * with no /mnemosyne-setup. Embeddings keep their state: on only when setup already downloaded the model, so nothing is fetched.
- * The first install stays /mnemosyne-setup's (it downloads the model). Resolves to whether the engine is current afterwards;
+ * with no /hal-m-setup. Embeddings keep their state: on only when setup already downloaded the model, so nothing is fetched.
+ * The first install stays /hal-m-setup's (it downloads the model). Resolves to whether the engine is current afterwards;
  * an install another session holds the lock for counts once that session's engine is in place.
  */
 function autoUpdate($: EngineInterface, options: PluginOptions): Promise<boolean> {
@@ -1964,7 +2100,7 @@ function autoUpdate($: EngineInterface, options: PluginOptions): Promise<boolean
       $.ui.toast(`HAL-M: memory engine updated to build ${ENGINE_BUILD}.`)
     } else {
       const reason = `${installed.stderr}\n${installed.stdout}`.trim().slice(-300)
-      $.ui.toast(`HAL-M: the memory engine update failed; the old engine is unchanged. Run /mnemosyne-setup to retry.${reason ? `\n${reason}` : ''}`)
+      $.ui.toast(`HAL-M: the memory engine update failed; the old engine is unchanged. Run /hal-m-setup to retry.${reason ? `\n${reason}` : ''}`)
     }
     if (!current) updateFailed.add(options)
     return current
@@ -2209,6 +2345,24 @@ async function maybeSweep($: EngineInterface, options: PluginOptions) {
   }
 }
 
+// The slash commands' menu text; each runs under /hal-m-<key> and its 0.37 alias /mnemosyne-<key> (hooks/names.ts).
+const COMMAND_DESCRIPTIONS: Readonly<Record<CommandKey, string>> = {
+  setup: `Install the HAL-M Memory engine (${ENGINE_PACKAGE} ${ENGINE_BUILD}, the plugin's own copy) into the HAL-M data folder (~/.hal-m)`,
+  tags: 'Tag the existing memories once: a dry run lets Haiku propose topic tags; "apply" writes them (no new model calls)',
+  import: 'Import a .md or .txt document, or boil a past session down to a few memories: a dry run checks everything and writes nothing; "apply" backs the store up, then saves',
+  ui: 'Open the HAL-M dashboard: a local page on 127.0.0.1, opened in your default browser',
+  knowledge: 'Extract knowledge from older memories and finish pending ones: a dry run counts them; "apply" extracts',
+  embed: 'Fill embeddings for memories saved before embeddings were on: a dry run counts them; "apply" fills them; "rebuild" also allows a model change',
+}
+/** The command.run matcher for one command: its new name and its 0.37 alias (A-m1: one hook each). */
+const commandMatch = (key: CommandKey) => {
+  const { name, old } = COMMAND_NAMES.find(command => command.key === key)!
+  return [name, old]
+}
+// The tool.call matcher: fixed when the module loads, so from the constant prefix, not $.plugin.name (F-m1).
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const OWN_TOOL = new RegExp(`^${escapeRegExp(TOOL_PREFIX)}memory_`)
+
 export const register: Register = (on, options) => {
   const isPerProject = options.scope === 'per-project'
   // Per session, the tail of its extraction chain (one at a time).
@@ -2268,30 +2422,13 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', { cwd: /.*/ }, async ($, e, next) => {
-    await $.command.register({
-      name: 'mnemosyne-setup',
-      description: `Install the HAL-M Memory engine (${ENGINE_PACKAGE} ${ENGINE_BUILD}, the plugin's own copy) into ~/.claude/mnemosyne`,
-    })
-    await $.command.register({
-      name: 'mnemosyne-tags',
-      description: 'Tag the existing memories once: a dry run lets Haiku propose topic tags; "apply" writes them (no new model calls)',
-    })
-    await $.command.register({
-      name: 'mnemosyne-import',
-      description: 'Import a .md or .txt document, or boil a past session down to a few memories: a dry run checks everything and writes nothing; "apply" backs the store up, then saves',
-    })
-    await $.command.register({
-      name: 'mnemosyne-ui',
-      description: 'Open the HAL-M dashboard: a local page on 127.0.0.1, opened in your default browser',
-    })
-    await $.command.register({
-      name: 'mnemosyne-knowledge',
-      description: 'Extract knowledge from older memories and finish pending ones: a dry run counts them; "apply" extracts',
-    })
-    await $.command.register({
-      name: 'mnemosyne-embed',
-      description: 'Fill embeddings for memories saved before embeddings were on: a dry run counts them; "apply" fills them; "rebuild" also allows a model change',
-    })
+    // R1: the link comes before anything else, ahead of the client-mode return below.
+    await linkRoot($, options)
+    // D4: each command under its new name, and under its 0.37 name as an alias served by the same hook.
+    for (const { key, name, old } of COMMAND_NAMES) {
+      await $.command.register({ name, description: COMMAND_DESCRIPTIONS[key] })
+      await $.command.register({ name: old, description: `${COMMAND_DESCRIPTIONS[key]} (old name of /${name})` })
+    }
     // M1: a tool switched off is not registered, so Claude never sees it; the registered set is kept for this session (see `registered`).
     const settings = await settingsFor($, options)
     const enabled = new Set<ToolName>(TOOL_NAMES.filter(name => settings.tools[name]))
@@ -2303,12 +2440,12 @@ export const register: Register = (on, options) => {
       void track(options, helloAtStart($, options))
       return next(e)
     }
-    if (!(await isInstalled($, options))) $.ui.toast('HAL-M Memory engine not installed. Run /mnemosyne-setup.')
+    if (!(await isInstalled($, options))) $.ui.toast('HAL-M Memory engine not installed. Run /hal-m-setup.')
     else {
       // A stale engine keeps recall, forget and stats working; memory_remember and memory_update wait for the update (AUTO.1), then refuse if it failed (an old engine's 24 h trim would delete the new saves).
       if (!(await isCurrent($, options))) {
         if (isOlderBuild(await installedBuild($, options)) && !updateFailed.has(options)) void autoUpdate($, options)
-        else $.ui.toast('HAL-M Memory engine is out of date. Run /mnemosyne-setup to update it.')
+        else $.ui.toast('HAL-M Memory engine is out of date. Run /hal-m-setup to update it.')
       }
       await Promise.all([secure($, options), syncWrapper($, options)]).catch(() => undefined)
       activity($, options, 'memory ready', 'ready')
@@ -2323,7 +2460,7 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'mnemosyne-setup' }, async $ => {
+  on('command.run', { command: commandMatch('setup') }, async $ => {
     const server = serverUrlOf(options)
     if (server !== undefined) {
       const said = await hello($, options, true)
@@ -2358,7 +2495,7 @@ export const register: Register = (on, options) => {
       // SETUP.STATUS: the download line only when the model is not in <root>'s cache yet; a cached model is loaded from disk.
       if (embeddings && !(await modelCached($, pluginRoot))) {
         show('downloading the embedding model from huggingface.co (about 63 MB)')
-        $.ui.log('HAL-M: /mnemosyne-setup downloads the embedding model BAAI/bge-small-en-v1.5 from huggingface.co (Qdrant/bge-small-en-v1.5-onnx-Q, about 63 MB), once.')
+        $.ui.log('HAL-M: /hal-m-setup downloads the embedding model BAAI/bge-small-en-v1.5 from huggingface.co (Qdrant/bge-small-en-v1.5-onnx-Q, about 63 MB), once.')
       } else show(embeddings ? 'embedding model already cached; installing the engine' : 'installing the engine')
       const installed = await runInstaller($, options, embeddings)
       if (installed.exitCode !== 0) {
@@ -2368,7 +2505,7 @@ export const register: Register = (on, options) => {
         // generic install failure.
         if (embeddings && /no memory_embeddings row|model did not load/i.test(`${installed.stderr}${installed.stdout}`)) {
           await bunFs($, 'fs.rmSync(a[0], { force: true })', `${pluginRoot}/${EMBEDDINGS_MARKER}`)
-          return { text: 'Embeddings are off: the model did not load, so no memory_embeddings row was written, the engine was not swapped and no marker was written. Set the embeddings option to off and re-run /mnemosyne-setup, or re-run /mnemosyne-setup when online.' }
+          return { text: 'Embeddings are off: the model did not load, so no memory_embeddings row was written, the engine was not swapped and no marker was written. Set the embeddings option to off and re-run /hal-m-setup, or re-run /hal-m-setup when online.' }
         }
         return { text: `Engine install failed; the engine already installed (if any) is unchanged:\n${`${installed.stderr}\n${installed.stdout}`.trim().slice(-800)}` }
       }
@@ -2383,7 +2520,7 @@ export const register: Register = (on, options) => {
       const stats = mnemosyneStats(await call($, options, 'mnemopi_stats', {}))
       const { wrapper } = await paths($, options)
       const external =
-        options.externalMcp === true ? `\nOther MCP clients: claude mcp add mnemosyne-memory -- ${wrapper}` : ''
+        options.externalMcp === true ? `\nOther MCP clients: claude mcp add hal-m-memory -- ${wrapper}` : ''
       const saved = filled.length > 0 ? `\nSaved defaults for ${filled.join(', ')}; restart Claude Code to see them in /plugin.` : ''
       // M2: embeddings are reported on only after the install check proved the
       // model loaded (the marker is written above).
@@ -2400,7 +2537,7 @@ export const register: Register = (on, options) => {
   })
 
   // The dashboard: one shared server on 127.0.0.1 (hooks/ui-launch.ts, ui/server.ts).
-  on('command.run', { command: 'mnemosyne-ui' }, async $ => {
+  on('command.run', { command: commandMatch('ui') }, async $ => {
     const server = serverUrlOf(options)
     if (server !== undefined) {
       // Client mode: no local dashboard; the server's is the one to open.
@@ -2412,8 +2549,8 @@ export const register: Register = (on, options) => {
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The HAL-M dashboard needs Bun on PATH: https://bun.sh' }
     try {
-      if (!(await isInstalled($, options))) return { text: 'The HAL-M dashboard needs the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date: run /mnemosyne-setup, then /mnemosyne-ui again.' }
+      if (!(await isInstalled($, options))) return { text: 'The HAL-M dashboard needs the engine: run /hal-m-setup first.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date: run /hal-m-setup, then /hal-m-ui again.' }
       const { root, store, cli, activity: log } = await paths($, options)
       const activityLog = options.activityLog === 'off' ? '' : log
       const session = await $.session.id()
@@ -2428,15 +2565,15 @@ export const register: Register = (on, options) => {
   })
 
   // The tag backfill: no argument is a dry run (the only mode that calls a model); apply writes the saved proposals.
-  on('command.run', { command: 'mnemosyne-tags' }, async ($, e, next) => {
-    if (clientMode(options)) return { text: `/mnemosyne-tags runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+  on('command.run', { command: commandMatch('tags') }, async ($, e, next) => {
+    if (clientMode(options)) return { text: `/hal-m-tags runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply' && mode !== 'retag') return { text: TAGS_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The tag backfill needs Bun on PATH: https://bun.sh' }
     try {
-      if (!(await isInstalled($, options))) return { text: 'The tag backfill needs the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (the backfill needs memory_update): run /mnemosyne-setup, then try again.' }
+      if (!(await isInstalled($, options))) return { text: 'The tag backfill needs the engine: run /hal-m-setup first.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (the backfill needs memory_update): run /hal-m-setup, then try again.' }
       return { text: mode === 'apply' ? await tagsApply($, options, next.signal) : await tagsDryRun($, options, next.signal, mode === 'retag') }
     } catch (err) {
       return { text: `HAL-M tag backfill failed: ${(err as Error).message}` }
@@ -2444,15 +2581,15 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ text: 'HAL-M: the tag backfill failed.' }))
 
   // The importers: doc and session are dry runs (nothing is written); apply backs the store up, then saves what the last dry run checked.
-  on('command.run', { command: 'mnemosyne-import' }, async ($, e, next) => {
-    if (clientMode(options)) return { text: `/mnemosyne-import runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+  on('command.run', { command: commandMatch('import') }, async ($, e, next) => {
+    if (clientMode(options)) return { text: `/hal-m-import runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const parsed = parseImportArgs(e.args)
     if (parsed.mode === 'usage') return { text: IMPORT_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The importers need Bun on PATH: https://bun.sh' }
     try {
-      if (!(await isInstalled($, options))) return { text: 'The importers need the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (an import saves with this build\'s provenance): run /mnemosyne-setup, then try again.' }
+      if (!(await isInstalled($, options))) return { text: 'The importers need the engine: run /hal-m-setup first.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (an import saves with this build\'s provenance): run /hal-m-setup, then try again.' }
       if (parsed.mode === 'doc') return { text: await importDocDryRun($, options, parsed.path) }
       if (parsed.mode === 'apply') return { text: await importApply($, options, parsed.confirm, next.signal) }
       return { text: await importSessionDryRun($, options, parsed.target, next.signal) }
@@ -2462,14 +2599,14 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ text: 'HAL-M: the import failed.' }))
 
   // The knowledge backfill: no argument is a dry run; apply extracts pending and older memories.
-  on('command.run', { command: 'mnemosyne-knowledge' }, async ($, e, next) => {
-    if (clientMode(options)) return { text: `/mnemosyne-knowledge runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+  on('command.run', { command: commandMatch('knowledge') }, async ($, e, next) => {
+    if (clientMode(options)) return { text: `/hal-m-knowledge runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply') return { text: KNOWLEDGE_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The knowledge backfill needs Bun on PATH: https://bun.sh' }
     try {
-      if (!(await isInstalled($, options))) return { text: 'The knowledge backfill needs the engine: run /mnemosyne-setup first.' }
+      if (!(await isInstalled($, options))) return { text: 'The knowledge backfill needs the engine: run /hal-m-setup first.' }
       return { text: mode === 'apply' ? await knowledgeApply($, options, next.signal) : await knowledgeDryRun($, options) }
     } catch (err) {
       return { text: `HAL-M knowledge backfill failed: ${(err as Error).message}` }
@@ -2478,27 +2615,27 @@ export const register: Register = (on, options) => {
 
   // The embeddings backfill: no argument is a dry run, "apply" fills the vectors,
   // "rebuild" also allows a model change (which wipes and rebuilds every vector).
-  on('command.run', { command: 'mnemosyne-embed' }, async ($, e) => {
-    if (clientMode(options)) return { text: `/mnemosyne-embed runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+  on('command.run', { command: commandMatch('embed') }, async ($, e) => {
+    if (clientMode(options)) return { text: `/hal-m-embed runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply' && mode !== 'rebuild') return { text: EMBED_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The embeddings backfill needs Bun on PATH: https://bun.sh' }
     try {
-      if (!(await isInstalled($, options))) return { text: 'The embeddings backfill needs the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (the backfill needs the reembed command): run /mnemosyne-setup, then try again.' }
-      const { cli, store } = await paths($, options)
+      if (!(await isInstalled($, options))) return { text: 'The embeddings backfill needs the engine: run /hal-m-setup first.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (the backfill needs the reembed command): run /hal-m-setup, then try again.' }
+      const { cli, store, modelCache } = await paths($, options)
       if (!(await embeddingsOn($, options))) {
-        return { text: 'Embeddings are off: set the embeddings option to on (or run /mnemosyne-setup on macOS arm64 to download the model), then try again.' }
+        return { text: 'Embeddings are off: set the embeddings option to on (or run /hal-m-setup on macOS arm64 to download the model), then try again.' }
       }
       // C9: apply and rebuild write vectors (rebuild wipes them first), so the store is backed up first; a failed backup stops the run.
       if (mode !== '') {
-        const stopped = await backupFirst($, options, `/mnemosyne-embed ${mode}`)
+        const stopped = await backupFirst($, options, `/hal-m-embed ${mode}`)
         if (stopped !== undefined) return { text: stopped }
       }
       // Run the engine's own reembed command with the same local-only pins the hooks send.
       const ran = await $.process.run(['bun', cli, 'reembed', ...(mode === '' ? [] : [mode])], {
-        env: engineEnv(store, GLOBAL_OWNER, { embeddings: true }),
+        env: engineEnv(store, GLOBAL_OWNER, { embeddings: true, modelCacheDir: modelCache }),
         timeoutMs: REEMBED_TIMEOUT_MS,
       })
       const output = `${ran.stdout}${ran.stderr}`.trim()
@@ -2523,8 +2660,8 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch((_$, e, next) => next(e))
 
-  on('tool.call', { tool: /^mcp__mnemosyne__memory_/ }, async ($, e) => {
-    const tool = e.tool.replace('mcp__mnemosyne__', '')
+  on('tool.call', { tool: OWN_TOOL }, async ($, e) => {
+    const tool = e.tool.slice(TOOL_PREFIX.length)
     const input = e as unknown as Record<string, unknown>
     // A row is changed, deleted or read in full as its owner: a global fact from another project names its own.
     const ownsRow = tool === 'memory_forget' || tool === 'memory_update' || tool === 'memory_get'
@@ -2712,7 +2849,9 @@ export const register: Register = (on, options) => {
   // Fixed text, appended last on the session side, so the prompt cache holds.
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
-    if (e.traits.includes('bare') || !e.tools.includes('mcp__mnemosyne__memory_remember')) return composed
+    // 6.3 (F-M6): the 0.37 plugin's tools in the same session mean two plugins answer every save: say so once per session.
+    if (!e.traits.includes('bare') && e.tools.some(tool => tool.startsWith(`${OLD_TOOL_PREFIX}memory_`))) await warnOldPlugin($, options)
+    if (e.traits.includes('bare') || !e.tools.includes(`${TOOL_PREFIX}memory_remember`)) return composed
     // M1 and C6: no block while memory_remember is off or was not registered this session; its numbers follow the settings.
     const settings = await settingsFor($, options)
     if (!(await rememberRegistered($, registered, settings))) return composed
@@ -2784,7 +2923,7 @@ export const register: Register = (on, options) => {
       // The save itself is Claude's memory_remember call, logged with origin tool.
       logged.push({ action: 'remember', origin: 'trigger', text: remember, ok: true })
       context.push(
-        `The user invoked a HAL-M remember trigger. Call mcp__mnemosyne__memory_remember exactly once, with a kind, with a self-contained version of:\n${remember}\nIf it is a secret or credential, do not save it; say so.`,
+        `The user invoked a HAL-M remember trigger. Call ${TOOL_PREFIX}memory_remember exactly once, with a kind, with a self-contained version of:\n${remember}\nIf it is a secret or credential, do not save it; say so.`,
       )
     }
     // A recall term is the reason for the recall, even on a first prompt.

@@ -883,7 +883,7 @@ describe('META.4: replaces retires, never deletes', () => {
   }, 30_000)
 })
 
-// VOCAB.4: /mnemosyne-tags retag through the real hooks/register.ts, bin/memories.ts and engine (only the model is a stand-in).
+// VOCAB.4: /hal-m-tags retag through the real hooks/register.ts, bin/memories.ts and engine (only the model is a stand-in).
 describe('VOCAB.4: retag on a real store', () => {
   const hosts: Host[] = []
   afterAll(() => {
@@ -941,13 +941,13 @@ describe('VOCAB.4: retag on a real store', () => {
     const othersBefore = others(host)
     expect(JSON.stringify(othersBefore.memoria_facts)).toContain('a fact worth keeping')
 
-    const dry = await host.command('mnemosyne-tags', 'retag')
+    const dry = await host.command('hal-m-tags', 'retag')
     expect(dry.text).toContain('Proposed tags and kinds for 3 of 3 memories')
     // the dry run changes nothing at all
     expect(memories(host)).toEqual(before)
     expect(others(host)).toEqual(othersBefore)
 
-    const applied = await host.command('mnemosyne-tags', 'apply')
+    const applied = await host.command('hal-m-tags', 'apply')
     expect(applied.text).toContain('Retagged 3 memories of 3 proposed.')
     const after = memories(host)
     expect(after).toHaveLength(3)
@@ -975,8 +975,9 @@ describe('VOCAB.4: retag on a real store', () => {
   test('VOCAB.4.a1: apply backs the store up first: a copy of the store as it was before any change is in <root>/backups', async () => {
     const host = await open(() => ({ isAnswered: true, text: reply }))
     const id = await seed(host, 'An older memory whose tags a retag replaces.', { importance: 0.4, metadata: { tags: ['keep-me-in-the-backup'] } })
+    // The 0.37 name /mnemosyne-tags runs the same handler.
     await host.command('mnemosyne-tags', 'retag')
-    await host.command('mnemosyne-tags', 'apply')
+    await host.command('hal-m-tags', 'apply')
     const folder = join(host.root, 'backups')
     const files = readdirSync(folder).filter(name => /^mnemopi-\d{8}T\d{9}Z\.db$/.test(name))
     expect(files).toHaveLength(1)
@@ -997,12 +998,12 @@ describe('VOCAB.4: retag on a real store', () => {
     const edited = await seed(host, 'An older memory whose tags are edited meanwhile.', { metadata: { tags: ['before'] } })
     const rewritten = await seed(host, 'An older memory whose text is rewritten meanwhile.', { metadata: { tags: ['before'] } })
     const untouched = await seed(host, 'An older memory nobody touches meanwhile at all.', { metadata: { tags: ['before'] } })
-    await host.command('mnemosyne-tags', 'retag')
+    await host.command('hal-m-tags', 'retag')
     await engineCall(CLI, host.store, 'global', [
       toolCall(1, 'mnemopi_update', { memory_id: edited, metadata: { tags: ['rohit-chose-this'] } }),
       toolCall(2, 'mnemopi_update', { memory_id: rewritten, content: 'An older memory whose text was rewritten meanwhile.' }),
     ])
-    const applied = await host.command('mnemosyne-tags', 'apply')
+    const applied = await host.command('hal-m-tags', 'apply')
     expect(applied.text).toContain('Retagged 1 memory of 3 proposed.')
     expect(applied.text).toContain('2 changed since the dry run')
     const tagsOf = (id: string) => JSON.parse(String(memories(host).find(row => row.id === id)!.metadata_json)).tags
@@ -1015,7 +1016,7 @@ describe('VOCAB.4: retag on a real store', () => {
     let calls = 0
     const host = await open(() => (calls++ < 2 ? { isAnswered: false, reason: 'api-error', status: 429, error: 'rate_limit' } : { isAnswered: true, text: reply }))
     await seed(host, 'An older memory the model is slow to answer for.', { metadata: { tags: ['old'] } })
-    const dry = await host.command('mnemosyne-tags', 'retag')
+    const dry = await host.command('hal-m-tags', 'retag')
     expect(calls).toBe(3)
     expect(dry.text).toContain('Proposed tags and kinds for 1 of 1 memory')
     expect(dry.text).not.toContain('failed')

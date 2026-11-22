@@ -79,12 +79,12 @@ function heldModel() {
 /** Waits a moment for something that must NOT happen (there is nothing to wait for). */
 const settle = () => Bun.sleep(500)
 
-describe('spec 1: process counts of /mnemosyne-knowledge apply', () => {
+describe('spec 1: process counts of /hal-m-knowledge apply', () => {
   test('spec 1a: 5 memories, one owner: 5 model calls, ONE prompt engine + ONE store engine, ONE pending write, ONE remove-many, ONE activity append', async () => {
     const host = await open({ model: good })
     await seed(host, ['alpha fact', 'bravo fact', 'charlie fact', 'delta fact', 'echo fact'])
     const before = host.runs.length
-    const out = await host.command('mnemosyne-knowledge', 'apply')
+    const out = await host.command('hal-m-knowledge', 'apply')
     expect(out.text).toContain('Extracted knowledge for 5 of 5 memories')
     const runs = host.runs.slice(before)
     expect(host.model.length).toBe(5)
@@ -106,7 +106,7 @@ describe('spec 1: process counts of /mnemosyne-knowledge apply', () => {
     const host = await open({ model: good })
     await seed(host, Array.from({ length: 45 }, (_, i) => `memory number ${i} about topic${i}`))
     const before = host.runs.length
-    const out = await host.command('mnemosyne-knowledge', 'apply')
+    const out = await host.command('hal-m-knowledge', 'apply')
     expect(out.text).toContain('Extracted knowledge for 45 of 45 memories')
     const runs = host.runs.slice(before)
     expect(host.model.length).toBe(45)
@@ -207,7 +207,7 @@ describe('finding 3: the backfill and pending entries', () => {
     expect(forgotten.result).toBeDefined()
     const calls = host.model.length
 
-    const out = await host.command('mnemosyne-knowledge', 'apply')
+    const out = await host.command('hal-m-knowledge', 'apply')
     expect(host.model.length).toBe(calls)
     expect(host.pending()).toEqual([])
     expect(out.text).toContain('1 gone')
@@ -221,7 +221,7 @@ describe('finding 3: the backfill and pending entries', () => {
     await until('the failed extract line', () => host.extractLines()[0])
     expect(host.pending()).toEqual([`${id}.json`])
     await host.tool('memory_forget', { memory_id: id })
-    const dry = await host.command('mnemosyne-knowledge')
+    const dry = await host.command('hal-m-knowledge')
     expect(dry.text).not.toMatch(/[1-9]\d* pending entr/)
     expect(dry.text).toContain('1 entry of forgotten memories (apply drops them)')
   })
@@ -237,14 +237,14 @@ describe('finding 3: the backfill and pending entries', () => {
     expect(host.pendingEntry(id).sha256).toBe(oldSha)
     const calls = host.model.length
 
-    const out = await host.command('mnemosyne-knowledge', 'apply')
+    const out = await host.command('hal-m-knowledge', 'apply')
     expect(out.text).toContain('Extracted knowledge for 1 of 1 memory')
     expect(host.model.length).toBe(calls + 1)
     expect(host.model[calls]!.request.prompt).toContain('rewritten text')
     expect(host.pending()).toEqual([])
     expect(factsOf(host, id).length).toBe(1)
 
-    const again = await host.command('mnemosyne-knowledge', 'apply')
+    const again = await host.command('hal-m-knowledge', 'apply')
     expect(again.text).toContain('Nothing to extract')
     expect(host.model.length).toBe(calls + 1)
     expect(host.pending()).toEqual([])
@@ -261,7 +261,7 @@ describe('finding 8: abort mid-apply', () => {
       },
     })
     await seed(host, ['one to stop on', 'two to stop on', 'three to stop on', 'four to stop on', 'five to stop on', 'six to stop on'])
-    const out = await host.command('mnemosyne-knowledge', 'apply', controller.signal)
+    const out = await host.command('hal-m-knowledge', 'apply', controller.signal)
     const reached = host.model.length
     const left = 6 - reached
     expect(reached).toBeGreaterThanOrEqual(1)
@@ -270,11 +270,11 @@ describe('finding 8: abort mid-apply', () => {
     expect(out.text).toContain(`${left} memories not reached`)
     // The pending entries were written before any call: the unreached ones are still there.
     expect(host.pending().length).toBe(left)
-    const dry = await host.command('mnemosyne-knowledge')
+    const dry = await host.command('hal-m-knowledge')
     expect(dry.text).toMatch(new RegExp(`${left} pending entr`))
     expect(dry.text).toMatch(new RegExp(`${left} memories with no knowledge`))
     // A second, unaborted apply finishes them.
-    const rest = await host.command('mnemosyne-knowledge', 'apply')
+    const rest = await host.command('hal-m-knowledge', 'apply')
     expect(rest.text).not.toContain('Stopped early')
     expect(host.pending()).toEqual([])
     expect(host.model.length).toBe(6)
@@ -295,8 +295,8 @@ describe('finding 9: extractionModel off in any spelling', () => {
       expect(host.activity().some(line => line.action === 'remember')).toBe(true)
       expect(host.engineRuns().length).toBe(1)
       expect(memoriesOf(host.runs).length).toBe(0)
-      expect((await host.command('mnemosyne-knowledge', 'apply')).text).toContain('Knowledge extraction is off')
-      expect((await host.command('mnemosyne-knowledge')).text).toContain('Knowledge extraction is off')
+      expect((await host.command('hal-m-knowledge', 'apply')).text).toContain('Knowledge extraction is off')
+      expect((await host.command('hal-m-knowledge')).text).toContain('Knowledge extraction is off')
       expect(host.model.length).toBe(0)
     })
   }
@@ -353,7 +353,7 @@ describe('provenance through the real engine', () => {
     const before = snapshot()
     expect(JSON.parse(before)).toHaveLength(3)
     const knowledgeBefore = countFacts(host)
-    const out = await host.command('mnemosyne-knowledge', 'apply')
+    const out = await host.command('hal-m-knowledge', 'apply')
     expect(out.text).toContain('Extracted knowledge for 3 of 3 memories')
     // The run really wrote knowledge (so "unchanged" is not because nothing ran) ...
     expect(countFacts(host)).toBeGreaterThan(knowledgeBefore)
