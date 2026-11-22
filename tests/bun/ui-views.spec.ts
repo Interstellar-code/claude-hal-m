@@ -398,9 +398,9 @@ describe('the dashboard views on a real store', () => {
       ['hook', 'automatic recall on a first prompt or after a compaction'],
       ['tool', 'Claude called a memory tool in Claude Code'],
       ['trigger', 'you typed a trigger phrase, such as \u201cremember that\u201d'],
-      ['external', 'another MCP client, through mnemosyne-mcp'],
+      ['external', 'another MCP client, through hal-m-mcp'],
       ['ui', 'this dashboard (search or forget)'],
-      ['backfill', 'the one-time tagging run, /mnemosyne-tags'],
+      ['backfill', 'the one-time tagging run, /hal-m-tags'],
     ])
     const appSelect = view.slice(view.indexOf('id="act-app"'), view.indexOf('</select>', view.indexOf('id="act-app"')))
     expect([...appSelect.matchAll(/<option value="([^"]*)"/g)].map(m => m[1])).toEqual(['all', 'Claude Code', 'Codex', 'Cursor', 'Dashboard'])
@@ -2344,7 +2344,7 @@ describe('CRUD.1 and CRUD.3: the form and the vocabulary panel', () => {
       expect(vocab.vocabularyFailure(500, {})).toBe('The server answered 500.')
       // No vocabulary file: the sentence says how to make one, and the panel has no candidates card.
       const none = vocab.parseVocabulary({ exists: false, tags: [], candidates: [] })
-      expect(vocab.vocabularyText(none)).toContain('Run /mnemosyne-tags')
+      expect(vocab.vocabularyText(none)).toContain('Run /hal-m-tags')
       expect(vocab.candidateList(none, refuse(200, ''))).toEqual([])
       expect(vocab.parseVocabulary(null)).toBeNull()
       expect(vocab.parseVocabulary({}).tags).toEqual([])

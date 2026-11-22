@@ -265,16 +265,16 @@ describe('VIEWS.2: the Health tab on a real store', () => {
       ['Who wrote it (provenance)', '1 of 5'],
       ['Recalled at least once', '3 of 5'],
     ])
-    expect(bars[0]!.note).toContain('/mnemosyne-tags')
+    expect(bars[0]!.note).toContain('/hal-m-tags')
     expect(bars[1]!.note).toContain('extractionModel')
-    expect(bars[1]!.note).toContain('/mnemosyne-knowledge')
+    expect(bars[1]!.note).toContain('/hal-m-knowledge')
     expect(bars[2]).toMatchObject({ pct: 0, good: false, note: 'Turn on embeddings, then run /mnemosyne-embed apply' })
     expect(bars[3]!.note).toContain('1 memory records who wrote it')
     // With no provenance yet the note says how to turn it on (VIEWS.2.a1: every bar).
     const none = coverageBars({ ...data, coverage: { ...data.coverage, provenance: 0 } })[3]!.note
     expect(none).toStartWith('Author and certainty are not recorded on save yet.')
     expect(none).toContain('To turn it on')
-    expect(none).toContain('/mnemosyne-setup')
+    expect(none).toContain('/hal-m-setup')
     expect(bars[4]).toMatchObject({ pct: 60, good: true, note: 'Healthy: most memories are being used.' })
     expect(bars[0]!.pct).toBe(60)
     // Not complete here, so no note is muted; the note of "Recalled at least once" points to the Review tab, not "below".

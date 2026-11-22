@@ -65,7 +65,7 @@ affordable once per conversation and not per turn.
 
 The engine's built-in default is `~/.hermes/mnemopi/data`
 (`packages/mnemopi/src/config.ts`). The plugin always sets `MNEMOPI_DATA_DIR`
-to its own store, `~/.claude/mnemosyne/store` by default.
+to its own store, `~/.hal-m/store` by default.
 
 Verified with a throwaway `HOME`: a remember wrote only to `MNEMOPI_DATA_DIR`
 (plus bun's own cache under `~/Library/Caches/bun`). Nothing under `~/.omp` or
@@ -106,7 +106,7 @@ What fixed it (0.7.0, §3.8): the panic is onnxruntime's abort in
 (engine change 6), and the CLI now exits naturally on success instead of
 calling `process.exit(0)` (change 7), because the override alone is not enough
 on the fastembed path. Embeddings are now on by default on macOS arm64 once
-`/mnemosyne-setup` has downloaded the model; with the option `off`, or before
+`/hal-m-setup` has downloaded the model; with the option `off`, or before
 setup, `MNEMOPI_NO_EMBEDDINGS=1` still keeps recall FTS-only. §2.6's note about
 768-dimension vectors predates this: the model the plugin pins is 384-dimension.
 
@@ -129,8 +129,8 @@ would corrupt the vector index.
 
 The plugin keeps its own engine and store, separate from any other installation, so the two never
 share a writer (§2.6) and an upgrade elsewhere cannot change the engine under it.
-`/mnemosyne-setup` installs the plugin's own engine copy (§3.1) into
-`~/.claude/mnemosyne/engine/`. Each call is one `bun <cli> mcp` process:
+`/hal-m-setup` installs the plugin's own engine copy (§3.1) into
+`~/.hal-m/engine/`. Each call is one `bun <cli> mcp` process:
 
 ```mermaid
 flowchart LR
@@ -139,8 +139,8 @@ flowchart LR
   R --> B["context beside the prompt"]
   T --> P["$.process.run<br/>bun cli.ts mcp"]
   PS --> P
-  P --> E["~/.claude/mnemosyne/engine"]
-  E --> DB[("~/.claude/mnemosyne/store")]
+  P --> E["~/.hal-m/engine"]
+  E --> DB[("~/.hal-m/store")]
 ```
 
 ### 3.1 The engine lives in the repo: engine/ and UPSTREAM.md (v0.5.0)
@@ -178,7 +178,7 @@ of the plugin:
   engine processes, including two processes merging metadata into one row at
   once). `engine/` is not type-checked by us: upstream checks it with its
   monorepo setup, which the tarball lacks.
-- `/mnemosyne-setup` runs `bin/install-engine.ts <plugin root> <engine dir>
+- `/hal-m-setup` runs `bin/install-engine.ts <plugin root> <engine dir>
   <store>`. It builds `<engine dir>.next` (the copy as `pi-mnemopi/`, a
   `package.json` with `file:./pi-mnemopi`, `bun install --production
   --omit=peer`, since Bun would otherwise install the folder's dev and optional
@@ -201,24 +201,24 @@ of the plugin:
   `engine/package.json`'s version; a Bun spec fails when they differ.
   `isCurrent` in `register.ts` reads the installed engine's `package.json` with
   `$.fs.read` and compares. Session start with a stale engine shows a toast
-  asking for `/mnemosyne-setup`; it does not reinstall on its own (an install
+  asking for `/hal-m-setup`; it does not reinstall on its own (an install
   can take minutes and needs the network). Recall, forget and stats keep working
   on a stale engine; since v0.8.0 `memory_remember` and `memory_update` refuse,
   and so does the proxy (§3.9, §5.8). In
   0.6.0 the dashboard command, the extraction after a save and
-  `/mnemosyne-knowledge` refuse too (they need the knowledge tools), each with
-  a message that says to run `/mnemosyne-setup`.
+  `/hal-m-knowledge` refuse too (they need the knowledge tools), each with
+  a message that says to run `/hal-m-setup`.
 
 ### 3.2 The activity log: activity.jsonl (v0.5.0)
 
 Every memory call the plugin makes, and every call through the external MCP
-proxy, adds one JSON line to `~/.claude/mnemosyne/activity.jsonl` (`paths()`
+proxy, adds one JSON line to `~/.hal-m/activity.jsonl` (`paths()`
 gives it as `activity`, `<root>/activity.jsonl`). The dashboard reads it.
 
 - A line: `t` (ISO time), `action` (recall, remember, update, forget, stats,
   rearm, extract), `origin` (hook = first-prompt recall or compaction, trigger = a
   recall or remember term, tool = Claude's tool call, external = the proxy,
-  ui = a dashboard search or forget, backfill = `/mnemosyne-tags apply` and `/mnemosyne-knowledge apply`), `owner`, `text`, `ids`, `count`, `ok`, and
+  ui = a dashboard search or forget, backfill = `/hal-m-tags apply` and `/hal-m-knowledge apply`), `owner`, `text`, `ids`, `count`, `ok`, and
   `error` only when not ok. v0.6.0 adds four optional fields (§3.7, C1) and the
   action `extract` (one line per knowledge extraction run: `ids` is the memory,
   `count` the items stored, `error` the reason when it did not store). `ids` holds at most 50; `count` is the full
@@ -279,7 +279,7 @@ gives it as `activity`, `<root>/activity.jsonl`). The dashboard reads it.
   loop or the module unloading kills a spawned child, so an append started in
   the last moments of a session can be lost. The hooks that log (prompt, tool
   call, compaction) do not run at session end, so this is a narrow window. To
-  switch, start Claude Code with `MNEMOSYNE_ACTIVITY_APPEND=run` (or `await`)
+  switch, start Claude Code with `HALM_ACTIVITY_APPEND=run` (or `await`)
   in its environment; to change the default, edit `DEFAULT_APPEND` in
   `hooks/register.ts` and record the result here.
 - The proxy imports `appendActivity` and writes synchronously, so every line is
@@ -288,15 +288,15 @@ gives it as `activity`, `<root>/activity.jsonl`). The dashboard reads it.
   it refuses (stale engine, bad tags) is logged at once with `ok: false`; a
   tool outside the five (six since 0.34.0) is not a memory call and is not logged; a call the
   engine never answered is logged as failed at exit. The wrapper passes the
-  path as `MNEMOSYNE_ACTIVITY_LOG`, empty when the log is off; a log failure
+  path as `HALM_ACTIVITY_LOG`, empty when the log is off; a log failure
   never changes what the client receives (Bun test).
 - The `activityLog` setting (`on` by default, or `off`) turns it all off: the
   hooks read it on each call, and the wrapper is rewritten at session start,
   so the proxy follows from the next session.
 
-### 3.3 The dashboard server: /mnemosyne-ui (v0.5.0)
+### 3.3 The dashboard server: /hal-m-ui (v0.5.0)
 
-`/mnemosyne-ui` starts one local web server for the dashboard, or reuses the
+`/hal-m-ui` starts one local web server for the dashboard, or reuses the
 one running, and hands its link over without writing the token into the
 transcript. It is the plan's main exposure (a network port), so each guard
 below has a Bun test in `tests/bun/ui-server.spec.ts` against the real server
@@ -326,9 +326,9 @@ and a temporary WAL store made by the real engine.
   call, and `POLYPHONIC_RECALL` set to `0`, because that recall path writes
   `consolidated_facts`, which a forget does not purge). `paths()` stays in
   `register.ts`: the hook resolves root, store and cli and passes them to the
-  server as `MNEMOSYNE_ROOT`, `MNEMOSYNE_STORE`, `MNEMOSYNE_CLI`,
-  `MNEMOSYNE_ACTIVITY_LOG` (empty when the log is off),
-  `MNEMOSYNE_PLUGIN_ROOT` and, since 0.6.0, `MNEMOSYNE_EXTRACTION` (§3.7).
+  server as `HALM_ROOT`, `HALM_STORE`, `HALM_CLI`,
+  `HALM_ACTIVITY_LOG` (empty when the log is off),
+  `HALM_PLUGIN_ROOT` and, since 0.6.0, `HALM_EXTRACTION` (§3.7).
 - Guards: it binds `127.0.0.1` only, on a port the OS picks. It makes a
   32-byte random token at each start. Every `/api` route wants
   `Authorization: Bearer <token>` (compared in constant time); no token, a
@@ -416,33 +416,33 @@ and a temporary WAL store made by the real engine.
   Backstops, each with a Bun test: when its stdin closes, its parent is gone
   or it gets SIGHUP, the server exits unless the list names a live session,
   and then polls the list and exits once none is; the holder exits when its
-  parent is gone (checked every 10 s; `MNEMOSYNE_UI_PARENT_CHECK_MS`
+  parent is gone (checked every 10 s; `HALM_UI_PARENT_CHECK_MS`
   sets it for tests, held to 100 ms - 10 s). On exit the server removes `ui.json` only while it
   still names its own pid. There is no stop command and no stop route.
 - Before it starts anything the command checks Bun, an installed engine and a
   current one (`isCurrent`), and otherwise says to install Bun or run
-  `/mnemosyne-setup`.
+  `/hal-m-setup`.
 
 Manual check (plan SRV.4), in a real terminal session and in the desktop app:
 
-1. Run `/mnemosyne-ui`. The default browser opens the page, and the reply
+1. Run `/hal-m-ui`. The default browser opens the page, and the reply
    shows `Link: http://127.0.0.1:<port>/#token=<token>`. The page
    shows the header, the owners with counts, the store path and "Connected to
    the local HAL-M server." Open the browser console: no error and no CSP
    violation.
 2. After the page loads, the address bar shows no `#token=`. Reload: the page
    still works (the tab's sessionStorage). Open `http://127.0.0.1:<port>/`
-   (no fragment) in a new tab: it says to open the link from /mnemosyne-ui and
+   (no fragment) in a new tab: it says to open the link from /hal-m-ui and
    shows no data.
 3. Paste the reply's link into a second browser: the page loads there too.
-4. Run `/mnemosyne-ui` again: the same address, nothing new starts
+4. Run `/hal-m-ui` again: the same address, nothing new starts
    (`lsof -nP -iTCP:<port> -sTCP:LISTEN` shows one `bun`).
 5. `/clear` in the starting session: `lsof -nP -iTCP:<port> -sTCP:LISTEN`
-   shows nothing and `~/.claude/mnemosyne/ui.json` is gone.
-6. Run `/mnemosyne-ui` again, then exit the session: the same two checks show
+   shows nothing and `~/.hal-m/ui.json` is gone.
+6. Run `/hal-m-ui` again, then exit the session: the same two checks show
    nothing.
 7. Desktop app, two sessions A and B: start the server in A, run
-   `/mnemosyne-ui` in B (same address). Close B: the port still listens. Close
+   `/hal-m-ui` in B (same address). Close B: the port still listens. Close
    A: the port is gone and `ui.json` is gone.
 
 That check was written for the four v0.5.0 tabs; the Map, Knowledge and
@@ -454,7 +454,7 @@ browser agent. The mockups to compare with are `Memories.dc.html`,
 (`~/.matrixkoder/projects/claude-mnemosyne/plans/mnemosyne-ui/assets/design/`).
 Keep the browser console open throughout: no error and no CSP violation.
 
-1. Run `/mnemosyne-ui` and open the copied link. The page opens on Memories:
+1. Run `/hal-m-ui` and open the copied link. The page opens on Memories:
    a table (Memory, Project, Tags, Saved, Recalls), "Showing N of M", and a
    detail panel saying "Pick a memory to see it in full." Compare layout,
    copy and colours with `Memories.dc.html` (the mockup's "Save tags" editor
@@ -490,9 +490,9 @@ Keep the browser console open throughout: no error and no CSP violation.
    is gone from the table and the header count drops by one, and Activity
    shows a `forget` line with origin `dashboard`.
 7. Open the bare address `http://127.0.0.1:<port>/` in a private window: it
-   says to open the link from /mnemosyne-ui and shows no data.
+   says to open the link from /hal-m-ui and shows no data.
 
-### 3.4 Topic tags and /mnemosyne-tags (v0.5.0)
+### 3.4 Topic tags and /hal-m-tags (v0.5.0)
 
 A memory's topics live in one place: `metadata.tags`, a list of short
 lowercase strings cleaned by `hooks/tags.ts` (trimmed, lowercased, unique, at
@@ -505,12 +505,12 @@ transaction; an empty list removes the key).
 
 - New memories: the rules text asks Claude for 2 to 5 short topic tags with
   each fact it saves.
-- Old memories: `/mnemosyne-tags` tags the existing ones once. With no
+- Old memories: `/hal-m-tags` tags the existing ones once. With no
   argument it is a dry run: for each untagged memory it sends the memory's
   text (as quoted data, at most 4000 characters) to Haiku through
   `$.model.complete`, 4 calls at a time, and saves the proposals to
   `<root>/tags-proposed.json` (0600): id, owner, tags and a sha256 of the
-  text, never the text. Nothing changes in the store. `/mnemosyne-tags apply`
+  text, never the text. Nothing changes in the store. `/hal-m-tags apply`
   makes no model call: it re-reads each proposed row and writes only those
   that still exist, still have no tags and whose text hash is unchanged,
   through `mnemopi_update`, one engine process per owner. Each run says how
@@ -793,7 +793,7 @@ records the code as it was in 0.6.0.
   first tag or null), recalls, lastRecalled, active (instructions),
   confidence (relations) }`; `recalls` and `lastRecalled` are the source
   memory's all-time numbers, since the engine keeps no usage count for items.
-  `extraction` is the server's `MNEMOSYNE_EXTRACTION` or `unknown`.
+  `extraction` is the server's `HALM_EXTRACTION` or `unknown`.
   `/api/health-report` answers `{ ok, total, global, projects, owners,
   neverRecalled: { count, list }, mostRecalled, recallsPerDay, recallsByDay,
   daysCovered, sizes: { store, log }, tables, coverage }` (with the never-recalled
@@ -811,14 +811,14 @@ records the code as it was in 0.6.0.
   Knowledge and Health tabs call `show` for Show on map; the Map tab then
   selects that star. Open in Memories goes the other way.
 - C11, dashboard options. `hooks/ui-launch.ts` starts the server with
-  `MNEMOSYNE_EXTRACTION` set to the `extractionModel` setting (`off` when
+  `HALM_EXTRACTION` set to the `extractionModel` setting (`off` when
   off, `unknown` when the hook could not read it); the server reads it for
   `/api/knowledge` and it is fixed for that server's life, so a changed
   setting needs a dashboard restart. The hook records `{ pid, extraction }` in
-  `<root>/ui-extraction.json` for the server it started, and `/mnemosyne-ui` on
+  `<root>/ui-extraction.json` for the server it started, and `/hal-m-ui` on
   a reused server whose recorded value differs says so (a server with no
   record predates the setting). The plan's second option,
-  `MNEMOSYNE_EMBEDDINGS`, did not exist in 0.6.0; 0.7.0 adds it (§3.8).
+  `HALM_EMBEDDINGS`, did not exist in 0.6.0; 0.7.0 adds it (§3.8).
 - C12, the extraction flow. The hooks cannot import engine code (it lives in
   the engine's `node_modules`, which an installed plugin's root does not have),
   so the engine has two tools and the plugin only carries text between them.
@@ -848,21 +848,21 @@ records the code as it was in 0.6.0.
   process spawns (the engine's `knowledge_prompt`, then `memories.ts pending
   write`) have finished, which happens after the tool reply, so a save made
   right before exit may leave no pending file and no `extract` line. Nothing is
-  lost for good: `/mnemosyne-knowledge` works from `list --no-knowledge` (the
+  lost for good: `/hal-m-knowledge` works from `list --no-knowledge` (the
   store state), not only from pending files, and its dry run is the check.
   Making the reply wait for the model would be a one-line change, but the 60 s
   model timeout (`hooks/knowledge.ts`) and the 120 s engine timeout
   (`hooks/register.ts`) would then hold the tool reply, so a timeout change goes
-  with it. `/mnemosyne-knowledge` lists the pending files; `apply`
+  with it. `/hal-m-knowledge` lists the pending files; `apply`
   finishes the pending entries from the memory's current text and hash first,
   then extracts memories with no knowledge, 40 memories to a batch per owner
   and 4 model calls at a time, and notes a memory whose extraction found nothing
   in `<root>/knowledge-empty.json` (`{ empty: [{ id, sha256 }] }`, mode 0600),
-  skipped while its hash is unchanged. `<root>` is `~/.claude/mnemosyne` (the
+  skipped while its hash is unchanged. `<root>` is `~/.hal-m` (the
   data root from `paths()`), never `$.plugin.root`, which an update replaces.
   Outside agents' saves reach the engine through the proxy, which has no model
-  channel, so they get no extraction until `/mnemosyne-knowledge apply`.
-  `extractionModel` `off` stops all of it, and `/mnemosyne-tags` too (it shares
+  channel, so they get no extraction until `/hal-m-knowledge apply`.
+  `extractionModel` `off` stops all of it, and `/hal-m-tags` too (it shares
   the setting), with a message instead of a model call.
 - C8, shipped in 0.7.0: embeddings (`memory_embeddings`, computed on this
   machine), the Meaning layout, similar-memory links, and the dashboard option
@@ -880,12 +880,12 @@ record): under reduced motion the moons stand still; `rangeDays`, `ticks` and
 `timelinePosition` take a second argument the plan's C4 line leaves out;
 `bin/memories.ts pending` also has `remove-many`, which the plan's C12 does not
 list; the hook's `<root>/ui-extraction.json` is not in C11; and C11's
-`MNEMOSYNE_EMBEDDINGS` was not passed in 0.6.0, because embeddings came in 0.7.0.
+`HALM_EMBEDDINGS` was not passed in 0.6.0, because embeddings came in 0.7.0.
 
 Manual check of the v0.6.0 dashboard, in a browser, by the user, with the
 console open throughout (no error and no CSP violation):
 
-1. `/mnemosyne-ui`, then open Map: the galaxy appears with a bloom glow; Reset
+1. `/hal-m-ui`, then open Map: the galaxy appears with a bloom glow; Reset
    view, Colour by, Find and the project toggles change it at once. Click a
    star: the inspector shows its text, recalls and saved date; Open in Memories
    opens it in the Memories tab.
@@ -894,22 +894,22 @@ console open throughout (no error and no CSP violation):
    the Timeline is still the layout. Meaning and Similar memories are disabled (in 0.6.0; 0.7.0 enables them once
    vectors exist, §3.8).
 3. Press Simulate a recall and Simulate a write: sparks fly from the Claude
-   core and the live strip lists them; `~/.claude/mnemosyne/activity.jsonl`
+   core and the live strip lists them; `~/.hal-m/activity.jsonl`
    gains no line and the Memories tab's counts do not change.
 4. In Claude Code, save a memory (`remember that ...`): an activity line shows
    the app and session, the badge `you said`, and a new star appears. After a
    few seconds an `extract` line follows; reload the page and the memory has
    moons, the Knowledge chips count it, and the Knowledge tab lists its items.
-5. Set `extractionModel` to `off` and run `/mnemosyne-ui` again: it says the
+5. Set `extractionModel` to `off` and run `/hal-m-ui` again: it says the
    dashboard must be restarted; after a restart the Knowledge tab says
-   extraction is off, and `/mnemosyne-tags` and `/mnemosyne-knowledge` refuse.
+   extraction is off, and `/hal-m-tags` and `/hal-m-knowledge` refuse.
 6. Health: the counts match the Memories tab, and the Embeddings bar reads 0
    (in 0.6.0; in 0.7.0 it counts the memories with a vector, §3.8).
 
 ### 3.8 v0.7.0: embeddings and the Meaning layout
 
 v0.7.0 turns local embeddings on (C8 of the build plan `mnemosyne-070`), adds
-`/mnemosyne-embed` to fill vectors for older memories, and gives the dashboard
+`/hal-m-embed` to fill vectors for older memories, and gives the dashboard
 a Meaning layout and Similar memories links over those vectors (SEMX on the
 server, SEM in the page). Its engine changes are 6 to 11 in
 `engine/UPSTREAM.md`; the build has since moved to `18.12.3-mnemosyne.10`
@@ -935,7 +935,7 @@ server, SEM in the page). Its engine changes are 6 to 11 in
   `MNEMOPI_EMBEDDING_DIM`, `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY` and
   `OPENAI_API_KEY` are empty; `MNEMOPI_EMBEDDING_MODEL` is `BAAI/bge-small-en-v1.5`,
   `HF_ENDPOINT` is `https://huggingface.co`, `PI_CONFIG_DIR` is
-  `.claude/mnemosyne/model-cache` and `MNEMOPI_EMBEDDINGS_API_OPT_IN` is `0`.
+  `.hal-m/model-cache` and `MNEMOPI_EMBEDDINGS_API_OPT_IN` is `0`.
   Why an empty string is not a pin: pi-utils' dotenv pass refills every falsy
   environment key from `~/.env`, `<configRoot>/.env`, `<agentDir>/.env` and
   `<cwd>/.env`, so a key pinned to `''` can be set again by a `.env` line. The
@@ -955,12 +955,12 @@ server, SEM in the page). Its engine changes are 6 to 11 in
   load; there an `XDG_CACHE_HOME=''` pin was not a pin, and a `~/.env` line made
   the engine download the model mid-call. With `PI_CONFIG_DIR` unset (an engine
   run outside the plugin) the `~/.omp/cache/fastembed` default is kept. The
-  model lives in `~/.claude/mnemosyne/model-cache/cache/fastembed/`.
+  model lives in `~/.hal-m/model-cache/cache/fastembed/`.
 - C8, `embeddings` and the setup marker (`hooks/register.ts`). The
   `embeddings` option is `auto` (default), `on` or `off`. `auto` means on only
   on macOS arm64 (`uname -s` is `Darwin` and `uname -m` is `arm64`, asked by the
   hook because it cannot read `process.arch`); elsewhere it is off unless set to
-  `on`. `/mnemosyne-setup` downloads the model only when the option resolves to
+  `on`. `/hal-m-setup` downloads the model only when the option resolves to
   on, then writes `<root>/embeddings.json` (0600, renamed over the old file). An
   engine run turns embeddings on (`MNEMOPI_NO_EMBEDDINGS` empty instead of `1`)
   only when the option is not `off`, the marker exists and all five model files
@@ -973,7 +973,7 @@ server, SEM in the page). Its engine changes are 6 to 11 in
   so a clean exit alone proves nothing). Any failure refuses the swap, keeps the
   old engine, writes no marker, and setup tells the user to set `embeddings` to
   `off` or re-run setup online.
-- C8, `reembed` and `/mnemosyne-embed` (change 9, `engine/src/cli.ts`;
+- C8, `reembed` and `/hal-m-embed` (change 9, `engine/src/cli.ts`;
   `hooks/register.ts`). The engine's `reembed` has three modes. No argument is
   a dry run: it counts the live memories with no vector for the active model
   and writes nothing (it prints the `apply` hint only when something is
@@ -985,7 +985,7 @@ server, SEM in the page). Its engine changes are 6 to 11 in
   vectors from another model, because the reconcile wipes every vector on a
   model mismatch; `reembed` refuses that without `rebuild`, and `rebuild` first
   proves the model loads by embedding one probe text before the wipe.
-  `/mnemosyne-embed` runs `bun <cli> reembed [apply|rebuild]` with the same pins
+  `/hal-m-embed` runs `bun <cli> reembed [apply|rebuild]` with the same pins
   and a 600 s limit, and answers the last six lines of its output; it refuses
   when the engine is missing or out of date or embeddings are off.
 - SEMX, the additions to C2 (`ui/server.ts`, `ui/semantic-worker.ts`).
@@ -1010,10 +1010,10 @@ server, SEM in the page). Its engine changes are 6 to 11 in
   that has one, and only the model most vectors carry is used. The database is
   only read.
 - C11, the dashboard option. `hooks/ui-launch.ts` passes
-  `MNEMOSYNE_EMBEDDINGS` (`on` only when the model is downloaded and the option
+  `HALM_EMBEDDINGS` (`on` only when the model is downloaded and the option
   is not `off`, as `engineEnv` would send it); the server fixes it for its life,
   records `{ pid, extraction, embeddings }` in `<root>/ui-extraction.json`, and
-  `/mnemosyne-ui` on a reused server whose recorded value differs says it must
+  `/hal-m-ui` on a reused server whose recorded value differs says it must
   be restarted.
 - SEM, the page (`ui/map-state.ts` holds every rule, `ui/map.ts` draws). Meaning
   is the third layout: a memory with a `position` moves to it, a memory without
@@ -1023,7 +1023,7 @@ server, SEM in the page). Its engine changes are 6 to 11 in
   switch draws faint links between neighbours, and the inspector lists a
   memory's neighbours with their project and a percentage. The Meaning button,
   the switch and the Health tab's "Embeddings (meaning search)" bar show the one
-  hint `EMBEDDINGS_HINT`, "Turn on embeddings, then run /mnemosyne-embed apply",
+  hint `EMBEDDINGS_HINT`, "Turn on embeddings, then run /hal-m-embed apply",
   while the reply says `meaning: false`. The Health bar now counts memories with
   a vector (`coverage.embeddings`, `ui/server.ts` `healthReport`).
 
@@ -1050,7 +1050,7 @@ MODEL, GUARD, META, VOCAB and the HARDEN fixes that came out of their reviews).
 Its goal: nothing enters memory without passing one check, every memory says
 what kind it is and where it came from, project state expires, and tags come
 from one vocabulary. The engine build is `18.12.3-mnemosyne.10`
-(`engine/UPSTREAM.md`, changes 12 to 18). A user must run `/mnemosyne-setup`
+(`engine/UPSTREAM.md`, changes 12 to 18). A user must run `/hal-m-setup`
 after updating: `isCurrent` compares `ENGINE_BUILD`.
 
 Not in this release, and not described as if it were: the dashboard writes
@@ -1092,7 +1092,7 @@ its true `source` and `trust_tier`.
    `memory_remember` is refused exactly like `memory_update` whenever the
    installed engine's build (`package.json`'s `version`) is not `ENGINE_BUILD`,
    including a build that is missing, unreadable or has no version: the plugin
-   denies the call with a message that names `/mnemosyne-setup`, before any
+   denies the call with a message that names `/hal-m-setup`, before any
    engine run (so no `mnemopi_similar` and no `replaces` retire either, and the
    remember-phrase trigger is not used up), and `bin/mcp-proxy.ts` answers a
    client's `memory_remember` or `memory_update` with JSON-RPC `-32000`, before
@@ -1100,13 +1100,13 @@ its true `source` and `trust_tier`.
    stats keep working on a stale engine, so nothing is lost and nothing is
    hidden, and a save succeeds as soon as the setup has run. The proxy reads the
    installed build once, when it starts, so a long-running client keeps refusing
-   after `/mnemosyne-setup` until it is restarted; the README says so. The
+   after `/hal-m-setup` until it is restarted; the README says so. The
    same change makes a proxy tag update whose tags clean down to only the
    project's name a `-32602` refusal, like the plugin's, instead of erasing the
    stored tags. Since 0.8.2 any non-empty tag list that cleans
    to nothing (punctuation, blanks, the project name) is refused the same way,
-   in both the proxy and the plugin. The other commands that write (`/mnemosyne-tags`,
-   `/mnemosyne-knowledge`, `/mnemosyne-embed`) already stop on a stale engine.
+   in both the proxy and the plugin. The other commands that write (`/hal-m-tags`,
+   `/hal-m-knowledge`, `/hal-m-embed`) already stop on a stale engine.
 4. Verified by the MODEL review, not assumed: a probe over every tier (STATED,
    DERIVED, EXTERNAL_WRITE, IMPORTED) by scope (session, channel, global, NULL)
    at 48 hours old found only a non-IMPORTED `session` row trimmed, and with
@@ -1160,7 +1160,7 @@ activity line of a refusal is `ok: false`, `error: guard:<rule ids>`, empty
 text. A warned save stores the rule ids in `metadata.guard` (G3 as
 `near-duplicate:<id>`); a content update that now passes clean sends
 `guard: null`, which removes the key through the engine's metadata merge. The
-wrappers export `MNEMOSYNE_GUARD_MODE` for the proxy. `guardMode` is `strict`
+wrappers export `HALM_GUARD_MODE` for the proxy. `guardMode` is `strict`
 (the default; any unknown value counts as strict) or `warn`; `confirm` is
 stripped before the engine in both paths. `bin/guard-audit.ts --store <dir>` is
 a read-only audit (`query_only`) that runs G1, G2 and G4 over every stored row
@@ -1270,7 +1270,7 @@ name is dropped; at most 5 per memory. Only writes are cleaned; stored tags are
 never rewritten on read, and `ui/` does not use the cleaner. The tagger prompt
 lists up to 150 admitted tags by namespace, asks for 2 to 5 tags and one kind,
 and allows one `new:<tag>` per memory; that goes to `candidates`, is not written
-as a tag, and is admitted as `auto` at 3 proposals. `/mnemosyne-tags retag`
+as a tag, and is admitted as `auto` at 3 proposals. `/hal-m-tags retag`
 proposes tags and a kind for every memory; its apply runs `mnemopi_update` with
 `metadata.tags` (and `memory_type` only where the kind is `unknown`), skips a
 row whose text, owner or tags changed since the dry run, never touches text,
@@ -1290,8 +1290,8 @@ space is under twice the database plus WAL, the copy read back with
 `BACKUP_KEEP = 10` kept by name pattern (other files in the folder are left
 alone). Output is the path and a count, never text. Every command that changes
 the store in bulk runs it first through `backupFirst` and stops, saying no
-memory was changed, if it fails: `/mnemosyne-tags apply` (tags and retag),
-`/mnemosyne-knowledge apply` and `/mnemosyne-embed apply|rebuild`. The first
+memory was changed, if it fails: `/hal-m-tags apply` (tags and retag),
+`/hal-m-knowledge apply` and `/hal-m-embed apply|rebuild`. The first
 version covered only the tags apply; the other two were added in VOCAB.4 after
 the META review noted the gap against the plan's "every apply" rule. There is no
 slash command for a backup on its own.
@@ -1361,10 +1361,10 @@ Recorded from the phase reviews; each was a ruling or an accepted deviation.
 6. The bank pin (HARDEN.1). `MNEMOPI_MCP_BANK` was pinned to the empty string,
    which a `.env` in an agent's working folder could refill, moving saves to
    `<store>/banks/<x>`; this was the open item 3 of section 3.8. The engine
-   environment (`hooks/engine.ts`), both `mnemosyne-mcp` wrappers and the
+   environment (`hooks/engine.ts`), both `hal-m-mcp` wrappers and the
    installer now pin it to `default`, and a spec writes a hostile `.env`.
 7. Tests never touch the real home (HARDEN.2). A spawned engine writes its logs
-   (`omp.*.log`) and caches under `$HOME/.claude/mnemosyne/model-cache`, so every
+   (`omp.*.log`) and caches under `$HOME/.hal-m/model-cache`, so every
    spec that starts a process gets a temporary `HOME` and `PI_CONFIG_DIR` from
    `isolatedEnv()` (`tests/bun/helpers.ts`; `engine/test/helpers.ts` does the
    same with `testHome()`). The temp home links to the real, already
@@ -1423,7 +1423,7 @@ Learned by hitting both errors:
   modules already work around this — `tools.ts` and `wake.ts` register with
   `{ cwd: /.*/ }`.
 - Same for `tool.call`. A new module needs a matcher on both:
-  `{ cwd: /.*/ }` and `{ tool: /^mcp__mnemosyne__memory_/ }`.
+  `{ cwd: /.*/ }` and `{ tool: /^mcp__hal-m__memory_/ }`.
 
 ## 5. Decisions (2026-10-16)
 
@@ -1519,7 +1519,7 @@ rows written elsewhere, §2.4).
    `metadata.tags`; `[]` sends `tags: null`, which removes the key. With none of
    content, importance and tags, or tags that are not an array, it is denied
    before any engine run; on a stale engine it is denied with a message to run
-   `/mnemosyne-setup`. The rules text now says to update a fact by id and
+   `/hal-m-setup`. The rules text now says to update a fact by id and
    owner, to forget only to delete, and (since 0.8.0) not to save a near-duplicate
    but to update the close memory or save with `replaces`. The proxy
    (§5.6) serves `memory_update` too, so `tools/list` holds five tools (six since 0.34.0); it
@@ -1554,6 +1554,17 @@ banks. Claims marked *verified* were observed directly; the rest are marked as
 inference where they appear. Re-probed on 2026-10-20 with `pi-mnemopi` 18.12.3:
 remember, owner-scoped recall, owner-only forget and stats behave the same.
 
+## 8. Names since 0.38.0
+
+The plugin id and marketplace are `hal-m` (`hal-m@hal-m`), the tools are `mcp__hal-m__memory_*`, the commands `/hal-m-*`, the settings variables `HALM_*`, the data folder `~/.hal-m`, the launcher `bin/hal-m-mcp`. The plugin id and the tool prefix cannot be aliased, so each PC switches once (README, "Upgrading from 0.37"). Everything else reads the old name as a fallback:
+
+1. Names live in one module, `hooks/names.ts`: command names (new and old, one handler each), the constant tool prefix (the `tool.call` matcher is fixed at load), the header and cookie names, the stderr prefix list and the keep-list below. `envOf(name)` reads `HALM_<name>`, then `MNEMOSYNE_<name>`; ACTIVITY_LOG is the one variable where an empty value counts (log off).
+2. Data root. One resolver decides it: only old, no link: the old root; a link either way: the new path; neither: a real `~/.hal-m`; both real: never picked silently (the one holding a store, else the old root, with a warning); a link elsewhere or dangling: the old root, with a warning. In 0.38 `~/.hal-m` is only ever a link to `~/.claude/mnemosyne` (a junction on Windows), made by `bin/migrate-root.ts` from `session.start`, never when the root is set by `HALM_ROOT`, `MNEMOSYNE_ROOT` or `--root`, and never with `HALM_NO_MIGRATE=1` (on for a `--plugin-dir` load). Nothing moves; the physical move is for a later release.
+3. Launchers. `bin/hal-m-mcp` reads `HALM_OWNER`, then `MNEMOSYNE_OWNER`, then `global`; the old `bin/mnemosyne-mcp` is a short shim that runs it. A stale 0.37 launcher still works (checked against a recall under the owner it names). The root marker is `.hal-m-root`; `.mnemosyne-root` is accepted.
+4. Server. The image bakes no default an operator can set; the entrypoint resolves new, then old, then default. The owner header is `HAL-M-Owner` (`Mnemosyne-Owner` accepted); cookies are `halm_session` and `__Host-halm_session`, the old two accepted, and sign-out clears all four.
+5. Dashboard folder and Windows names: `~/.hal-m-ui`, task "HAL-M dashboard", shortcut "Update HAL-M"; the 0.37 names are migrated.
+6. Kept as they were: the Mnemopi engine name and `MNEMOPI_*`, the `-mnemosyne.N` engine build suffix, browser `localStorage` keys, `serverInfo.name`, the rules section id `mnemosyne:rules`, and the stderr text `bin/remote.ts` writes (every reader accepts both).
+
 ## v0.9.0: dashboard writes and review, the importers, session summaries and the expiry sweep
 
 `README.md` describes the release for a person; this section records the contracts as built and what they cannot do. The plan is `docs/plans/mnemosyne-v3.md` (phases CRUDX, IMPORT, CRUD, SESSION, HARDEN part B, REL9). `engine/` is not touched in 0.9.0; it uses the tools MODEL added in 0.8.0 (`mnemopi_similar`, `mnemopi_expire_unused`, update's `restore` and `pinned` metadata, the `validator` argument).
@@ -1567,7 +1578,7 @@ remember, owner-scoped recall, owner-only forget and stats behave the same.
 5. Retire is `mnemopi_invalidate` (the route's `replaced_by` is the engine's `replacement_id`), refused with 409 for a memory that is not live. Restore is update with `restore: true`; both pass `validator: 'dashboard'`. Nothing retires or deletes more than the one memory named.
 6. Row state. `/api/memories` and `/api/review` rows carry `state`: `live`, `retired`, `expired` or `lapsed`, from the exported `memoryState` helper (the rule is in v0.8.3's C11.4 above). Its limit: the engine writes an audit row only when a `validator` is passed, and the trail keeps the newest 3 rows per memory, so a retire with no validator and no replacement, or one whose rows were pushed out, reads as `lapsed`.
 7. `GET /api/review` is read-only on the read-only handle (it never changes `recall_count`). Retire candidates carry reasons (marked superseded, near-duplicate by vector among the newest 1000 live memories that have one, a dated status note by G4's own test, a guard flag, never recalled and older than 30 days); a pinned memory is never listed; at most `REVIEW_LIMIT` (200) of each list come back with their totals. Not-live rows carry their state, the date they stopped and their last 3 audit rows (action, validator, time; no text).
-8. Vocabulary. Admit and alias call `admitTag` and the alias code of `bin/vocab.ts`, the one writer of `vocabulary.json` (C5), one write at a time; with no vocabulary file the answer is 409 and the page says to run `/mnemosyne-tags`.
+8. Vocabulary. Admit and alias call `admitTag` and the alias code of `bin/vocab.ts`, the one writer of `vocabulary.json` (C5), one write at a time; with no vocabulary file the answer is 409 and the page says to run `/hal-m-tags`.
 9. Logging. Each write adds one activity line (`remember`, `update`, `retire`, `restore`; origin `ui`) with ids and rule ids, never memory text. CRUDX.0 added the actions `restore`, `import` and `expire` and the origins `import` and `session` to `hooks/activity-log.ts`.
 
 ### C8: proposal files hold no memory text (VOCAB.2, IMPORT.1 to IMPORT.3)
@@ -1588,7 +1599,7 @@ C10.3: the engine's trigger `trim_validations_to_3` keeps only the newest 3 `mem
 2. GET.1, the tool. `memory_get` (`memory_id`, optional `owner`) runs `mnemopi_get` and answers `{ status, id, owner, kind, scope, content, length, tags, pinned, importance, source, created_at, timestamp, valid_until, superseded_by }` (`mnemosyneGet`, `hooks/surface.ts`). The engine's get leaves out `memory_type` and `scope`, so both come from a read-only look at the store, `rowInfo` in `bin/row-info.ts` (no text read; working memory, then episodic; any error on a table gives no row, so the check fails closed and never passes on one table's row while the engine answers with the other's). An id must match `MEMORY_ID`: no leading `-`, so it can never read as an option to `bin/memories.ts`. The plugin's tool reaches it as `bin/memories.ts row-info <id>`; the proxy opens the store itself. It is the sixth M1 tool (`tools.memory_get`, on by default, last in `TOOL_NAMES` so older lists keep their order) and is in the default `tools.externalAllow`. Activity lines use the new action `get` (the dashboard shows "Read … in full").
 3. GET.1, owners. The engine's get reads any owner's working row, so the plugin checks first (`visibleTo`): a row is read when it is the caller's owner's or `global`, the same rows recall shows. In Claude Code the caller's owner is the call's `owner` when given (it runs as that owner, like update and forget), else this project. The proxy reads only as its own owner: an `owner` that is not the row's own, a private row of another owner, a retired or expired `global` row of another owner (recall hides those too; their own owner still reads them), an id from the `facts` table (`rowInfo` does not look there) and an unknown id all get the same `{"status":"not_found","memory_id":…}`, answered without an engine run, so the reply says nothing about other projects' memories. A malformed id is refused (`-32602` in the proxy, a denial in Claude Code).
 4. GET.2, cut recall rows. The engine already marks a cut row `truncated` with `full_length`. The plugin's recall keeps both and adds a `note` that names the `memory_get` call with the id and owner; the proxy adds `truncated: true` and the note to its pass-through rows. Both recall descriptions say that a long memory comes back cut and to call `memory_get`. Neither the note nor that sentence is given when `memory_get` is switched off (M1) or, in the proxy, not in `tools.externalAllow` (M2): the row then carries only `truncated` and `full_length`. A `full`/preview-length argument on recall was not added: the engine's MCP recall has no such argument, and adding one is an engine build.
-5. GET.3, cut lines in the context. A first-prompt recall line whose row is cut, and the block's pinned memory cut at the 2000-character cap, end in `cutMark` (`hooks/session.ts`): `[cut: call mcp__mnemosyne__memory_get with this id and owner for the full text]`, or `[cut]` when `memory_get` is switched off. The mark is not counted in the cap; the line already carries the id and owner.
+5. GET.3, cut lines in the context. A first-prompt recall line whose row is cut, and the block's pinned memory cut at the 2000-character cap, end in `cutMark` (`hooks/session.ts`): `[cut: call mcp__hal-m__memory_get with this id and owner for the full text]`, or `[cut]` when `memory_get` is switched off. The mark is not counted in the cap; the line already carries the id and owner.
 6. The proxy's read-only store lookups (`ownerOfMemory` for OWNERHINT and the new one) wait up to 2 s for the engine's lock (`busy_timeout`) instead of failing at once. The OWNERHINT spec failed once on a forget's hint while this was built, and passed on reruns; the wait is believed to be the fix, not proven.
 
 ### Session summaries and the first-prompt block (SESSION.1, SESSION.2)
@@ -1607,7 +1618,7 @@ C10.3: the engine's trigger `trim_validations_to_3` keeps only the newest 3 `mem
 
 ### Engine logs and platforms (HARDEN.3)
 
-`pruneEngineLogs` in `bin/install-engine.ts` removes `omp.*.log` files directly inside `<root>/model-cache/logs` that are older than 7 days, always keeping the newest 20, at most 1000 per run, regular files only (a linked folder or file is left alone). Session start and `/mnemosyne-setup` run it through `bun bin/install-engine.ts prune-logs <dir>` in the background (15 s bound, errors swallowed). Setup's reply names the platforms: embeddings are tested on macOS Apple Silicon only, Linux and Windows are untested, and an Intel Mac (darwin x64) is told embeddings are unsupported and stays off even with `embeddings: on`.
+`pruneEngineLogs` in `bin/install-engine.ts` removes `omp.*.log` files directly inside `<root>/model-cache/logs` that are older than 7 days, always keeping the newest 20, at most 1000 per run, regular files only (a linked folder or file is left alone). Session start and `/hal-m-setup` run it through `bun bin/install-engine.ts prune-logs <dir>` in the background (15 s bound, errors swallowed). Setup's reply names the platforms: embeddings are tested on macOS Apple Silicon only, Linux and Windows are untested, and an Intel Mac (darwin x64) is told embeddings are unsupported and stays off even with `embeddings: on`.
 
 ### The map setting (map.stationMin)
 
@@ -1615,14 +1626,14 @@ On the solar-system map a plain folder (no git repo) with at least `map.stationM
 
 ### Updating without Claude Code (0.28.0)
 
-Issue #43. `bin/update.ts` serves the Claude Code layout (`~/.claude/mnemosyne`) on machines without the `claude` CLI; a `--root` install is still updated by running `install-engine.ts --root` again.
+Issue #43. `bin/update.ts` serves the Claude Code layout (`~/.hal-m`) on machines without the `claude` CLI; a `--root` install is still updated by running `install-engine.ts --root` again.
 
 - **Staging.** Without `--from`, the latest `vX.Y.Z` tag (`git ls-remote --tags`, or the GitHub tags API) is cloned or untarred into `<root>/update-staging`, and the staged `bin/update.ts --from <staging>` does the work, so the newest update logic runs and no code runs from the plugin copy being replaced. A release without `bin/update.ts` is refused. The parent removes the staging folder. Each run downloads into its own `update-staging/run-<pid>-<ms>` (folders older than a day are pruned), and the staged updater reads the source only under `engine.lock`, so two runs (the Start Menu entry and the button, a double click) never read or delete each other's tree; the second waits for the lock, then finds everything up to date. The staged plugin copy is swapped in only when `pluginCopyProblems` finds nothing: every required file present, every source file copied at the same size, the planned version, and a proxy whose imports resolve (`proxyClosure`).
 - **Plan** (`planUpdate`, pure). Inputs: the installed plugin version (`plugin/.claude-plugin/plugin.json`), engine build (the installed package.json), launcher text; the source's version and build; the expected launcher; the running processes. Engine step when the builds differ, plugin step when the versions differ, launcher step when the text differs; none: up to date. An older source is refused; `--force` does all three.
-- **Processes** (`classifyProcesses`). Matched by the layout's paths, case-folded and slash-normalised on Windows: `plugin/bin/mcp-proxy.ts` (proxy), `engine/…/src/cli.ts` (engine), `plugin/ui/server.ts` (dashboard), `mnemosyne-ui/run-ui.ps1` (its keep-alive loop). An engine is the dashboard's when a dashboard process is its nearest owning ancestor, else it joins its proxy's connection (or is its own). Running connections never refuse the plan: a running engine does not always lock its folder (seen on the author's machine), so the swap is tried. A refused rename (`isSwapFailure`) with connections still running becomes exit 2 with `lockedMessage` (the pids, and whether anything changed). `--stop-engines` stops them first; `--wait` gives them up to n seconds to end first. Dashboard processes are stopped for a Windows swap and the task is run again in a `finally`, so a failed update restarts the old dashboard. The dashboard is its whole tree: anything below the loop, the cmd.exe of `start-ui.cmd` (its current folder is the plugin copy, and its command line names only that script), the holder or the server. `others` are processes whose command line names a file in the plugin copy or the engine folder (the updater itself excepted). The failure text says what was found (chats "may be holding it", dashboard processes still up, other programs), and when nothing was found it says that another program probably has the folder open; it blames chats only when there are some.
+- **Processes** (`classifyProcesses`). Matched by the layout's paths, case-folded and slash-normalised on Windows: `plugin/bin/mcp-proxy.ts` (proxy), `engine/…/src/cli.ts` (engine), `plugin/ui/server.ts` (dashboard), `.hal-m-ui/run-ui.ps1` (its keep-alive loop). An engine is the dashboard's when a dashboard process is its nearest owning ancestor, else it joins its proxy's connection (or is its own). Running connections never refuse the plan: a running engine does not always lock its folder (seen on the author's machine), so the swap is tried. A refused rename (`isSwapFailure`) with connections still running becomes exit 2 with `lockedMessage` (the pids, and whether anything changed). `--stop-engines` stops them first; `--wait` gives them up to n seconds to end first. Dashboard processes are stopped for a Windows swap and the task is run again in a `finally`, so a failed update restarts the old dashboard. The dashboard is its whole tree: anything below the loop, the cmd.exe of `start-ui.cmd` (its current folder is the plugin copy, and its command line names only that script), the holder or the server. `others` are processes whose command line names a file in the plugin copy or the engine folder (the updater itself excepted). The failure text says what was found (chats "may be holding it", dashboard processes still up, other programs), and when nothing was found it says that another program probably has the folder open; it blames chats only when there are some.
 - **Order.** `plugin.next` is staged first (cheap, nothing changed yet), then engine `install()` (its own stage/check/swap; the dashboard is stopped in its `beforeSwap` hook, after the check, so the Update button shows progress through the long build), plugin swap (rename, roll back on failure), launcher write. All under `<root>/engine.lock` (`withInstallLock`). A plugin swap failure after a new engine leaves new engine plus old plugin, and the error says so.
-- **Launcher.** `launcherFor` parses the existing `set "K=V"` / `export K=V` lines and keeps `MNEMOPI_DATA_DIR`, `MNEMOSYNE_ACTIVITY_LOG` (empty stays off), `MNEMOSYNE_GUARD_MODE`, `MNEMOSYNE_VOCABULARY`, `MNEMOSYNE_ROOT`, `PI_CONFIG_DIR` and the embeddings switch; cli and proxy point at the layout. The store it names must not be inside the plugin folders. A rewrite of a current launcher is byte-identical, so no step is planned. It is replaced by rename (`writeLauncher`), never rewritten in place, because a running cmd.exe reads a batch file line by line from its open handle. If the rename fails, the old launcher is kept and the summary says so.
-- **Shortcut.** `<home>/.claude/mnemosyne-ui/update-mnemosyne.{vbs,ps1}` and `Start Menu/Programs/Update Mnemosyne.lnk` (wscript, hidden PowerShell, as the dashboard shortcut). The script runs the installed updater, writes `update.log`, shows a message box, and on exit 2 (a swap refused while chats run) asks before rerunning with `-StopEngines`.
+- **Launcher.** `launcherFor` parses the existing `set "K=V"` / `export K=V` lines and keeps `MNEMOPI_DATA_DIR`, `HALM_ACTIVITY_LOG` (empty stays off), `HALM_GUARD_MODE`, `HALM_VOCABULARY`, `HALM_ROOT`, `PI_CONFIG_DIR` and the embeddings switch; cli and proxy point at the layout. The store it names must not be inside the plugin folders. A rewrite of a current launcher is byte-identical, so no step is planned. It is replaced by rename (`writeLauncher`), never rewritten in place, because a running cmd.exe reads a batch file line by line from its open handle. If the rename fails, the old launcher is kept and the summary says so.
+- **Shortcut.** `<home>/.hal-m-ui/update-hal-m.{vbs,ps1}` and `Start Menu/Programs/Update HAL-M.lnk` (wscript, hidden PowerShell, as the dashboard shortcut). The script runs the installed updater, writes `update.log`, shows a message box, and on exit 2 (a swap refused while chats run) asks before rerunning with `-StopEngines`.
 - **Progress** (`--status <file>`). `writeStatus` appends each printed line (the last 200) and the state: starting (written by the server), running, then done, failed or blocked with the exit code. A final state is never replaced by another final one, so the staging parent keeps its child's result. Written by rename, 0600.
 - **Update button** (`ui/update-routes.ts`, `ui/update.ts`). `GET /api/update`: the installed versions, `latestRelease` (the GitHub tags API plus the tag's `engine/package.json`, a 5 s timeout, cached in `update-check.json` for 24 h, a failure cached too), `available` (`compareVersions`), and `updatable` (`updaterHome`: root is `<home>/.claude/mnemosyne`, the plugin root is `<root>/plugin`, and it holds `bin/update.ts`). `POST /api/update/start` refuses with 409 when not updatable, when a run is going (progress not final and touched within 30 min), or when no newer release exists. Otherwise it writes the starting progress and `ui-handoff.json` (port, token, until +30 min, 0600) and launches `bun <root>/plugin/bin/update.ts --home <home> --tag <offered> --status <file>`. On Windows that goes through `Win32_Process.Create` with ShowWindow 0, and the command line is passed in an environment variable so PowerShell never parses it; elsewhere through `nohup`. The updater is never the server's child, because it stops that server. `serve()` calls `takeHandoff` (read once, removed, valid only fresh and well-formed) and falls back to a new port and token when the old port is taken. The page polls `/api/update/status` every 2 s. When the server is gone it polls `/api/health` with its token for up to 3 min and reloads on 200; a 401 or a timeout means a new address, and the panel names the Start Menu shortcut. The panel DOM is createElement and textContent only, with tokens in CSS.
 - **Not covered by tests:** the real swap with live processes, the scheduled task, the WMI start and the shortcut, which need a Windows desktop. The tests stay at planning, messages, routes and the panel with fakes.
@@ -1813,7 +1824,7 @@ The panel:
 
 ### The dashboard shell and shared tokens (0.17.0)
 
-First step of the tab polish (design proposal `tabs-after/NOTES-shell-vocabulary-settings.md`, section A and the token list). Tokens in `ui/style.css` `:root`, the same in both themes: data roles as on the map only (`--role-gold`, `--role-shared`, `--role-bond`, `--role-slate`, `--role-ash`), `--warn` (amber: waiting or "later"), spacing `--space-1..6` (4 to 32), radii `--radius-1..3` and `--radius-pill`, type `--fs-h1/group/body/help/meta`. Teal `--accent` stays the UI accent. Shell: the active tab is a teal underline; `#summary` reads "N memories in M projects"; plugin and engine versions moved into `<details class="about">` (`#engine` kept); `.local` became `#conn[data-state=live|lost|expired]` with `#conn-text`, set by `setConnection` from the watch's `onChange` and from `expire()`. `setStatus` keeps its text and classes (the specs read them) but hides `#status` for the Connected line and sets `data-kind` (`lost` styles it as the top of an amber strip; `expired` hides it in favour of the `#expired` card: two steps, `/mnemosyne-ui` with a Copy button, "nothing was lost"). While lost, `#lost-extra` shows `Next check in N s` from the new `Watch.nextIn()` (refreshed every 500 ms) and a Try now button calling the new `Watch.retry()` (clears the wait and probes at once; the back-off continues), and every `.view` gets `.is-stale` (opacity 0.55). The watch now schedules the next check before it announces the loss, so a listener can read `nextIn()` at once.
+First step of the tab polish (design proposal `tabs-after/NOTES-shell-vocabulary-settings.md`, section A and the token list). Tokens in `ui/style.css` `:root`, the same in both themes: data roles as on the map only (`--role-gold`, `--role-shared`, `--role-bond`, `--role-slate`, `--role-ash`), `--warn` (amber: waiting or "later"), spacing `--space-1..6` (4 to 32), radii `--radius-1..3` and `--radius-pill`, type `--fs-h1/group/body/help/meta`. Teal `--accent` stays the UI accent. Shell: the active tab is a teal underline; `#summary` reads "N memories in M projects"; plugin and engine versions moved into `<details class="about">` (`#engine` kept); `.local` became `#conn[data-state=live|lost|expired]` with `#conn-text`, set by `setConnection` from the watch's `onChange` and from `expire()`. `setStatus` keeps its text and classes (the specs read them) but hides `#status` for the Connected line and sets `data-kind` (`lost` styles it as the top of an amber strip; `expired` hides it in favour of the `#expired` card: two steps, `/hal-m-ui` with a Copy button, "nothing was lost"). While lost, `#lost-extra` shows `Next check in N s` from the new `Watch.nextIn()` (refreshed every 500 ms) and a Try now button calling the new `Watch.retry()` (clears the wait and probes at once; the back-off continues), and every `.view` gets `.is-stale` (opacity 0.55). The watch now schedules the next check before it announces the loss, so a listener can read `nextIn()` at once.
 
 ### Calm motion, folding tethers and focus (0.16.0)
 
@@ -1845,7 +1856,7 @@ C11.3's link rule is two settings, read per call by `linkRuleOf` in `ui/server.t
 
 ### C14: `config.json` (CFG.1, CFG.2)
 
-1. Two homes. A plugin option stays a plugin option: Claude Code stores it, and the plugin reads it from the hook's options. A knob that used to be a number in the source lives in `<root>/config.json`, where `<root>` is `~/.claude/mnemosyne` (the folder that holds `store/`, `backups/` and `vocabulary.json`). Nothing in the plugin writes `~/.claude/settings.json`.
+1. Two homes. A plugin option stays a plugin option: Claude Code stores it, and the plugin reads it from the hook's options. A knob that used to be a number in the source lives in `<root>/config.json`, where `<root>` is `~/.hal-m` (the folder that holds `store/`, `backups/` and `vocabulary.json`). Nothing in the plugin writes `~/.claude/settings.json`.
 2. Shape. `{ "version": 1, "guard": {...}, "tags": {...}, "recall": {...}, "expiry": {...}, "tools": {...}, "storage": {...} }`. Only a value that differs from its default is stored; a group left empty is removed; a missing file means all defaults. Keys are written in a fixed order (schema order), so equal settings are equal bytes. A key this version does not know is ignored on read and kept on write.
 3. One schema and one resolver. `hooks/settings.ts` holds `SETTINGS` (key, type, default, range or choices, help text and the "applies" badge) and `resolve(raw)`; it imports nothing, so a hook, the proxy, the server and the Bun specs all use it. `resolve` never throws: an unknown key is ignored, a value of the wrong type or out of range gives its default and a warning that names the key and never holds the value. A words list or a tool allow-list keeps its good entries and drops the bad ones, so a typo never switches protection off or widens an allow-list. Rules between keys (min < warn < max length, default <= most recall results, the three weights not all 0) revert the stored keys that break them. The README's settings tables are checked against `SETTINGS` by `tests/bun/readme-settings.spec.ts`.
 4. Safe writes. `bin/settings.ts` is the one writer. It checks the whole change first (a refusal names the key and the reason and writes nothing), builds the new file text, writes it to `config.json.<pid>.tmp` with mode `0600` (`wx`, then `chmod`), and renames it over the file, so a crash leaves the old file or the new one. The file it replaces is first copied to `config.json.bak` by the same temp-and-rename. The data folder is created `0700` when missing. A write that changes nothing writes nothing (and "reset all" on a file that is already empty keeps the backup of the first reset). A file that is not valid JSON is read as all defaults plus one warning and is left alone until a real change is written. A file over 64 KiB is not read.

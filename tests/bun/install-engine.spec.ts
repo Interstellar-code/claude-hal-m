@@ -2,10 +2,12 @@
 // checks it answers, and only then swaps it in. Real installs into temp folders.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { cliOf, installStep, installStepEnv, pruneEngineLogs, type Runner } from '../../bin/install-engine'
+import { cliOf, installStep, installStepEnv, pluginModelCacheDir, pruneEngineLogs, type Runner } from '../../bin/install-engine'
+import { EMBEDDINGS_CACHE_DIR } from '../../hooks/engine'
 import { ENGINE_BUILD } from '../../hooks/engine-build'
+import { modelCacheDir } from '../../hooks/names'
 import { body, engineCall, isolatedEnv, liveTempDirs, ROOT, runInstaller, tempDir, toolCall } from './helpers'
 
 const INSTALL_TIMEOUT = 300_000
@@ -452,5 +454,83 @@ describe('pruneEngineLogs', () => {
     const ran = Bun.spawnSync(['bun', join(ROOT, 'bin', 'install-engine.ts'), 'prune-logs', join(temp.dir, 'nope')], { env: { ...(process.env as Record<string, string>), ...isolatedEnv() } })
     expect(ran.exitCode).toBe(0)
     expect(ran.stdout.toString().trim()).toBe('0')
+  })
+})
+
+
+// The plugin form's check (/hal-m-setup, the auto-update) pins PI_CONFIG_DIR to the cache
+// hooks/register.ts gives the engine at run time (3.2 item 5): the old HOME-relative constant
+// while the data root is the 0.37 folder, else <root>/model-cache. Real folders in a temp home.
+describe('pluginModelCacheDir: the check downloads into the cache the plugin uses', () => {
+  const temp = tempDir('plugin-cache')
+  afterAll(() => temp.dispose())
+  const home = (name: string) => {
+    const dir = join(temp.dir, name)
+    mkdirSync(dir)
+    return dir
+  }
+
+  test('a fresh home (neither root): <home>/.hal-m/model-cache, and nothing is created', () => {
+    const h = home('fresh')
+    expect(pluginModelCacheDir({ HOME: h })).toBe(modelCacheDir(`${h}/.hal-m`))
+    expect(pluginModelCacheDir({ HOME: h })).toBe(`${h}/.hal-m/model-cache`)
+    expect(readdirSync(h)).toEqual([])
+  })
+
+  test('only the 0.37 root: the old HOME-relative constant, byte for byte', () => {
+    const h = home('old-only')
+    mkdirSync(join(h, '.claude', 'mnemosyne', 'store'), { recursive: true })
+    expect(pluginModelCacheDir({ HOME: h })).toBe(EMBEDDINGS_CACHE_DIR)
+    expect(EMBEDDINGS_CACHE_DIR).toBe('.claude/mnemosyne/model-cache')
+  })
+
+  test('~/.hal-m a link to the 0.37 root: the new path, the same real folder as the old cache', () => {
+    const h = home('linked')
+    mkdirSync(join(h, '.claude', 'mnemosyne', 'model-cache'), { recursive: true })
+    symlinkSync(join(h, '.claude', 'mnemosyne'), join(h, '.hal-m'), 'dir')
+    const dir = pluginModelCacheDir({ HOME: h })
+    expect(dir).toBe(`${h}/.hal-m/model-cache`)
+    expect(realpathSync(dir)).toBe(realpathSync(join(h, EMBEDDINGS_CACHE_DIR)))
+  })
+
+  test('the 0.37 path a link to ~/.hal-m, and only ~/.hal-m: the new path', () => {
+    const h = home('old-links-new')
+    mkdirSync(join(h, '.hal-m', 'model-cache'), { recursive: true })
+    mkdirSync(join(h, '.claude'))
+    symlinkSync(join(h, '.hal-m'), join(h, '.claude', 'mnemosyne'), 'dir')
+    expect(pluginModelCacheDir({ HOME: h })).toBe(`${h}/.hal-m/model-cache`)
+    const n = home('new-only')
+    mkdirSync(join(n, '.hal-m'))
+    expect(pluginModelCacheDir({ HOME: n })).toBe(`${n}/.hal-m/model-cache`)
+  })
+
+  test('two real roots: the root the resolver picks (the one holding a store, else the old one)', () => {
+    const h = home('both-real')
+    mkdirSync(join(h, '.claude', 'mnemosyne'), { recursive: true })
+    mkdirSync(join(h, '.hal-m'))
+    expect(pluginModelCacheDir({ HOME: h })).toBe(EMBEDDINGS_CACHE_DIR)
+    mkdirSync(join(h, '.hal-m', 'store'))
+    expect(pluginModelCacheDir({ HOME: h })).toBe(`${h}/.hal-m/model-cache`)
+  })
+
+  test('HALM_ROOT and MNEMOSYNE_ROOT do not move it: register.ts resolves the plugin root without them', () => {
+    const h = home('explicit')
+    mkdirSync(join(h, '.claude', 'mnemosyne'), { recursive: true })
+    expect(pluginModelCacheDir({ HOME: h, HALM_ROOT: join(temp.dir, 'elsewhere'), MNEMOSYNE_ROOT: join(temp.dir, 'other') })).toBe(EMBEDDINGS_CACHE_DIR)
+  })
+
+  test('no usable home keeps the 0.37 constant; on Windows USERPROFILE stands in for an unset HOME', () => {
+    expect(pluginModelCacheDir({})).toBe(EMBEDDINGS_CACHE_DIR)
+    expect(pluginModelCacheDir({ HOME: '' })).toBe(EMBEDDINGS_CACHE_DIR)
+    expect(pluginModelCacheDir({ HOME: 'relative/home' })).toBe(EMBEDDINGS_CACHE_DIR)
+    const h = home('profile')
+    expect(pluginModelCacheDir({ USERPROFILE: h }, undefined, 'linux')).toBe(EMBEDDINGS_CACHE_DIR)
+    expect(pluginModelCacheDir({ USERPROFILE: h }, undefined, 'win32')).toBe(`${h}/.hal-m/model-cache`)
+    expect(pluginModelCacheDir({ HOME: 'C:\\Users\\a', USERPROFILE: h }, { lstat: () => null, stat: () => null, realpath: () => null }, 'win32')).toBe('C:/Users/a/.hal-m/model-cache')
+  })
+
+  test('the CLI plugin form passes it to install()', () => {
+    const text = readFileSync(join(ROOT, 'bin', 'install-engine.ts'), 'utf8')
+    expect(text).toContain("install(pluginRoot, engineDir, storeDir, embeddingsArg === 'embeddings', pluginModelCacheDir(process.env))")
   })
 })

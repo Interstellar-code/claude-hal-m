@@ -8,6 +8,7 @@
 // takes too long or a process that dies ends the process (the next call starts a new one), and the process
 // stops after `idleMs` without calls, so an idle dashboard holds no model in memory.
 import { engineEnv, type EngineRequest } from '../hooks/engine'
+import { envOf } from '../hooks/names'
 
 /**
  * Whether an installed engine build takes the owner per call (change 21, build 18.12.3-mnemosyne.13). An older
@@ -41,6 +42,8 @@ export type WarmOptions = {
   spawn?: WarmSpawn
   /** Meaning search on (the default: this engine exists for it); a test without the model turns it off. */
   embeddings?: boolean
+  /** The model cache when HALM_MODEL_CACHE is not set: the dashboard passes the one under its root (ui/server.ts rootModelCache). */
+  modelCacheDir?: string
 }
 
 export type WarmEngine = {
@@ -136,8 +139,8 @@ export function createWarmEngine(options: WarmOptions): WarmEngine {
   function ensure(): WarmProcess {
     if (child !== null) return child
     const base = options.baseEnv ?? process.env
-    // Server mode: the image's absolute model cache (MNEMOSYNE_MODEL_CACHE), as runEngine passes it.
-    const modelCacheDir = base.MNEMOSYNE_MODEL_CACHE || undefined
+    // Server mode: the image's absolute model cache (HALM_MODEL_CACHE, or the old name), as runEngine passes it.
+    const modelCacheDir = envOf('MODEL_CACHE', base) || options.modelCacheDir || undefined
     const env = { ...base, ...engineEnv(options.store, 'global', { embeddings: options.embeddings !== false, ...(modelCacheDir ? { modelCacheDir } : {}) }), MNEMOPI_OWNER_PER_CALL: '1' }
     const proc = spawn([process.execPath, options.cli, 'mcp'], env)
     child = proc

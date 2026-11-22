@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ENGINE_BUILD } from '../../hooks/engine-build'
+import { hookChildEnv } from '../../hooks/names'
 import { ROOT } from './helpers'
 
 test('ENGINE_BUILD is engine/package.json version', () => {
@@ -48,5 +49,12 @@ test('a setup that waits for another install\'s lock still ends 30 s before the 
   expect(SETUP_LOCK_WAIT_MS + INSTALL_STEP_TIMEOUT_MS + INSTALL_CHECK_TIMEOUT_MS).toBeLessThanOrEqual(SETUP_TIMEOUT_MS - 30_000)
   // --root keeps the long wait: longer than a whole install, so a healthy one is waited out.
   expect(INSTALL_LOCK_WAIT_MS).toBeGreaterThan(INSTALL_STEP_TIMEOUT_MS + INSTALL_CHECK_TIMEOUT_MS)
-  expect(readFileSync(join(ROOT, 'hooks', 'register.ts'), 'utf8')).toContain('env: { MNEMOSYNE_LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS) }')
+  // /hal-m-setup hands the short wait to the installer under both names (a hook cannot delete an
+  // inherited variable, so hookChildEnv sets HALM_ and MNEMOSYNE_ to the same value), and the
+  // installer reads it with envOf: HALM_LOCK_WAIT_MS first, the old name as the fallback.
+  expect(readFileSync(join(ROOT, 'hooks', 'register.ts'), 'utf8')).toContain('env: hookChildEnv({ LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS) })')
+  expect(hookChildEnv({ LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS) })).toEqual({ HALM_LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS), MNEMOSYNE_LOCK_WAIT_MS: String(SETUP_LOCK_WAIT_MS) })
+  const installer = readFileSync(join(ROOT, 'bin', 'install-engine.ts'), 'utf8')
+  expect(installer).toContain("lockTimingFromEnv(envOf('LOCK_WAIT_MS', process.env))")
+  expect(installer).not.toContain('process.env.MNEMOSYNE_LOCK_WAIT_MS')
 })

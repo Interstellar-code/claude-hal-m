@@ -10,6 +10,8 @@ Decided 2026-11-21 (Rohit: "yes to all"). Done in two stages so nothing breaks.
 4. Kept: plugin id and marketplace `mnemosyne`, tools `mcp__mnemosyne__*`, `MNEMOSYNE_*` variables, `~/.claude/mnemosyne`, the Linux user in the image, the Mnemopi engine name, older CHANGELOG entries and `docs/plans/` history.
 5. 7of9 redeploy: build `hal-m:local`, move `/mnt/cache/appdata/mnemosyne` to `.../hal-m`, install `my-HAL-M.xml`, remove the old container, approve the new Tailscale device and turn off its key expiry, remove the old `mnemosyne` device, set the new address as `serverUrl` on each PC that uses the server.
 
-## Stage 2 (later, its own plan): the machine names
+## Stage 2 (v0.38.0, done): the machine names
+
+Done in 0.38.0 (plan: `hal-m-stage2.md`, runbook: `hal-m-stage2-runbook.md`). The GitHub repo is now `Interstellar-code/hal-m` (renamed from `claude-hal-m`; GitHub redirects the old names). What was planned:
 
 Plugin id, tool names (`mcp__hal-m__*`), `MNEMOSYNE_*` variables and the data folder. Needs: reading the old variable names as a fallback, moving the data folder on first start, and updating every rule, permission list and memory that names `mcp__mnemosyne__*` on every PC. Each PC reinstalls the plugin.

@@ -1,4 +1,4 @@
-// The pure parts of /mnemosyne-tags, the one-time tag backfill (plan phase
+// The pure parts of /hal-m-tags, the one-time tag backfill (plan phase
 // TAGS). hooks/register.ts runs the command; this file holds what needs no
 // host: the prompt, the reply reading, the proposals file's shape, the
 // apply-time re-check and the bounded worker pool. Imports only hooks/tags.ts,

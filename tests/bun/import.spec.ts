@@ -1,4 +1,4 @@
-// IMPORT.1: /mnemosyne-import doc and apply, run for real. The hooks are the real hooks/register.ts;
+// IMPORT.1: /hal-m-import doc and apply, run for real. The hooks are the real hooks/register.ts;
 // bin/import.ts, bin/memories.ts, bin/activity.ts and the engine are the real ones over a temp HOME
 // (see knowledge-host.ts). No model is called, and nothing here touches the real ~/.claude.
 import { Database } from 'bun:sqlite'
@@ -12,7 +12,7 @@ import type { Host } from './knowledge-host'
 
 setDefaultTimeout(60_000)
 const hosts: Host[] = []
-// /mnemosyne-setup opens the store once (mnemopi_stats), which is what creates mnemopi.db; the backup needs that file.
+// /hal-m-setup opens the store once (mnemopi_stats), which is what creates mnemopi.db; the backup needs that file.
 const open = async (...args: Parameters<typeof makeHost>) => {
   const host = await makeHost(...args)
   hosts.push(host)
@@ -72,7 +72,7 @@ describe('IMPORT.1: the dry run', () => {
   test('shows the counts and writes the proposal, but no memory and no backup', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(4))
-    const reply = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const reply = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(reply).toContain('Dry run for guide.md: 4 chunks')
     expect(reply).toContain('No memory was changed')
     expect(reply).toContain('Would save 4 clean')
@@ -93,27 +93,27 @@ describe('IMPORT.1: the dry run', () => {
   test('a relative path is read under the session folder and ~ is the home folder', async () => {
     const host = await open()
     writeDoc(host, 'home.md', doc(1))
-    const reply = (await host.command('mnemosyne-import', 'doc ~/docs/home.md')).text
+    const reply = (await host.command('hal-m-import', 'doc ~/docs/home.md')).text
     expect(reply).toContain('Dry run for home.md: 1 chunk ')
-    const relative = (await host.command('mnemosyne-import', 'doc ../nothing/here.md')).text
+    const relative = (await host.command('hal-m-import', 'doc ../nothing/here.md')).text
     expect(relative).toContain('HAL-M import failed: there is no such file')
   })
 
   test('refuses what is not importable, and names the cause', async () => {
     const host = await open()
     const script = writeDoc(host, 'notes.ts', doc(1))
-    expect((await host.command('mnemosyne-import', `doc ${script}`)).text).toContain('only .md and .txt files are imported')
+    expect((await host.command('hal-m-import', `doc ${script}`)).text).toContain('only .md and .txt files are imported')
     const big = writeDoc(host, 'big.md', `# Big\n\n${'word '.repeat(220_000)}`)
-    expect((await host.command('mnemosyne-import', `doc ${big}`)).text).toContain('must be under 1048576 bytes')
+    expect((await host.command('hal-m-import', `doc ${big}`)).text).toContain('must be under 1048576 bytes')
     const binary = join(host.home, 'docs', 'bin.md')
     writeFileSync(binary, Buffer.from([0x23, 0x20, 0x68, 0x00, 0x69]))
-    expect((await host.command('mnemosyne-import', `doc ${binary}`)).text).toContain('binary data')
+    expect((await host.command('hal-m-import', `doc ${binary}`)).text).toContain('binary data')
     const link = join(host.home, 'docs', 'link.md')
     symlinkSync(writeDoc(host, 'real.md', doc(1)), link)
-    expect((await host.command('mnemosyne-import', `doc ${link}`)).text).toContain('a link is not imported')
+    expect((await host.command('hal-m-import', `doc ${link}`)).text).toContain('a link is not imported')
     const bad = join(host.home, 'docs', 'latin.txt')
     writeFileSync(bad, Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0x61, 0x6e, 0x64]))
-    expect((await host.command('mnemosyne-import', `doc ${bad}`)).text).toContain('not valid UTF-8')
+    expect((await host.command('hal-m-import', `doc ${bad}`)).text).toContain('not valid UTF-8')
     expect(existsSync(proposalPath(host))).toBe(false)
     expect(rows(host)).toHaveLength(0)
   })
@@ -121,11 +121,11 @@ describe('IMPORT.1: the dry run', () => {
   test('a big document cannot flood the store: over the chunk limit it is refused with its count', async () => {
     const host = await open()
     const path = writeDoc(host, 'huge.md', doc(201))
-    const reply = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const reply = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(reply).toContain('splits into 201 chunks, over the limit of 200')
     expect(reply).toContain('Nothing was imported')
     expect(existsSync(proposalPath(host))).toBe(false)
-    // and an apply has nothing to apply
+    // and an apply has nothing to apply (through the 0.37 name /mnemosyne-import, an alias of the same handler)
     expect((await host.command('mnemosyne-import', 'apply')).text).toContain('There is no dry run to apply')
     expect(rows(host)).toHaveLength(0)
   })
@@ -135,7 +135,7 @@ describe('IMPORT.1: the dry run', () => {
     setConfig(host, { guard: { warnLength: 250, maxLength: 300 } })
     const long = `${'The cache lives in the build folder and is cleared first. '.repeat(8)}`
     const path = writeDoc(host, 'sized.md', `# Sized\n\n## Short\n\n${sentence(1)}\n\n## Long\n\n${long}\n`)
-    const reply = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const reply = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(reply).toContain('1 blocked')
     expect(reply).toContain('G2')
     const proposal = JSON.parse(readFileSync(proposalPath(host), 'utf8')) as { chunks: { verdict: string; rules: string[] }[] }
@@ -147,8 +147,8 @@ describe('IMPORT.1: apply', () => {
   test('backs the store up, then saves every chunk with honest provenance, a kind and its origin', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(3))
-    await host.command('mnemosyne-import', `doc ${path}`)
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    await host.command('hal-m-import', `doc ${path}`)
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Imported 3 chunks of guide.md')
     expect(backups(host)).toHaveLength(1)
     const saved = live(host)
@@ -174,16 +174,16 @@ describe('IMPORT.1: apply', () => {
   test('stops, and changes nothing, when the backup fails', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(2))
-    await host.command('mnemosyne-import', `doc ${path}`)
+    await host.command('hal-m-import', `doc ${path}`)
     // a first apply makes the store; the second run is the one whose backup fails
     mkdirSync(join(host.root, 'backups'), { recursive: true })
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', 'apply')
     const before = rows(host).length
     writeFileSync(path, doc(3))
-    await host.command('mnemosyne-import', `doc ${path}`)
+    await host.command('hal-m-import', `doc ${path}`)
     chmodSync(join(host.root, 'backups'), 0o500)
     const engineBefore = host.engineRuns().length
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Stopped: the backup before the change failed')
     expect(reply).toContain('No memory was changed')
     expect(rows(host)).toHaveLength(before)
@@ -193,13 +193,13 @@ describe('IMPORT.1: apply', () => {
   test('importing an unchanged file again adds nothing', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(3))
-    await host.command('mnemosyne-import', `doc ${path}`)
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', `doc ${path}`)
+    await host.command('hal-m-import', 'apply')
     const before = rows(host)
-    const again = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const again = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(again).toContain('3 already in the store')
     expect(again).toContain('Nothing to import')
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Imported 0 chunks')
     expect(rows(host)).toEqual(before)
   })
@@ -207,15 +207,15 @@ describe('IMPORT.1: apply', () => {
   test('a changed chunk replaces its old row: the old one is retired, not deleted, and can be restored', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(3))
-    await host.command('mnemosyne-import', `doc ${path}`)
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', `doc ${path}`)
+    await host.command('hal-m-import', 'apply')
     const first = rows(host)
     const oldPart2 = first.find(row => meta(row).origin?.heading === 'Guide > Part 2')!
     writeFileSync(path, doc(3, { 2: 'Section 2 now says the output goes to the build folder and nothing is cleared.' }))
-    const dry = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const dry = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(dry).toContain('1 of the chunks replace a row from an earlier import')
     expect(dry).toContain('2 already in the store')
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Imported 1 chunk of guide.md')
     expect(reply).toContain('Replaced 1 of 1 earlier chunk')
     const after = rows(host)
@@ -238,10 +238,10 @@ describe('IMPORT.1: apply', () => {
   test('a blocked chunk is never saved and its text is never logged', async () => {
     const host = await open()
     const path = writeDoc(host, 'keys.md', `# Keys\n\n## Deploy\n\nThe deploy job pushes the release with the token ${SECRET} to the registry.\n\n## Build\n\n${sentence(2)}\n`)
-    const dry = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const dry = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(dry).toContain('1 blocked (never saved)')
     expect(dry).toContain('G1')
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Imported 1 chunk of keys.md')
     expect(reply).toContain('1 blocked')
     const stored = rows(host)
@@ -257,13 +257,13 @@ describe('IMPORT.1: apply', () => {
     const host = await open()
     const warned = 'Released on 2026-10-01, done and merged, and the build output goes to the dist folder.'
     const path = writeDoc(host, 'log.md', `# Log\n\n## Clean\n\n${sentence(1)}\n\n## Dated\n\n${warned}\n`)
-    const dry = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const dry = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(dry).toContain('1 with a warning (guard mode strict')
-    const plain = (await host.command('mnemosyne-import', 'apply')).text
+    const plain = (await host.command('hal-m-import', 'apply')).text
     expect(plain).toContain('Imported 1 chunk of log.md')
     expect(plain).toContain('1 with a warning')
     expect(live(host)).toHaveLength(1)
-    const confirmed = (await host.command('mnemosyne-import', 'apply confirm')).text
+    const confirmed = (await host.command('hal-m-import', 'apply confirm')).text
     expect(confirmed).toContain('Imported 1 chunk of log.md')
     const dated = live(host).find(row => row.content.includes('Released on'))!
     expect(meta(dated).guard).toEqual(['G4'])
@@ -273,17 +273,17 @@ describe('IMPORT.1: apply', () => {
   test('in warn mode a warned chunk is saved and flagged without confirm', async () => {
     const host = await open({ options: { guardMode: 'warn' } })
     const path = writeDoc(host, 'log.md', `# Log\n\n## Dated\n\nReleased on 2026-10-01, done and merged, and the build output goes to the dist folder.\n`)
-    await host.command('mnemosyne-import', `doc ${path}`)
-    expect((await host.command('mnemosyne-import', 'apply')).text).toContain('Imported 1 chunk')
+    await host.command('hal-m-import', `doc ${path}`)
+    expect((await host.command('hal-m-import', 'apply')).text).toContain('Imported 1 chunk')
     expect(meta(live(host)[0]!).guard).toEqual(['G4'])
   })
 
   test('a chunk edited between the dry run and the apply is not saved', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(2))
-    await host.command('mnemosyne-import', `doc ${path}`)
+    await host.command('hal-m-import', `doc ${path}`)
     writeFileSync(path, doc(2, { 2: 'Section 2 was rewritten after the dry run, so it was never checked.' }))
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Imported 1 chunk of guide.md')
     expect(reply).toContain('1 edited since the dry run')
     expect(live(host).map(row => meta(row).origin?.heading)).toEqual(['Guide > Part 1'])
@@ -291,9 +291,10 @@ describe('IMPORT.1: apply', () => {
 
   test('an apply without a dry run, and a bad subcommand, do nothing', async () => {
     const host = await open()
-    expect((await host.command('mnemosyne-import', 'apply')).text).toContain('There is no dry run to apply')
-    expect((await host.command('mnemosyne-import', 'tags')).text).toContain('Usage: /mnemosyne-import')
-    expect((await host.command('mnemosyne-import', '')).text).toContain('Usage: /mnemosyne-import')
+    expect((await host.command('hal-m-import', 'apply')).text).toContain('There is no dry run to apply')
+    // IMPORT_USAGE lives in hooks/import.ts (T3's file), which still names /mnemosyne-import until T3 switches it: either spelling.
+    expect((await host.command('hal-m-import', 'tags')).text).toMatch(/Usage: \/(hal-m|mnemosyne)-import/)
+    expect((await host.command('hal-m-import', '')).text).toMatch(/Usage: \/(hal-m|mnemosyne)-import/)
     expect(rows(host)).toHaveLength(0)
     expect(backups(host)).toHaveLength(0)
   })
@@ -312,40 +313,40 @@ describe('IMPORT.1: per-project scope keeps one project\'s import away from anot
     const host = await open({ options: { scope: 'per-project' } })
     const path = writeDoc(host, 'guide.md', doc(3))
     inProject(host, '/work/A')
-    await host.command('mnemosyne-import', `doc ${path}`)
-    expect((await host.command('mnemosyne-import', 'apply')).text).toContain('Imported 3 chunks of guide.md')
+    await host.command('hal-m-import', `doc ${path}`)
+    expect((await host.command('hal-m-import', 'apply')).text).toContain('Imported 3 chunks of guide.md')
     const owners = new Set(live(host).map(ownerOf))
     expect(owners.size).toBe(1)
     inProject(host, '/work/B')
-    const dry = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const dry = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(dry).toContain('Would save 3 clean')
     expect(dry).toContain('0 already in the store')
-    expect((await host.command('mnemosyne-import', 'apply')).text).toContain('Imported 3 chunks of guide.md')
+    expect((await host.command('hal-m-import', 'apply')).text).toContain('Imported 3 chunks of guide.md')
     const all = live(host)
     expect(all).toHaveLength(6)
     expect(new Set(all.map(ownerOf)).size).toBe(2)
     for (const owner of new Set(all.map(ownerOf))) expect(all.filter(row => ownerOf(row) === owner)).toHaveLength(3)
     // and an unchanged file imported again by B adds nothing, as for A
-    expect((await host.command('mnemosyne-import', `doc ${path}`)).text).toContain('3 already in the store')
+    expect((await host.command('hal-m-import', `doc ${path}`)).text).toContain('3 already in the store')
   })
 
   test('a re-import by B after the file changed never retires A\'s rows, and A\'s own re-import replaces only A\'s', async () => {
     const host = await open({ options: { scope: 'per-project' } })
     const path = writeDoc(host, 'guide.md', doc(3))
     inProject(host, '/work/A')
-    await host.command('mnemosyne-import', `doc ${path}`)
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', `doc ${path}`)
+    await host.command('hal-m-import', 'apply')
     const aRows = live(host)
     expect(aRows).toHaveLength(3)
     inProject(host, '/work/B')
-    await host.command('mnemosyne-import', `doc ${path}`)
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', `doc ${path}`)
+    await host.command('hal-m-import', 'apply')
     expect(live(host)).toHaveLength(6)
     // the file changes; B imports it again
     writeFileSync(path, doc(3, { 2: 'Section 2 now says the output goes to the build folder and nothing is cleared.' }))
-    const dry = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const dry = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(dry).toContain('1 of the chunks replace a row from an earlier import')
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Imported 1 chunk of guide.md')
     expect(reply).toContain('Replaced 1 of 1 earlier chunk')
     const aOwner = ownerOf(aRows[0]!)
@@ -360,9 +361,9 @@ describe('IMPORT.1: per-project scope keeps one project\'s import away from anot
     expect(bLive.some(row => row.content.includes('nothing is cleared'))).toBe(true)
     // A imports the changed file: A's own part 2 is replaced, B's rows stay
     inProject(host, '/work/A')
-    const aReply = (await host.command('mnemosyne-import', `doc ${path}`)).text
+    const aReply = (await host.command('hal-m-import', `doc ${path}`)).text
     expect(aReply).toContain('1 of the chunks replace a row from an earlier import')
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', 'apply')
     expect(live(host)).toHaveLength(6)
     expect(live(host).filter(row => ownerOf(row) !== aOwner).map(row => row.id).sort()).toEqual(bLive.map(row => row.id).sort())
     expect(live(host).filter(row => ownerOf(row) === aOwner).some(row => row.content.includes('nothing is cleared'))).toBe(true)
@@ -373,15 +374,15 @@ describe('IMPORT: no test touches the real home', () => {
   test('the temp host keeps every file under its own HOME', async () => {
     const host = await open()
     const path = writeDoc(host, 'guide.md', doc(1))
-    await host.command('mnemosyne-import', `doc ${path}`)
-    await host.command('mnemosyne-import', 'apply')
+    await host.command('hal-m-import', `doc ${path}`)
+    await host.command('hal-m-import', 'apply')
     expect(host.root.startsWith(host.home)).toBe(true)
     expect(statSync(join(host.root, 'backups')).isDirectory()).toBe(true)
     expect(host.home).not.toBe(process.env.HOME)
   })
 })
 
-// ---- IMPORT.2: /mnemosyne-import session ----
+// ---- IMPORT.2: /hal-m-import session ----
 //
 // The transcript is a fixture in Claude Code's real line format (see the IMPORT.0 report): one JSON object a line, user turns
 // as a string or text/tool_result blocks, assistant turns as thinking/text/tool_use blocks, and lines that are no conversation
@@ -441,7 +442,7 @@ describe('IMPORT.2: the dry run', () => {
   test('sends only the redacted conversation text to the model, and shows the checked memories', async () => {
     const host = await open({ model: answers(REPLY) })
     writeTranscript(host, SID, transcript([userTurn(`my token is ${TOKEN} please keep it safe`), say('I will not store it.')]))
-    const reply = (await host.command('mnemosyne-import', `session ${SID}`)).text
+    const reply = (await host.command('hal-m-import', `session ${SID}`)).text
     expect(host.model).toHaveLength(1)
     const { system, prompt } = host.model[0]!.request
     // the conversation, and nothing but the conversation
@@ -467,7 +468,7 @@ describe('IMPORT.2: the dry run', () => {
   test('the proposals file holds the session id, hashes and verdicts, never a memory\'s text', async () => {
     const host = await open({ model: answers(REPLY) })
     writeTranscript(host, SID, transcript())
-    await host.command('mnemosyne-import', `session ${SID}`)
+    await host.command('hal-m-import', `session ${SID}`)
     expect(host.mode(proposalPath(host))).toBe('600')
     const text = readFileSync(proposalPath(host), 'utf8')
     const proposal = JSON.parse(text) as { kind: string; sessionId: string; chunks: { sha256: string; verdict: string; rules: string[]; heading: string }[] }
@@ -482,30 +483,30 @@ describe('IMPORT.2: the dry run', () => {
   test('junk from the model gives nothing and writes nothing', async () => {
     const host = await open({ model: answers('Sure! I could not find anything {{ nope') })
     writeTranscript(host, SID, transcript())
-    const reply = (await host.command('mnemosyne-import', `session ${SID}`)).text
+    const reply = (await host.command('hal-m-import', `session ${SID}`)).text
     expect(reply).toContain('found nothing durable worth remembering')
     expect(rows(host)).toHaveLength(0)
-    expect((await host.command('mnemosyne-import', 'apply')).text).toContain('Imported 0 memories')
+    expect((await host.command('hal-m-import', 'apply')).text).toContain('Imported 0 memories')
     expect(rows(host)).toHaveLength(0)
   })
 
   test('a failed model call and a switched-off extraction model change nothing', async () => {
     const failing = await open({ model: () => ({ isAnswered: false as const, reason: 'api-error', status: 500, error: 'overloaded' }) })
     writeTranscript(failing, SID, transcript())
-    const reply = (await failing.command('mnemosyne-import', `session ${SID}`)).text
+    const reply = (await failing.command('hal-m-import', `session ${SID}`)).text
     expect(reply).toContain('The model call failed (api-error 500 overloaded)')
     expect(existsSync(proposalPath(failing))).toBe(false)
     const off = await open({ model: answers(REPLY), options: { extractionModel: 'off' } })
     writeTranscript(off, SID, transcript())
-    expect((await off.command('mnemosyne-import', `session ${SID}`)).text).toContain('extractionModel')
+    expect((await off.command('hal-m-import', `session ${SID}`)).text).toContain('extractionModel')
     expect(off.model).toHaveLength(0)
   })
 
   test('a session id that does not exist, or is not an id, is refused before any model call', async () => {
     const host = await open({ model: answers(REPLY) })
     writeTranscript(host, SID, transcript())
-    expect((await host.command('mnemosyne-import', `session ${ID2}`)).text).toContain('there is no transcript for that session id')
-    expect((await host.command('mnemosyne-import', 'session ../../etc/passwd')).text).toContain('only letters, digits, hyphens and underscores')
+    expect((await host.command('hal-m-import', `session ${ID2}`)).text).toContain('there is no transcript for that session id')
+    expect((await host.command('hal-m-import', 'session ../../etc/passwd')).text).toContain('only letters, digits, hyphens and underscores')
         expect(host.model).toHaveLength(0)
   })
 
@@ -515,13 +516,13 @@ describe('IMPORT.2: the dry run', () => {
     const other = join(host.home, '.claude', 'projects', '-work-Other-Repo')
     mkdirSync(other, { recursive: true })
     writeFileSync(join(other, `${ID2}.jsonl`), transcript([userTurn('OTHER-PROJECT-TURN')]))
-    const reply = (await host.command('mnemosyne-import', `session ${ID2}`)).text
+    const reply = (await host.command('hal-m-import', `session ${ID2}`)).text
     expect(reply).toContain("there is no transcript for that session id in this project's folder")
     expect(reply).toContain('another project')
     expect(host.model).toHaveLength(0)
     expect(existsSync(proposalPath(host))).toBe(false)
     // this project's own id still works
-    expect((await host.command('mnemosyne-import', `session ${SID}`)).text).toContain(`Dry run for session ${SID}`)
+    expect((await host.command('hal-m-import', `session ${SID}`)).text).toContain(`Dry run for session ${SID}`)
   })
 
   test('"last" is refused when the running session\'s id is unknown, and reads nothing', async () => {
@@ -532,13 +533,13 @@ describe('IMPORT.2: the dry run', () => {
       throw new Error('session store unavailable')
     }
     const before = host.runs.length
-    const reply = (await host.command('mnemosyne-import', 'session last')).text
+    const reply = (await host.command('hal-m-import', 'session last')).text
     expect(reply).toContain('id is not known')
     expect(reply).toContain('session <id>')
     expect(host.model).toHaveLength(0)
     expect(host.runs.slice(before).filter(run => String(run.argv[1] ?? '').endsWith('/bin/import.ts'))).toEqual([])
     // an explicit id does not need the running session's id
-    expect((await host.command('mnemosyne-import', `session ${ID2}`)).text).toContain(`Dry run for session ${ID2}`)
+    expect((await host.command('hal-m-import', `session ${ID2}`)).text).toContain(`Dry run for session ${ID2}`)
   })
 
   test('"last" is the newest earlier transcript of the project, never the running session', async () => {
@@ -546,7 +547,7 @@ describe('IMPORT.2: the dry run', () => {
     writeTranscript(host, ID2, transcript(), new Date(Date.now() - 3_600_000))
     // the running session is 's1' in this host, and its file is the newest
     writeTranscript(host, 's1', transcript([userTurn('RUNNING-SESSION-TURN')]), new Date())
-    const reply = (await host.command('mnemosyne-import', 'session last')).text
+    const reply = (await host.command('hal-m-import', 'session last')).text
     expect(reply).toContain(`Dry run for session ${ID2}`)
     expect(host.model[0]!.request.prompt).not.toContain('RUNNING-SESSION-TURN')
   })
@@ -559,7 +560,7 @@ describe('IMPORT.2: the dry run', () => {
     turns.splice(100, 0, base('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't9', content: 'Z'.repeat(5 * 1024 * 1024) }] } }))
     const path = writeTranscript(host, SID, transcript(turns))
     expect(statSync(path).size).toBeGreaterThan(4 * 1024 * 1024)
-    const reply = (await host.command('mnemosyne-import', `session ${SID}`)).text
+    const reply = (await host.command('hal-m-import', `session ${SID}`)).text
     expect(reply).toContain('the text is capped')
     const prompt = host.model[0]!.request.prompt
     expect(prompt).toContain('ANSWER-399')
@@ -573,13 +574,13 @@ describe('IMPORT.2: the dry run', () => {
 describe('IMPORT.2: apply', () => {
   async function dryRun(host: Host) {
     writeTranscript(host, SID, transcript())
-    return (await host.command('mnemosyne-import', `session ${SID}`)).text
+    return (await host.command('hal-m-import', `session ${SID}`)).text
   }
 
   test('backs the store up, then saves the clean memories with source import:session, IMPORTED, imported, their kind and tags', async () => {
     const host = await open({ model: answers(REPLY) })
     await dryRun(host)
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain(`Imported 2 memories of session ${SID}`)
     expect(reply).toContain('1 blocked')
     expect(reply).toContain('1 with a warning')
@@ -612,11 +613,11 @@ describe('IMPORT.2: apply', () => {
   test('a warning is saved only with confirm, and flagged; text already saved is not saved twice', async () => {
     const host = await open({ model: answers(REPLY) })
     await dryRun(host)
-    const first = (await host.command('mnemosyne-import', 'apply')).text
+    const first = (await host.command('hal-m-import', 'apply')).text
     expect(first).toContain('Imported 2 memories')
-    expect(first).toContain('1 with a warning (resend as /mnemosyne-import apply confirm')
+    expect(first).toContain('1 with a warning (resend as /hal-m-import apply confirm')
     // the message says to resend with confirm, so that must work on the same dry run: the two saved ones are skipped as already stored
-    const confirmed = (await host.command('mnemosyne-import', 'apply confirm')).text
+    const confirmed = (await host.command('hal-m-import', 'apply confirm')).text
     expect(confirmed).toContain('Imported 1 memory of session')
     expect(confirmed).toContain('2 already in the store')
     const warned = rows(host).find(row => row.content.includes('formatter'))!
@@ -624,7 +625,7 @@ describe('IMPORT.2: apply', () => {
     expect(warned.source).toBe('import:session')
     expect(rows(host)).toHaveLength(3)
     // and a third apply adds nothing at all
-    const third = (await host.command('mnemosyne-import', 'apply confirm')).text
+    const third = (await host.command('hal-m-import', 'apply confirm')).text
     expect(third).toContain('Imported 0 memories')
     expect(rows(host)).toHaveLength(3)
   })
@@ -635,7 +636,7 @@ describe('IMPORT.2: apply', () => {
     mkdirSync(join(host.root, 'backups'), { recursive: true })
     chmodSync(join(host.root, 'backups'), 0o500)
     const engineBefore = host.engineRuns().length
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('Stopped: the backup before the change failed')
     expect(rows(host)).toHaveLength(0)
     expect(host.engineRuns()).toHaveLength(engineBefore)
@@ -646,13 +647,13 @@ describe('IMPORT.2: apply', () => {
     await dryRun(host)
     // a minimum length of 60 makes the two short sentences (54 and 45 characters) too short, though the dry run let them through
     setConfig(host, { guard: { minLength: 60 } })
-    const blocked = (await host.command('mnemosyne-import', 'apply')).text
+    const blocked = (await host.command('hal-m-import', 'apply')).text
     expect(blocked).toContain('Imported 0 memories')
     expect(blocked).toContain('3 blocked')
     expect(rows(host)).toHaveLength(0)
     // one tag per memory, set after the dry run, applies to what is saved now
     setConfig(host, { tags: { maxPerMemory: 1 } })
-    const saved = (await host.command('mnemosyne-import', 'apply')).text
+    const saved = (await host.command('hal-m-import', 'apply')).text
     expect(saved).toContain('Imported 2 memories')
     const tabs = rows(host).find(row => row.content.includes('tabs'))!
     expect((JSON.parse(tabs.metadata_json!) as { tags: string[] }).tags).toEqual(['formatting'])
@@ -663,7 +664,7 @@ describe('IMPORT.2: apply', () => {
     // a session proposal file left by another process: its text exists nowhere
     mkdirSync(host.root, { recursive: true })
     writeFileSync(proposalPath(host), JSON.stringify({ version: 1, kind: 'session', created: 'x', sessionId: SID, chunks: [{ heading: 'memory 1', sha256: 'a'.repeat(64), verdict: 'allow', rules: [] }] }))
-    const reply = (await host.command('mnemosyne-import', 'apply')).text
+    const reply = (await host.command('hal-m-import', 'apply')).text
     expect(reply).toContain('no longer in this Claude Code process')
     expect(backups(host)).toHaveLength(0)
     expect(rows(host)).toHaveLength(0)

@@ -229,8 +229,15 @@ function rig(on: On, options: RigOptions = {}) {
     toasts: [] as string[],
   }
   const installed = options.installed !== false
-  on('env.get', () => ({ value: '/home/u' }))
-  on('fs.stat', () => (installed ? { value: { kind: 'file' } } : { deny: 'ENOENT' }) as never)
+  // Only HOME is set: the hook also reads OS, HALM_NO_MIGRATE, HALM_ACTIVITY_APPEND and their MNEMOSYNE_ spellings, which stay unset.
+  on('env.get', (_$, e) => ({ value: (e as { name: string }).name === 'HOME' ? '/home/u' : undefined }) as never)
+  // The data root: the old folder is a real folder and ~/.hal-m does not exist (state old-only), so the root stays ROOT.
+  on('fs.stat', (_$, e) => {
+    const path = (e as { path: string }).path
+    if (path === ROOT) return { value: { kind: 'dir' } } as never
+    if (path === '/home/u/.hal-m') return { deny: 'ENOENT' } as never
+    return (installed ? { value: { kind: 'file' } } : { deny: 'ENOENT' }) as never
+  })
   on('fs.read', (_$, e) => (e.path === PACKAGE && installed ? { value: JSON.stringify({ name: '@oh-my-pi/pi-mnemopi', version: ENGINE_BUILD }) } : options.files?.[e.path] !== undefined ? { value: options.files[e.path] } : { deny: 'ENOENT' }) as never)
   on('session.id', () => ({ value: state.sessionId }))
   on('session.repo', () => ({ value: { root: '/work/scratch', remote: null } }) as never)

@@ -10,7 +10,7 @@
 //
 // Import this file BEFORE anything that imports hooks/register.ts.
 import { mock } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ENGINE_BUILD } from '../../hooks/engine-build'
@@ -61,13 +61,49 @@ export type HostOptions = {
   sharedWith?: { home: string }
   /** What $.session.repo() answers (default: /work/My Repo with no remote; null: a plain folder at /work/My Repo). */
   repo?: { root: string; remote?: string | null } | null
+  /**
+   * Which data root the temp home holds (hooks/names.ts state table): 'old' (default) makes only the 0.37 folder
+   * home/.claude/mnemosyne (state old-only, the root stays there); 'new' makes only home/.hal-m (state new-only).
+   */
+  layout?: 'old' | 'new'
+}
+
+// The host's $.fs.stat over the real disk: kind follows a link, isLink does not; realPath only with { resolve: true }.
+// A path that is not there (or a dangling link) rejects with ENOENT, as the host's does.
+const kindOf = (stat: { isDirectory(): boolean; isFile(): boolean }) => (stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : 'other')
+function hostStat(path: string, init?: { resolve?: boolean }) {
+  const link = lstatSync(path)
+  const stat = statSync(path)
+  return {
+    kind: kindOf(stat),
+    isLink: link.isSymbolicLink(),
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    ...(init?.resolve === true ? { realPath: realpathSync(path) } : {}),
+  }
+}
+// The host's $.fs.list: one entry per name; a dangling link is listed as a link of kind 'other'.
+function hostList(path: string) {
+  return readdirSync(path).map(name => {
+    const link = lstatSync(join(path, name))
+    let stat: { isDirectory(): boolean; isFile(): boolean; size: number; mtimeMs: number } = link
+    try {
+      stat = statSync(join(path, name))
+    } catch {
+      // dangling: keep the link's own facts
+    }
+    return { name, kind: link.isSymbolicLink() && stat === link ? 'other' : kindOf(stat), size: stat.size, mtimeMs: stat.mtimeMs, isLink: link.isSymbolicLink() }
+  })
 }
 
 export type Host = Awaited<ReturnType<typeof makeHost>>
 
 export async function makeHost(opts: HostOptions = {}) {
   const home = opts.sharedWith?.home ?? mkdtempSync(join(tmpdir(), 'mnemosyne-host-'))
-  const root = join(home, '.claude', 'mnemosyne')
+  const layout =
+    opts.layout ??
+    (opts.sharedWith !== undefined && existsSync(join(home, '.hal-m')) && !existsSync(join(home, '.claude', 'mnemosyne')) ? 'new' : 'old')
+  const root = layout === 'new' ? join(home, '.hal-m') : join(home, '.claude', 'mnemosyne')
   const store = join(root, 'store')
   const pendingDir = join(root, 'knowledge-pending')
   const scope = join(root, 'engine', 'node_modules', '@oh-my-pi')
@@ -87,7 +123,7 @@ export async function makeHost(opts: HostOptions = {}) {
   const runs: Ran[] = []
   const model: { request: ModelRequest; startedAt: number; endedAt?: number }[] = []
   const handlers: Handler[] = []
-  const env: Record<string, string> = { HOME: home, MNEMOSYNE_ACTIVITY_APPEND: 'await', ...(opts.env ?? {}) }
+  const env: Record<string, string> = { HOME: home, HALM_ACTIVITY_APPEND: 'await', ...(opts.env ?? {}) }
 
   async function runProcess(argv: readonly string[], init: { stdin?: string; env?: Record<string, string>; timeoutMs?: number } | undefined) {
     const record: Ran = { argv, stdin: init?.stdin, env: init?.env, startedAt: Date.now() }
@@ -109,8 +145,9 @@ export async function makeHost(opts: HostOptions = {}) {
 
   const $ = {
     atoms: new Map<string, unknown>(),
-    plugin: { root: ROOT, name: 'mnemosyne' },
-    env: { get: async (name: string) => env[name] ?? '' },
+    plugin: { root: ROOT, name: 'hal-m' },
+    // Only the names this host knows; anything else is unset (undefined), as in the host.
+    env: { get: async (name: string): Promise<string | undefined> => env[name] },
     session: {
       id: async () => sessionId,
       repo: async () => (opts.repo === undefined ? { root: '/work/My Repo' } : opts.repo),
@@ -118,10 +155,8 @@ export async function makeHost(opts: HostOptions = {}) {
     },
     fs: {
       read: async (path: string) => readFileSync(path, 'utf8'),
-      stat: async (path: string) => {
-        const stat = statSync(path)
-        return { kind: stat.isDirectory() ? 'directory' : 'file' }
-      },
+      stat: async (path: string, init?: { resolve?: boolean }) => hostStat(path, init),
+      list: async (path: string) => hostList(path),
     },
     process: {
       run: (argv: readonly string[], init?: { stdin?: string; env?: Record<string, string>; timeoutMs?: number }) => runProcess(argv, init),
@@ -179,7 +214,7 @@ export async function makeHost(opts: HostOptions = {}) {
     /** A memory tool call as the host delivers it. */
     tool: async (name: string, input: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => {
       const fn = find('tool.call')
-      return (await fn($, { tool: `mcp__mnemosyne__${name}`, ...input, ...extra })) as { result?: string; deny?: string }
+      return (await fn($, { tool: `mcp__hal-m__${name}`, ...input, ...extra })) as { result?: string; deny?: string }
     },
     /** A prompt submit, with the identity next. */
     prompt: async (text: string) => {
@@ -204,9 +239,9 @@ export async function makeHost(opts: HostOptions = {}) {
       const fn = find('session.start')
       return fn($, { cwd: '/work/My Repo', surface: null, isInteractive: false }, passThrough())
     },
-    /** A slash command: /mnemosyne-knowledge [apply]. */
+    /** A slash command: /hal-m-knowledge [apply] (or its 0.37 alias /mnemosyne-knowledge: one hook matches both). */
     command: async (command: string, args = '', signal?: AbortSignal) => {
-      const fn = find('command.run', filter => String(filter?.command) === command)
+      const fn = find('command.run', filter => [filter?.command].flat().map(String).includes(command))
       return (await fn($, { command, args }, passThrough(signal))) as { text: string }
     },
     /** The activity lines written so far. */

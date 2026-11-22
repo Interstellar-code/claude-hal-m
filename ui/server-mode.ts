@@ -65,12 +65,16 @@ export function pluginSettingsText(url: string, key: string): string {
   return `serverUrl: ${url}\nserverKey: ${key}`
 }
 
-/** The MCP server entry for Cursor or Claude Desktop, pretty-printed. */
+/**
+ * The MCP server entry for Cursor or Claude Desktop, pretty-printed. Its key is 'hal-m-memory', never 'hal-m', so
+ * another client's tools never share the plugin's mcp__hal-m__ prefix (F-m4).
+ */
+export const MCP_SERVER_KEY = 'hal-m-memory'
 export function mcpJson(url: string, key: string): string {
-  return JSON.stringify({ mcpServers: { mnemosyne: { type: 'http', url: `${url}/mcp`, headers: { Authorization: `Bearer ${key}` } } } }, null, 2)
+  return JSON.stringify({ mcpServers: { [MCP_SERVER_KEY]: { type: 'http', url: `${url}/mcp`, headers: { Authorization: `Bearer ${key}` } } } }, null, 2)
 }
 
-export const PLUGIN_NOTE = 'These go into the HAL-M plugin\'s settings in Claude Code: /plugin → mnemosyne → configure.'
+export const PLUGIN_NOTE = 'These go into the HAL-M plugin\'s settings in Claude Code: /plugin → hal-m → configure.'
 
 // ---- The Settings card ----
 

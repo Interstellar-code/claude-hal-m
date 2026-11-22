@@ -10,20 +10,27 @@ import {
   checkEngineBody,
   checkMemoriesBody,
   cleanKeyName,
+  clearCookies,
+  COOKIE_NAMES,
   cookieValue,
   deviceKeys,
   loginLimiter,
   passwordMatches,
   pluginActivity,
+  proxyEnv,
   publicUrlOf,
+  revokeSessions,
   runUpkeep,
   serverModeFromEnv,
+  sessionCookie,
   sessions,
+  sessionTokens,
+  signedIn,
   storeOwners,
   viaHttps,
 } from '../../ui/remote'
 import type { ServerMode } from '../../ui/remote'
-import { startServer } from '../../ui/server'
+import { daemonEnv, ownerHeader, startServer } from '../../ui/server'
 import type { Started } from '../../ui/server'
 import { engineCall, ROOT, tempDir, toolCall } from './helpers'
 
@@ -45,6 +52,65 @@ describe('server mode settings', () => {
     expect(mode.secureCookie).toBe('off')
     expect(serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD, MNEMOSYNE_PUBLIC_URL: 'https://a.ts.net/path' })).toBeInstanceOf(Error)
     expect(serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD, MNEMOSYNE_PORT: '99999' })).toBeInstanceOf(Error)
+  })
+  test('HAL-M names: HALM_ wins over MNEMOSYNE_, an empty new name falls back to the old, old names alone still work', () => {
+    const both = serverModeFromEnv({
+      HALM_UI_PASSWORD: PASSWORD,
+      MNEMOSYNE_UI_PASSWORD: 'old password here',
+      HALM_PORT: '9001',
+      MNEMOSYNE_PORT: '9002',
+      HALM_BIND: '127.0.0.1',
+      MNEMOSYNE_BIND: '10.0.0.1',
+      HALM_HOSTS: 'new.ts.net',
+      MNEMOSYNE_HOSTS: 'old.ts.net',
+      HALM_PUBLIC_URL: 'https://new.ts.net',
+      MNEMOSYNE_PUBLIC_URL: 'https://old.ts.net',
+      HALM_SECURE_COOKIE: 'on',
+      MNEMOSYNE_SECURE_COOKIE: 'off',
+      HALM_EXPIRE_UNUSED_DAYS: '0',
+      MNEMOSYNE_EXPIRE_UNUSED_DAYS: '30',
+      HALM_MODEL_CACHE: '/new/cache',
+      MNEMOSYNE_MODEL_CACHE: '/old/cache',
+    }) as ServerMode
+    expect(both).toMatchObject({ password: PASSWORD, port: 9001, bind: '127.0.0.1', hosts: ['new.ts.net'], publicUrl: 'https://new.ts.net', secureCookie: 'on', expire: { mode: 'off' }, modelCacheDir: '/new/cache' })
+    // Compose passes an unset variable as an empty string: an empty new name means "not set".
+    const empty = serverModeFromEnv({
+      HALM_UI_PASSWORD: '',
+      MNEMOSYNE_UI_PASSWORD: PASSWORD,
+      HALM_PORT: '',
+      MNEMOSYNE_PORT: '9003',
+      HALM_BIND: '',
+      MNEMOSYNE_BIND: '127.0.0.1',
+      HALM_SECURE_COOKIE: '',
+      MNEMOSYNE_SECURE_COOKIE: 'off',
+    }) as ServerMode
+    expect(empty).toMatchObject({ password: PASSWORD, port: 9003, bind: '127.0.0.1', secureCookie: 'off' })
+    const old = serverModeFromEnv({ MNEMOSYNE_UI_PASSWORD: PASSWORD, MNEMOSYNE_BIND: '127.0.0.1', MNEMOSYNE_PORT: '9004' }) as ServerMode
+    expect(old).toMatchObject({ password: PASSWORD, port: 9004, bind: '127.0.0.1', secureCookie: 'auto' })
+    const fresh = serverModeFromEnv({ HALM_UI_PASSWORD: PASSWORD }) as ServerMode
+    expect(fresh).toMatchObject({ port: 8787, bind: '0.0.0.0', secureCookie: 'auto', hosts: [], publicUrl: '' })
+  })
+  test('messages name the new variable', () => {
+    expect((serverModeFromEnv({}) as Error).message).toContain('HALM_UI_PASSWORD (or MNEMOSYNE_UI_PASSWORD)')
+    expect((serverModeFromEnv({ HALM_UI_PASSWORD: PASSWORD, HALM_PORT: 'x' }) as Error).message).toContain('HALM_PORT')
+    expect((serverModeFromEnv({ HALM_UI_PASSWORD: PASSWORD, HALM_PUBLIC_URL: 'https://a.ts.net/p' }) as Error).message).toContain('HALM_PUBLIC_URL')
+    expect((serverModeFromEnv({ HALM_UI_PASSWORD: PASSWORD, HALM_EXPIRE_UNUSED_DAYS: '5' }) as Error).message).toContain('HALM_EXPIRE_UNUSED_DAYS')
+  })
+  test('server-mode env: the activity log defaults under the root, empty keeps it off, only the HALM_ name is left', () => {
+    expect(daemonEnv({ HALM_ROOT: '/data' }).HALM_ACTIVITY_LOG).toBe(join('/data', 'activity.jsonl'))
+    expect(daemonEnv({ MNEMOSYNE_ROOT: '/data' }).HALM_ACTIVITY_LOG).toBe(join('/data', 'activity.jsonl'))
+    const old = daemonEnv({ MNEMOSYNE_ROOT: '/data', MNEMOSYNE_ACTIVITY_LOG: '/logs/a.jsonl' })
+    expect(old.HALM_ACTIVITY_LOG).toBe('/logs/a.jsonl')
+    expect(old.MNEMOSYNE_ACTIVITY_LOG).toBeUndefined()
+    const off = daemonEnv({ HALM_ROOT: '/data', HALM_ACTIVITY_LOG: '', MNEMOSYNE_ACTIVITY_LOG: '/logs/a.jsonl' })
+    expect(off.HALM_ACTIVITY_LOG).toBe('')
+    expect(off.MNEMOSYNE_ACTIVITY_LOG).toBeUndefined()
+  })
+  test('the /mcp proxy env sets HALM_ names and drops inherited MNEMOSYNE_ ones', () => {
+    const ctx = { root: '/r', store: '/s', cli: '/c.ts', pluginRoot: '/p', activityLog: '/r/activity.jsonl', embeddings: false, modelCacheDir: undefined }
+    const env = proxyEnv(ctx, 'global', { PATH: '/bin', MNEMOSYNE_ROOT: '/stale', MNEMOSYNE_CLI: '/stale.ts', MNEMOSYNE_ACTIVITY_LOG: '/stale.jsonl', MNEMOSYNE_GUARD_MODE: 'off' })
+    expect(env).toMatchObject({ PATH: '/bin', HALM_ROOT: '/r', HALM_CLI: '/c.ts', HALM_ACTIVITY_LOG: '/r/activity.jsonl', HALM_GUARD_MODE: 'strict', HALM_VOCABULARY: join('/r', 'vocabulary.json') })
+    for (const name of ['ROOT', 'CLI', 'ACTIVITY_LOG', 'GUARD_MODE', 'VOCABULARY']) expect(env[`MNEMOSYNE_${name}`]).toBeUndefined()
   })
 })
 
@@ -88,6 +154,51 @@ describe('sessions and passwords', () => {
   test('cookie parsing', () => {
     expect(cookieValue('a=1; mnemosyne_session=xyz; b=2', 'mnemosyne_session')).toBe('xyz')
     expect(cookieValue(null, 'x')).toBeUndefined()
+  })
+  test('four cookie names: a new session gets the new name; any of the four signs in', () => {
+    expect([...COOKIE_NAMES]).toEqual(['__Host-halm_session', 'halm_session', '__Host-mnemosyne_session', 'mnemosyne_session'])
+    expect(sessionCookie('v', false).startsWith('halm_session=v;')).toBe(true)
+    expect(sessionCookie('v', true).startsWith('__Host-halm_session=v;')).toBe(true)
+    expect(sessionCookie('v', true)).toContain('; Secure')
+    const store = sessions(secret, PASSWORD)
+    const value = store.issue()
+    const req = (cookie: string) => new Request('http://h/', { headers: { cookie } })
+    for (const name of COOKIE_NAMES) expect(signedIn(req(`other=1; ${name}=${value}`), store)).toBe(true)
+    expect(signedIn(req(`halm_session=garbage; mnemosyne_session=${value}`), store)).toBe(true)
+    expect(signedIn(req('halm_session=garbage'), store)).toBe(false)
+    expect(sessionTokens(req(`halm_session=a; mnemosyne_session=b; __Host-halm_session=a`))).toEqual(['a', 'b'])
+  })
+  test('clearCookies expires all four, each __Host- one with Secure', () => {
+    const cleared = clearCookies()
+    expect(cleared.length).toBe(4)
+    for (const name of COOKIE_NAMES) {
+      const line = cleared.find(c => c.startsWith(`${name}=;`))
+      expect(line).toBeDefined()
+      expect(line).toContain('Max-Age=0')
+      expect(line).toContain('Path=/')
+      expect(line?.includes('; Secure')).toBe(name.startsWith('__Host-'))
+    }
+  })
+  test('revoke: a signed-out token is refused, whichever cookie carried it; others stay valid', () => {
+    const store = sessions(secret, PASSWORD)
+    const a = store.issue(Date.now())
+    const b = store.issue(Date.now() + 5)
+    const req = new Request('http://h/', { headers: { cookie: `mnemosyne_session=${a}` } })
+    expect(revokeSessions(req, store)).toBe(1)
+    expect(store.valid(a)).toBe(false)
+    expect(store.valid(b)).toBe(true)
+    expect(store.revoke('garbage')).toBe(false)
+  })
+})
+
+describe('owner header', () => {
+  test('HAL-M-Owner, then Mnemosyne-Owner, then global; blank counts as missing', () => {
+    const req = (headers: Record<string, string>) => new Request('http://h/mcp', { headers })
+    expect(ownerHeader(req({}))).toBe('global')
+    expect(ownerHeader(req({ 'Mnemosyne-Owner': 'project-a-1' }))).toBe('project-a-1')
+    expect(ownerHeader(req({ 'hal-m-owner': ' project-b-2 ' }))).toBe('project-b-2')
+    expect(ownerHeader(req({ 'HAL-M-Owner': 'project-b-2', 'Mnemosyne-Owner': 'project-a-1' }))).toBe('project-b-2')
+    expect(ownerHeader(req({ 'HAL-M-Owner': '  ', 'Mnemosyne-Owner': 'project-a-1' }))).toBe('project-a-1')
   })
 })
 
@@ -284,5 +395,40 @@ describe('the server, end to end', () => {
     const response = await fetch(`${base}/api/logout`, { method: 'POST', headers: origin() })
     expect(response.status).toBe(200)
     expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
+  })
+
+  test('a new sign-in sets only the new cookie name', async () => {
+    const cookie = await signIn()
+    expect(cookie.startsWith('halm_session=')).toBe(true)
+  })
+
+  test('sign out with an old-name cookie revokes that session and clears all four names', async () => {
+    const value = (await signIn()).split('=').slice(1).join('=')
+    const old = `mnemosyne_session=${value}`
+    expect((await json(await fetch(`${base}/api/session`, { headers: { Cookie: old } }))).signedIn).toBe(true)
+    expect((await fetch(`${base}/api/memories`, { headers: { Cookie: old } })).status).toBe(200)
+    const response = await fetch(`${base}/api/logout`, { method: 'POST', headers: { ...origin(), Cookie: old } })
+    expect(response.status).toBe(200)
+    const set = response.headers.getSetCookie()
+    for (const name of COOKIE_NAMES) expect(set.some(line => line.startsWith(`${name}=;`) && line.includes('Max-Age=0'))).toBe(true)
+    // The token is refused now under any name.
+    expect((await fetch(`${base}/api/memories`, { headers: { Cookie: old } })).status).toBe(401)
+    expect((await fetch(`${base}/api/memories`, { headers: { Cookie: `halm_session=${value}` } })).status).toBe(401)
+  })
+
+  test('/mcp owner header: HAL-M-Owner first, then Mnemosyne-Owner; any case', async () => {
+    const cookie = await signIn()
+    const made = await json(await fetch(`${base}/api/keys/create`, { method: 'POST', headers: { ...origin(), Cookie: cookie }, body: JSON.stringify({ name: 'Owner test' }) }))
+    const init = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+    const post = (headers: Record<string, string>) => fetch(`${base}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${made.key}`, 'Content-Type': 'application/json', ...headers }, body: init })
+    const badNew = await post({ 'HAL-M-Owner': 'someone' })
+    expect(badNew.status).toBe(400)
+    expect((await json(badNew)).error).toContain('HAL-M-Owner must be')
+    expect((await post({ 'Mnemosyne-Owner': 'someone' })).status).toBe(400)
+    expect((await post({ 'hal-m-owner': 'global' })).status).toBe(200)
+    expect((await post({ 'Mnemosyne-Owner': 'project-x-abc123' })).status).toBe(200)
+    // The new header wins over the old one.
+    expect((await post({ 'HAL-M-Owner': 'global', 'Mnemosyne-Owner': 'someone' })).status).toBe(200)
+    expect((await post({ 'HAL-M-Owner': 'someone', 'Mnemosyne-Owner': 'global' })).status).toBe(400)
   })
 })

@@ -7,10 +7,14 @@
 
 export type EngineRequest = readonly [name: string, args: Record<string, unknown>]
 
-// Where the local model lives, relative to $HOME: the plugin pins PI_CONFIG_DIR
-// and the engine reads it directly (never through pi-utils' XDG/profile
-// resolver), so the fastembed cache is <PI_CONFIG_DIR>/cache/fastembed =
-// <HOME>/.claude/mnemosyne/model-cache/cache/fastembed (EMB.1, H1b).
+// Where the local model lives: the plugin pins PI_CONFIG_DIR and the engine
+// reads it directly (never through pi-utils' XDG/profile resolver), so the
+// fastembed cache is <PI_CONFIG_DIR>/cache/fastembed (EMB.1, H1b); a relative
+// PI_CONFIG_DIR is taken from $HOME. EMBEDDINGS_CACHE_DIR is the old root's
+// (0.37's) cache, relative to $HOME: <HOME>/.claude/mnemosyne/model-cache. It is
+// used, with these exact bytes, only while the data root is the 0.37 folder
+// (hooks/register.ts, bin/install-engine.ts pluginModelCacheDir); every other
+// root uses modelCacheDir(root) from hooks/names.ts (<root>/model-cache).
 export const EMBEDDINGS_MODEL = 'BAAI/bge-small-en-v1.5'
 export const EMBEDDINGS_CACHE_DIR = '.claude/mnemosyne/model-cache'
 
@@ -25,9 +29,10 @@ export type EngineEnvOptions = {
   // marker and the model files are there. Otherwise the engine keeps embeddings
   // off so it never downloads the model behind the user's back (EMB.2.a4).
   embeddings?: boolean
-  // PI_CONFIG_DIR: none means EMBEDDINGS_CACHE_DIR (relative to $HOME, the
-  // plugin's); a standalone root passes its absolute <root>/model-cache, which
-  // the engine takes as is (<dir>/cache/fastembed).
+  // PI_CONFIG_DIR: none means EMBEDDINGS_CACHE_DIR (relative to $HOME, the old
+  // root's cache); the plugin passes modelCacheDir(root) for any other root, and
+  // a standalone root its absolute <root>/model-cache, which the engine takes as
+  // is (<dir>/cache/fastembed).
   modelCacheDir?: string
 }
 
@@ -90,7 +95,7 @@ export function engineEnv(store: string, owner: string, options: EngineEnvOption
     MNEMOPI_FTS_WEIGHT: String(weights.keyword),
     MNEMOPI_IMPORTANCE_WEIGHT: String(weights.importance),
     // On only when the caller proved the model is downloaded. Off blocks the
-    // engine's lazy model download outside /mnemosyne-setup; on clears an
+    // engine's lazy model download outside /hal-m-setup; on clears an
     // inherited MNEMOPI_NO_EMBEDDINGS (empty counts as unset in the engine).
     MNEMOPI_NO_EMBEDDINGS: embeddings ? '' : '1',
   }

@@ -4,17 +4,17 @@
 // the real store; the stub writes only the temp HOME's settings.json.
 import { afterAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { configFromEnv, startServer } from '../../ui/server'
 import type { Started } from '../../ui/server'
-import { ENGINE_TOOLS, GROUPS, SECRET_RULE_NAMES } from '../../ui/settings-routes'
+import { DEFAULT_MEMORY_DIR, OLD_DEFAULT_MEMORY_DIR, OLD_PLUGIN_ID, PLUGIN_ID } from '../../hooks/names'
+import { backupError, ENGINE_TOOLS, GROUPS, SECRET_RULE_NAMES } from '../../ui/settings-routes'
 import type { SettingsDeps } from '../../ui/settings-routes'
 import { ROOT, tempDir } from './helpers'
 
 const CLI = join(ROOT, 'engine', 'src', 'cli.ts')
 const STUB = join(ROOT, 'tests', 'bun', 'fixtures', 'claude-stub.ts')
-const PLUGIN_ID = 'mnemosyne@mnemosyne'
 
 type World = {
   dir: string
@@ -39,19 +39,28 @@ afterAll(() => {
   for (const dispose of worlds) dispose()
 })
 
-/** A server on a temp root with the stub CLI. `mode` and `extra` go to the stub; `noPluginId` is a --plugin-dir install. */
-async function boot(options: { mode?: string; extra?: object; noPluginId?: boolean; settings?: SettingsDeps; seed?: boolean; started?: Record<string, string> } = {}): Promise<World> {
+/**
+ * A server on a temp root with the stub CLI. `mode` and `extra` go to the stub; `noPluginId` is a --plugin-dir install;
+ * `pluginId` installs under another id; `options` are the seeded plugin options; `rootLink` makes the root a link to a
+ * real folder beside it (real-root).
+ */
+async function boot(options: { mode?: string; extra?: object; noPluginId?: boolean; pluginId?: string; options?: Record<string, string>; rootLink?: boolean; settings?: SettingsDeps; seed?: boolean; started?: Record<string, string> } = {}): Promise<World> {
   const temp = tempDir('settings-routes')
   const dir = temp.dir
   const root = join(dir, 'root')
   const store = join(root, 'store')
   const home = join(dir, 'home')
+  const pluginId = options.pluginId ?? PLUGIN_ID
+  if (options.rootLink) {
+    mkdirSync(join(dir, 'real-root'), { recursive: true })
+    symlinkSync(join(dir, 'real-root'), root, 'dir')
+  }
   mkdirSync(store, { recursive: true })
   mkdirSync(join(home, '.claude'), { recursive: true })
   const settingsFile = join(home, '.claude', 'settings.json')
   if (options.seed !== false) {
     // The temp HOME's settings.json holds other keys the CLI must leave alone.
-    writeFileSync(settingsFile, `${JSON.stringify({ permissions: { allow: ['Bash(ls)'] }, pluginConfigs: { [PLUGIN_ID]: { options: { guardMode: 'strict', memoryDir: '/tmp/somewhere' } } } }, null, 2)}\n`)
+    writeFileSync(settingsFile, `${JSON.stringify({ permissions: { allow: ['Bash(ls)'] }, pluginConfigs: { [pluginId]: { options: options.options ?? { guardMode: 'strict', memoryDir: '/tmp/somewhere' } } } }, null, 2)}\n`)
   }
   const stubLog = join(dir, 'stub-calls.jsonl')
   const claude = join(dir, 'claude')
@@ -71,7 +80,7 @@ async function boot(options: { mode?: string; extra?: object; noPluginId?: boole
     process.env[key] = value
   }
   const started = await startServer(
-    { root, store, cli: CLI, activityLog: activity, pluginRoot: ROOT, ...(options.noPluginId ? {} : { pluginId: PLUGIN_ID }), claudeCli: claude },
+    { root, store, cli: CLI, activityLog: activity, pluginRoot: ROOT, ...(options.noPluginId ? {} : { pluginId }), claudeCli: claude },
     { settings: { env, ...options.settings } },
   )
   worlds.push(() => {
@@ -230,6 +239,8 @@ describe('the server takes the plugin id and the CLI from its environment', () =
     const base = { MNEMOSYNE_ROOT: '/r', MNEMOSYNE_STORE: '/r/store' }
     expect(configFromEnv({ ...base, MNEMOSYNE_PLUGIN_ID: PLUGIN_ID, MNEMOSYNE_CLAUDE_CLI: '/bin/claude' })).toMatchObject({ pluginId: PLUGIN_ID, claudeCli: '/bin/claude' })
     expect(configFromEnv({ ...base, MNEMOSYNE_PLUGIN_ID: '' }).pluginId).toBeUndefined()
+    // The new names win; the old ones are the fallback.
+    expect(configFromEnv({ ...base, HALM_PLUGIN_ID: PLUGIN_ID, MNEMOSYNE_PLUGIN_ID: OLD_PLUGIN_ID, HALM_CLAUDE_CLI: '/bin/new', MNEMOSYNE_CLAUDE_CLI: '/bin/old' })).toMatchObject({ pluginId: PLUGIN_ID, claudeCli: '/bin/new' })
     expect(configFromEnv(base).claudeCli).toBeUndefined()
   })
 })
@@ -421,6 +432,9 @@ describe('POST /api/settings/update: plugin options go through the CLI only', ()
       ...(process.platform === 'win32' ? [] : ['C:/foo', 'c:\\foo']),
       '~/.claude/mnemosyne/Engine/s',
       '~/.claude/mnemosyne/engine.next/s',
+      // The new root's spelling is guarded too (it may be a link to the old one).
+      '~/.hal-m/engine/s',
+      join(world.home, '.hal-m', 'Engine.next', 's'),
       join(world.root, 'ENGINE.old', 's'),
     ]
     for (const value of refusedPaths) {
@@ -488,7 +502,7 @@ describe('POST /api/settings/reset', () => {
     const refused = await world.post('/api/settings/reset', { id: 'memoryDir' })
     expect(refused.status).toBe(400)
     expect(refused.body.needsConfirm).toBe(true)
-    const ok = await world.post('/api/settings/reset', { id: 'memoryDir', confirm: '~/.claude/mnemosyne/store' })
+    const ok = await world.post('/api/settings/reset', { id: 'memoryDir', confirm: DEFAULT_MEMORY_DIR })
     expect(ok.status).toBe(200)
   })
 
@@ -640,5 +654,111 @@ describe('POST /api/backup', () => {
     expect((await world.post('/api/backup', { store: '/etc' })).status).toBe(400)
     expect((await world.post('/api/backup', 'nope')).status).toBe(400)
     expect(existsSync(join(world.root, 'backups'))).toBe(false)
+  })
+})
+
+describe('HAL-M names: old and new spellings (plan 3.2, F-M4, F-M5, F-m3)', () => {
+  test('a stored memoryDir holding either default literal, or nothing, shows as the default, not an override', async () => {
+    for (const stored of [OLD_DEFAULT_MEMORY_DIR, DEFAULT_MEMORY_DIR, `${OLD_DEFAULT_MEMORY_DIR}/`, '']) {
+      const world = await boot({ options: { guardMode: 'strict', memoryDir: stored } })
+      expect([stored, await world.row('memoryDir')]).toMatchObject([stored, { configured: false, value: DEFAULT_MEMORY_DIR, default: DEFAULT_MEMORY_DIR }])
+    }
+    // A real custom path is still an override.
+    const custom = await boot()
+    expect(await custom.row('memoryDir')).toMatchObject({ configured: true, value: '/tmp/somewhere' })
+    // Five boots, each starting the claude stub: well over the default 5 s on a loaded machine.
+  }, 20_000)
+
+  test('saving the old default literal reads back as the default, not as a mismatch; a reset from it changes nothing', async () => {
+    const world = await boot()
+    const saved = await world.post('/api/settings/update', { id: 'memoryDir', value: OLD_DEFAULT_MEMORY_DIR, confirm: OLD_DEFAULT_MEMORY_DIR })
+    expect(saved.status).toBe(200)
+    expect(saved.body).toMatchObject({ ok: true, value: DEFAULT_MEMORY_DIR, default: DEFAULT_MEMORY_DIR, changed: true })
+    expect(JSON.parse(readFileSync(world.settingsFile, 'utf8')).pluginConfigs[PLUGIN_ID].options.memoryDir).toBe(OLD_DEFAULT_MEMORY_DIR)
+    const reset = await world.post('/api/settings/reset', { id: 'memoryDir', confirm: DEFAULT_MEMORY_DIR })
+    expect(reset.body).toMatchObject({ ok: true, value: DEFAULT_MEMORY_DIR, changed: false })
+  })
+
+  test('the store may not sit in the engine folder of the old root, the new root, or a linked root (real paths)', async () => {
+    const world = await boot()
+    const refuse = async (value: string) => {
+      const result = await world.post('/api/settings/update', { id: 'memoryDir', value, confirm: value })
+      expect([value, result.status, result.body.error]).toEqual([value, 400, 'memoryDir: must not be inside the engine folder'])
+    }
+    for (const value of [join(world.home, '.claude', 'mnemosyne', 'engine', 's'), '~/.claude/mnemosyne/engine.old/s', join(world.home, '.hal-m', 'engine', 's'), '~/.hal-m/engine.next/s']) await refuse(value)
+    // ~/.hal-m is a link to a folder elsewhere: that folder's engine is the new root's engine, by real path.
+    const elsewhere = join(world.dir, 'elsewhere-root')
+    mkdirSync(elsewhere, { recursive: true })
+    symlinkSync(elsewhere, join(world.home, '.hal-m'), 'dir')
+    await refuse(join(elsewhere, 'engine', 's'))
+    await refuse(join(elsewhere, 'ENGINE.old'))
+    // ~/.claude/mnemosyne as a link (the old spelling pointing at a moved root) is followed too.
+    const moved = join(world.dir, 'moved-root')
+    mkdirSync(moved, { recursive: true })
+    symlinkSync(moved, join(world.home, '.claude', 'mnemosyne'), 'dir')
+    await refuse(join(moved, 'engine.next', 'deep', 's'))
+    // A sibling of the engine folder in the same root is fine.
+    const fine = join(elsewhere, 'store')
+    expect((await world.post('/api/settings/update', { id: 'memoryDir', value: fine, confirm: fine })).status).toBe(200)
+  })
+
+  test('the store may not sit in the engine folder of the server\'s root reached through its real path', async () => {
+    const world = await boot({ rootLink: true })
+    const real = join(world.dir, 'real-root', 'engine', 's')
+    const refused = await world.post('/api/settings/update', { id: 'memoryDir', value: real, confirm: real })
+    expect(refused.status).toBe(400)
+    expect(refused.body.error).toContain('engine folder')
+    // And through a link that points into the engine folder.
+    mkdirSync(join(world.dir, 'real-root', 'engine'), { recursive: true })
+    symlinkSync(join(world.dir, 'real-root', 'engine'), join(world.dir, 'into-engine'), 'dir')
+    const viaLink = join(world.dir, 'into-engine', 's')
+    expect((await world.post('/api/settings/update', { id: 'memoryDir', value: viaLink, confirm: viaLink })).status).toBe(400)
+  })
+
+  test('the wrapper fact holds for hal-m-mcp or the old mnemosyne-mcp, either platform\'s file', async () => {
+    const world = await boot()
+    const wrapper = async () => (await world.row('setup.status')).value.wrapper
+    expect(await wrapper()).toBe(false)
+    const bin = join(world.root, 'bin')
+    mkdirSync(bin, { recursive: true })
+    for (const name of ['mnemosyne-mcp', 'mnemosyne-mcp.cmd', 'hal-m-mcp', 'hal-m-mcp.cmd']) {
+      const file = join(bin, name)
+      writeFileSync(file, '#!/bin/sh\n')
+      expect([name, await wrapper()]).toEqual([name, true])
+      rmSync(file, { force: true })
+    }
+    expect(await wrapper()).toBe(false)
+  })
+
+  test('the setup status help names /hal-m-setup', async () => {
+    const world = await boot()
+    expect((await world.row('setup.status')).help).toContain('/hal-m-setup')
+  })
+
+  test('the stub CLI answers for hal-m@hal-m and the old mnemosyne@mnemosyne; each keeps its own options', async () => {
+    const world = await boot({ pluginId: OLD_PLUGIN_ID })
+    expect((await world.get('/api/settings')).body.plugin).toEqual({ id: OLD_PLUGIN_ID, optionsEditable: true })
+    expect((await world.post('/api/settings/update', { id: 'guardMode', value: 'warn' })).status).toBe(200)
+    const settings = JSON.parse(readFileSync(world.settingsFile, 'utf8'))
+    expect(settings.pluginConfigs[OLD_PLUGIN_ID].options.guardMode).toBe('warn')
+    expect(settings.pluginConfigs[PLUGIN_ID]).toBeUndefined()
+    expect(world.stubCalls().every(call => call.argv[2] === OLD_PLUGIN_ID)).toBe(true)
+  })
+
+  test('a failed backup\'s reason loses a "mnemosyne ..." or "hal-m ..." prefix', () => {
+    expect(backupError('mnemosyne memories: there is no store database at /x to back up\n', 1)).toBe('there is no store database at /x to back up')
+    expect(backupError('hal-m memories: not enough disk space\n', 1)).toBe('not enough disk space')
+    expect(backupError('HAL-M import: broken', 1)).toBe('broken')
+    expect(backupError('something else: kept', 1)).toBe('something else: kept')
+    expect(backupError('', 3)).toBe('the backup exited with 3')
+  })
+
+  test('the extraction and embeddings the dashboard started with are read as HALM_* first, MNEMOSYNE_* second', async () => {
+    // The old names alone are covered by "says when the dashboard started with other extraction or embeddings values".
+    const world = await boot({ started: { HALM_EXTRACTION: 'sonnet', MNEMOSYNE_EXTRACTION: 'haiku', HALM_EMBEDDINGS: 'on', MNEMOSYNE_EMBEDDINGS: 'off' } })
+    // Started on sonnet (the new name wins over haiku), the default haiku needs a restart.
+    expect((await world.get('/api/settings')).body.restartNeeded).toEqual(['extractionModel'])
+    // Started on embeddings on (the new name wins over off): off needs a restart.
+    expect((await world.post('/api/settings/update', { id: 'embeddings', value: 'off' })).body.restartNeeded).toBe(true)
   })
 })

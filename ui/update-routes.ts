@@ -18,9 +18,12 @@
 // (takeHandoff), so the open page reloads into the new version. A run whose
 // updater died (its pid gone, or no pid a minute after the start) is reported
 // as failed (settle), so the button never waits 30 minutes on a dead start.
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { canonical, isInside } from '../bin/install-engine'
+import { nodeRootFs } from '../bin/migrate-root'
 import { compareVersions, FINAL_STATES, HANDOFF_FILE, latestReleaseTag, nextStatus, readStatus, REPO, type UpdateStatus } from '../bin/update'
+import { childEnv, commandName, newRootOf, oldRootOf, resolveRootSync } from '../hooks/names'
 
 export { HANDOFF_FILE }
 
@@ -65,11 +68,40 @@ export type UpdateDeps = {
 // UPDCC.1: how long `claude plugin update` may take (it clones or fetches the marketplace and copies the plugin).
 export const CLAUDE_UPDATE_TIMEOUT_MS = 5 * 60 * 1000
 
-/** UPDCC.1: whether `pluginRoot` is a Claude Code install: a version folder under <home>/.claude/plugins/cache. */
+/**
+ * The home folder whose default data root `root` is: <home>/.hal-m or the 0.37 <home>/.claude/mnemosyne,
+ * by the root's own spelling or by its real path (a link between the two spellings). Undefined for any
+ * other root (HALM_ROOT, a server's /data): no home can be told from it.
+ */
+export function homeOfRoot(root: string): string | undefined {
+  const fold = (path: string) => (process.platform === 'win32' ? path.replace(/\//g, '\\').toLowerCase() : path)
+  const given = resolve(root)
+  let real: string | undefined
+  try {
+    real = realpathSync(given)
+  } catch {
+    // not there: its spelling alone decides
+  }
+  for (const spelling of real === undefined || real === given ? [given] : [given, real]) {
+    for (const home of [dirname(spelling), dirname(dirname(spelling))]) {
+      if (fold(newRootOf(home)) === fold(spelling) || fold(oldRootOf(home)) === fold(spelling)) return home
+    }
+  }
+  return undefined
+}
+
+/** True when two paths name the same folder: their real paths (links followed, a missing tail kept as text) are equal. */
+export const samePath = (a: string, b: string) => canonical(a) === canonical(b)
+
+/**
+ * UPDCC.1: whether `pluginRoot` is a Claude Code install: a version folder under <home>/.claude/plugins/cache,
+ * the home told from the root (~/.hal-m or the 0.37 ~/.claude/mnemosyne, agy B2), real paths compared.
+ */
 export function claudeInstall(root: string, pluginRoot: string) {
-  const fold = (path: string) => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path))
-  const cache = join(dirname(resolve(root)), 'plugins', 'cache')
-  return fold(pluginRoot).startsWith(`${fold(cache)}${process.platform === 'win32' ? '\\' : '/'}`)
+  const home = homeOfRoot(root)
+  if (home === undefined) return false
+  const cache = join(home, '.claude', 'plugins', 'cache')
+  return isInside(pluginRoot, cache) && !samePath(pluginRoot, cache)
 }
 
 /** Runs the claude CLI, its output gathered, killed after CLAUDE_UPDATE_TIMEOUT_MS. */
@@ -108,7 +140,7 @@ const writePrivate = (file: string, value: unknown) => {
 /** The newest release and its engine build, from GitHub, within CHECK_TIMEOUT_MS; undefined on any failure. */
 export async function fetchLatest(fetcher: typeof fetch = fetch): Promise<Latest | undefined> {
   const signal = AbortSignal.timeout(CHECK_TIMEOUT_MS)
-  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'claude-hal-m-dashboard' }
+  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'hal-m-dashboard' }
   try {
     const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers, signal })
     if (!reply.ok) return undefined
@@ -164,12 +196,17 @@ export async function latestRelease(root: string, deps: UpdateDeps = {}, ask: { 
 /** Offered when the release is newer than the plugin this server runs. */
 export const updateAvailable = (current: string | null, latest: Latest | null) => latest !== null && current !== null && compareVersions(latest.plugin, current) > 0
 
-/** The home folder behind <root> when <root> is <home>/.claude/mnemosyne and this server runs from <root>/plugin; else undefined. */
+/**
+ * The home folder behind <root> when <root> is that home's default data root as T1's resolver picks it
+ * (~/.hal-m, the 0.37 ~/.claude/mnemosyne, or a link between them) and this server runs from <root>/plugin,
+ * all compared by real path (the runtime may hand the plugin folder in the other spelling); else undefined.
+ * bin/update.ts --home <home> then resolves the same folder.
+ */
 export function updaterHome(root: string, pluginRoot: string) {
-  const fold = (path: string) => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path))
-  const home = dirname(dirname(resolve(root)))
-  if (fold(join(home, '.claude', 'mnemosyne')) !== fold(root)) return undefined
-  if (fold(pluginRoot) !== fold(join(root, 'plugin'))) return undefined
+  const home = homeOfRoot(root)
+  if (home === undefined) return undefined
+  if (!samePath(resolveRootSync(nodeRootFs, home).root, root)) return undefined
+  if (!samePath(pluginRoot, join(root, 'plugin'))) return undefined
   if (!existsSync(join(pluginRoot, 'bin', 'update.ts'))) return undefined
   return home
 }
@@ -189,12 +226,13 @@ export function pidAlive(pid: number) {
  * updater is gone (its pid dead, no pid a minute after the start, or no change
  * for 30 minutes) is reported as failed, so the button does not sit on "starting".
  */
-export function settle(status: UpdateStatus | undefined, now: number, alive: (pid: number) => boolean = pidAlive): UpdateStatus | undefined {
+export function settle(status: UpdateStatus | undefined, now: number, alive: (pid: number) => boolean = pidAlive, log?: string): UpdateStatus | undefined {
   if (status === undefined || FINAL_STATES.includes(status.state)) return status
   const quiet = now - Date.parse(status.updated)
   const dead = status.pid !== undefined ? !alive(status.pid) : quiet >= LAUNCH_GRACE_MS
   if (!dead && quiet < STALE_RUN_MS) return status
-  return { ...status, state: 'failed', lines: [...status.lines, 'The updater stopped without finishing. Its output is in ~/.claude/mnemosyne/update.log; the previous version keeps working unless the lines above say otherwise.'] }
+  const where = log ?? `${UPDATE_LOG_FILE} in the HAL-M data folder`
+  return { ...status, state: 'failed', lines: [...status.lines, `The updater stopped without finishing. Its output is in ${where}; the previous version keeps working unless the lines above say otherwise.`] }
 }
 
 /** True while a run is under way (see settle). */
@@ -218,10 +256,10 @@ async function launchDetached(command: LaunchCommand) {
     // ShowWindow 0: no console window. The command line goes through the environment, so PowerShell never parses it.
     const script =
       "$s = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }; " +
-      '$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:MNEMOSYNE_UPDATE_CMD; CurrentDirectory = $env:MNEMOSYNE_UPDATE_CWD; ProcessStartupInformation = $s }; ' +
+      '$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:HALM_UPDATE_CMD; CurrentDirectory = $env:HALM_UPDATE_CWD; ProcessStartupInformation = $s }; ' +
       'exit $r.ReturnValue'
     const child = Bun.spawn(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script], {
-      env: { ...(process.env as Record<string, string>), MNEMOSYNE_UPDATE_CMD: windowsCommandLine(command), MNEMOSYNE_UPDATE_CWD: command.cwd },
+      env: childEnv(process.env, { UPDATE_CMD: windowsCommandLine(command), UPDATE_CWD: command.cwd }),
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'pipe',
@@ -274,7 +312,7 @@ export function updateRoutes(
 
   /** The progress, settled; a run that ended while this server stayed up leaves no use for the handoff. */
   function current() {
-    const status = settle(readStatus(statusFile), now(), deps.alive) ?? null
+    const status = settle(readStatus(statusFile), now(), deps.alive, join(root, UPDATE_LOG_FILE)) ?? null
     if (status && FINAL_STATES.includes(status.state)) rmSync(join(root, HANDOFF_FILE), { force: true })
     return status
   }
@@ -300,7 +338,7 @@ export function updateRoutes(
     }
     if (typeof body !== 'object' || body === null || Array.isArray(body)) return { status: 400, body: { error: 'the body must be an object' } }
     const how = via()
-    if (how === null) return { status: 409, body: { error: 'This dashboard is neither the Claude Desktop install under ~/.claude/mnemosyne/plugin nor a Claude Code install; update it by hand.' } }
+    if (how === null) return { status: 409, body: { error: 'This dashboard is neither the Claude Desktop install (the plugin folder in the HAL-M data folder) nor a Claude Code install; update it by hand.' } }
     if (running(readStatus(statusFile), now(), deps.alive)) return { status: 409, body: { error: 'An update is already running.' } }
     const latest = await latestRelease(root, deps, { current: input.plugin })
     if (!updateAvailable(input.plugin, latest) || latest === null) return { status: 409, body: { error: 'There is no newer release to install.' } }
@@ -351,7 +389,7 @@ export function updateRoutes(
       .then(({ code, output }) => {
         const lines = output.split('\n').map(line => line.trim()).filter(Boolean).slice(-6)
         // Claude Code installs what its marketplace copy names, which can lag the GitHub tag: claim the install only when it says so.
-        const restart = 'Restart Claude Code to load it, then run /mnemosyne-ui: the dashboard restarts on the new version by itself.'
+        const restart = `Restart Claude Code to load it, then run /${commandName('ui')}: the dashboard restarts on the new version by itself.`
         if (code === 0 && /\bupdated\b/i.test(output)) write({ state: 'done', code, lines: [...lines, `Installed the update. ${restart}`] })
         else if (code === 0) write({ state: 'done', code, lines: [...lines, `Claude Code found no newer version than the one installed yet; try again in a few minutes. If it was already updated, ${restart[0]!.toLowerCase()}${restart.slice(1)}`] })
         else write({ state: 'failed', code, lines: [...lines, `${command} exited with ${code}. Run it in a terminal to see why.`] })

@@ -190,13 +190,17 @@ describe('hooks/register.ts client mode', () => {
     expect(server.seen.find(seen => seen.path === '/api/plugin/memories')!.body).toEqual({ args: ['row-info', 'abcdef12'] })
     // Any other bin/memories.ts command is the server's.
     await expect((hooks.knowledgeDryRun as (...args: unknown[]) => Promise<string>)(host.$, host.options)).rejects.toThrow('This runs on the HAL-M server')
-    for (const command of ['mnemosyne-tags', 'mnemosyne-import', 'mnemosyne-knowledge', 'mnemosyne-embed']) {
-      expect((await host.command(command, command === 'mnemosyne-import' ? 'apply' : '')).text).toBe(`/${command} runs on the HAL-M server (${server.url}): open its dashboard or run it there.`)
+    for (const key of ['tags', 'import', 'knowledge', 'embed']) {
+      const args = key === 'import' ? 'apply' : ''
+      const expected = `/hal-m-${key} runs on the HAL-M server (${server.url}): open its dashboard or run it there.`
+      expect((await host.command(`hal-m-${key}`, args)).text).toBe(expected)
+      // The 0.37 name /mnemosyne-<key> is an alias of the same handler.
+      expect((await host.command(`mnemosyne-${key}`, args)).text).toBe(expected)
     }
     expect(host.memoriesRuns()).toEqual([])
   })
 
-  test('session start runs only a hello; /mnemosyne-setup and /mnemosyne-ui name the server', async () => {
+  test('session start runs only a hello; /hal-m-setup and /hal-m-ui name the server', async () => {
     const server = pluginServer()
     const { host, toasts, remoteRuns } = await clientHost(`${server.url}/`)
     await host.sessionStart()
@@ -204,9 +208,12 @@ describe('hooks/register.ts client mode', () => {
     expect(toasts).toEqual([])
     expect(host.runs.map(run => run.argv[1])).toEqual([`${ROOT.replaceAll('\\', '/')}/bin/remote.ts`])
     expect(remoteRuns()[0]!.argv[2]).toBe('hello')
-    const setup = (await host.command('mnemosyne-setup')).text
+    const setup = (await host.command('hal-m-setup')).text
     expect(setup).toContain(`uses the server at ${server.url} and needs no local engine`)
     expect(setup).toContain('engine build 18.12.3-mnemosyne.9')
+    expect((await host.command('hal-m-ui')).text).toContain(server.url)
+    // The 0.37 names are aliases of the same handlers.
+    expect((await host.command('mnemosyne-setup')).text).toBe(setup)
     expect((await host.command('mnemosyne-ui')).text).toContain(server.url)
   })
 
@@ -236,10 +243,10 @@ describe('hooks/register.ts client mode', () => {
     expect(Date.now() - started).toBeLessThan(3_000)
     expect(passed.context ?? []).toEqual([])
     expect(remoteRuns()).toHaveLength(1)
-    // The server comes back; /mnemosyne-setup looks past the breaker, and memory is on again.
+    // The server comes back; /hal-m-setup looks past the breaker, and memory is on again.
     const server = pluginServer(() => ['Forgot memory abc123.'])
     ;(host.options as Record<string, unknown>).serverUrl = server.url
-    expect((await host.command('mnemosyne-setup')).text).toContain('The server answered')
+    expect((await host.command('hal-m-setup')).text).toContain('The server answered')
     expect(statuses.at(-1)).toBeUndefined()
     expect((await host.tool('memory_forget', { memory_id: 'abc123' })).result).toBe('Forgot memory abc123.')
   })

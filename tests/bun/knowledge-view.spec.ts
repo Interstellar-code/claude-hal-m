@@ -283,7 +283,7 @@ describe('VIEWS.1: the Knowledge tab on a real store', () => {
     expect(offState.status).toContain('restart the dashboard')
     expect(notice(off)).toMatchObject({ title: 'Extraction is off.' })
     expect(notice(off)!.body).toContain('extractionModel')
-    expect(notice(off)!.body).toContain('/mnemosyne-knowledge')
+    expect(notice(off)!.body).toContain('/hal-m-knowledge')
     expect(notice(off)!.body).toContain('restart the dashboard')
 
     const unknown = await knowledge(started)
@@ -299,7 +299,7 @@ describe('VIEWS.1: the Knowledge tab on a real store', () => {
       expect(total(empty)).toBe(0)
       const note = notice(empty)!
       expect(note).not.toBeNull()
-      expect(note.body).toContain('/mnemosyne-knowledge')
+      expect(note.body).toContain('/hal-m-knowledge')
       expect(note.body).toContain('extractionModel')
       expect(kpis(empty, now).map((k: { value: string }) => k.value)).toEqual(['0', '0', '0'])
       await withDocument(() => {

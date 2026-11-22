@@ -11,14 +11,16 @@
 //      `claude plugin configure <id> --json` and `--values-stdin` with exactly one key per call, after the
 //      value passed the schema the CLI itself gave, then read back. Nothing here opens settings.json.
 // Nothing here logs a token, a list item or a memory: the activity log gets setting ids and kinds of value.
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
-import { join, resolve as resolvePath, sep } from 'node:path'
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { readConfig, resetAll, writeConfig } from '../bin/settings'
 import type { WriteResult } from '../bin/settings'
 import { BACKUPS_DIR } from '../bin/memories'
 import { settingsFields } from '../hooks/activity-log'
 import type { ActivityFields } from '../hooks/activity-log'
 import { ENGINE_BUILD } from '../hooks/engine-build'
+import { launcherFile, oldLauncherFile } from '../hooks/launcher'
+import { commandName, envOf, isDefaultMemoryDir, newRootOf, oldRootOf, stripStderrPrefix } from '../hooks/names'
 import { findSetting, SETTINGS, settingValue, valueKind } from '../hooks/settings'
 import type { SettingChange, SettingDef, ValueKind } from '../hooks/settings'
 import { MAX_TAG_LENGTH, NAMESPACES } from '../hooks/tags'
@@ -227,9 +229,13 @@ function typed(field: OptionField, source: unknown): unknown {
   return source === undefined || source === null ? '' : String(source)
 }
 
+/** A memoryDir value that means "the default store": empty, or the old (0.37) or new default literal (plan 3.2 item 5). */
+const isDefaultOption = (field: OptionField, raw: unknown) => field.key === 'memoryDir' && isDefaultMemoryDir(raw)
+
 function optionState(field: OptionField, inputs: Record<string, string>) {
   const raw = inputs[field.key]
-  const configured = raw !== undefined && raw.trim() !== ''
+  // A memoryDir holding a default literal is the default, not a custom override.
+  const configured = raw !== undefined && raw.trim() !== '' && !isDefaultOption(field, raw)
   return { configured, value: typed(field, configured ? raw : field.default), default: typed(field, field.default) }
 }
 
@@ -239,18 +245,43 @@ function written(field: OptionField, value: unknown): string {
   return String(value)
 }
 
-/** memoryDir's own rules, rule for rule as hooks/register.ts paths() (a value it refuses throws on every save and recall): absolute or ~/..., no control characters, not inside ~/.omp or the engine folders (case ignored, as the macOS and Windows file systems do). */
+/**
+ * A path's real form: the real path of its deepest part that exists, plus the rest, so a link anywhere
+ * above it (a linked data root, say) is followed even when the path itself is not there yet; resolve()
+ * alone when no part of it exists.
+ */
+function realOf(path: string): string {
+  const full = resolvePath(path)
+  const rest: string[] = []
+  let head = full
+  for (;;) {
+    try {
+      return join(realpathSync(head), ...rest)
+    } catch {
+      const parent = dirname(head)
+      if (parent === head) return full
+      rest.unshift(basename(head))
+      head = parent
+    }
+  }
+}
+
+/** The forms a path is compared in: as written (resolved) and real, case ignored as the macOS and Windows file systems do. */
+const pathForms = (path: string) => [...new Set([resolvePath(path), realOf(path)].map(form => form.toLowerCase()))]
+
+/** memoryDir's own rules, rule for rule as hooks/register.ts paths() (a value it refuses throws on every save and recall): absolute or ~/..., no control characters, not inside ~/.omp or the engine folders of any spelling of the data root (compared by real path, case ignored). */
 function memoryDirProblem(value: string, root: string, home: string): string | undefined {
   if (!(value.startsWith('/') || value === '~' || value.startsWith('~/') || (process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(value)))) return 'must be an absolute path or start with ~/'
   if (process.platform === 'win32' && /["%]/.test(value)) return 'must not hold " or %'
   if (value.startsWith('/') || value === '~' || value.startsWith('~/')) {
-    const full = resolvePath(value === '~' || value.startsWith('~/') ? join(home, value.slice(2)) : value).toLowerCase()
-    const inside = (folder: string) => full === folder || full.startsWith(`${folder}${sep}`)
-    if (inside(resolvePath(home, '.omp').toLowerCase())) return 'must not be inside ~/.omp'
-    // The configured root and the default root under the home (what paths() checks) are both guarded.
-    for (const base of [root, join(home, `.${'claude'}`, 'mnemosyne')]) {
+    const full = pathForms(value === '~' || value.startsWith('~/') ? join(home, value.slice(2)) : value)
+    const inside = (folder: string) => pathForms(folder).some(form => full.some(path => path === form || path.startsWith(`${form}${sep}`)))
+    if (inside(resolvePath(home, '.omp'))) return 'must not be inside ~/.omp'
+    // The root this server runs on and both spellings of the root under the home (old and new; one may be a
+    // link to the other) are all guarded, by real path.
+    for (const base of [root, ...(home === '' ? [] : [oldRootOf(home), newRootOf(home)])]) {
       for (const name of ['engine', 'engine.next', 'engine.old']) {
-        if (inside(resolvePath(base, name).toLowerCase())) return 'must not be inside the engine folder'
+        if (inside(join(base, name))) return 'must not be inside the engine folder'
       }
     }
   }
@@ -314,6 +345,8 @@ function vocabularyFacts(root: string) {
   }
 }
 
+const LAUNCHER_FILES = ['linux', 'win32'].flatMap(platform => [launcherFile(platform), oldLauncherFile(platform)])
+
 function setupFacts(root: string) {
   const fileExists = (path: string) => {
     try {
@@ -334,12 +367,16 @@ function setupFacts(root: string) {
   return {
     engine: { installed: build !== null, build, expected: ENGINE_BUILD, current: build === ENGINE_BUILD },
     embeddings: { marker: fileExists(join(root, 'embeddings.json')), modelFiles: present, modelFilesExpected: EMBEDDINGS_MODEL_FILES.length, modelReady: present === EMBEDDINGS_MODEL_FILES.length },
-    wrapper: fileExists(join(root, 'bin', 'mnemosyne-mcp')) || fileExists(join(root, 'bin', 'mnemosyne-mcp.cmd')),
+    // The externalMcp launcher under either name (hal-m-mcp, or 0.37's mnemosyne-mcp), either platform's file.
+    wrapper: LAUNCHER_FILES.some(name => fileExists(join(root, 'bin', name))),
     bun: Bun.version,
   }
 }
 
 type BackupInfo = { name: string; size: number; date: string }
+
+/** A failed backup's reason: its stderr without the "mnemosyne memories: " (or "hal-m ...: ") prefix, or its exit code. */
+export const backupError = (stderr: string, code: number | null) => short(stripStderrPrefix(stderr)) || `the backup exited with ${code}`
 
 function listBackups(root: string): BackupInfo[] {
   const folder = join(root, BACKUPS_DIR)
@@ -389,7 +426,7 @@ function optionKinds(field: OptionField, before: { configured: boolean; value: u
 export function settingsRoutes(config: SettingsConfig, log: (fields: ActivityFields) => void, deps: SettingsDeps = {}) {
   const env = deps.env ?? process.env
   // What this dashboard process started with (hooks/ui-launch.ts), to say when a changed option needs a restart.
-  const started = { extraction: process.env.MNEMOSYNE_EXTRACTION, embeddings: process.env.MNEMOSYNE_EMBEDDINGS }
+  const started = { extraction: envOf('EXTRACTION', process.env), embeddings: envOf('EMBEDDINGS', process.env) }
   // One write at a time (a settings change, a reset or a backup); an overlapping one is refused, not queued.
   let busy = false
   const exclusive = async (job: () => Promise<Answer>): Promise<Answer> => {
@@ -500,7 +537,7 @@ export function settingsRoutes(config: SettingsConfig, log: (fields: ActivityFie
     rows.push(fact('guard.secretRules', 'G8', 'guard', 'Built-in secret rules', 'These always block a save and cannot be changed or switched off by any setting.', [...SECRET_RULE_NAMES]))
     rows.push(fact('tags.format', 'T3', 'tags', 'Tag format and vocabulary', 'Tag length and namespaces are fixed. Admitting tags and aliases comes in 0.9.0.', { maxLength: MAX_TAG_LENGTH, namespaces: [...NAMESPACES], vocabulary: vocabularyFacts(config.root) }))
     rows.push(fact('tools.engineTools', 'M3', 'tools', 'Engine tools', 'The engine has these tools; they are hidden from Claude and from outside agents.', [...ENGINE_TOOLS]))
-    rows.push(fact('setup.status', 'D1', 'setup', 'Setup status', 'What /mnemosyne-setup installed. Run that command to install or repair.', setupFacts(config.root)))
+    rows.push(fact('setup.status', 'D1', 'setup', 'Setup status', `What /${commandName('setup')} installed. Run that command to install or repair.`, setupFacts(config.root)))
     const backups = listBackups(config.root)
     rows.push(fact('setup.backups', 'D2', 'setup', 'Backups', 'Copies of the store. Use "Back up now" to make one.', backups, { action: 'backup', keep: resolved.storage.backupsKeep }))
 
@@ -583,6 +620,8 @@ export function settingsRoutes(config: SettingsConfig, log: (fields: ActivityFie
     const after = await readOptions(config, env)
     const seen = after.ok ? after.options.fields.find(item => item.key === id) : undefined
     const readBack = after.ok && seen !== undefined ? optionState(seen, after.options.inputs) : undefined
+    // A memoryDir set to a default literal (old or new spelling) reads back as the default.
+    if (isDefaultOption(field, text)) next = state.default
     if (readBack === undefined || !sameJson(readBack.value, next)) {
       return { status: 502, body: { error: `${id}: the claude CLI accepted the change but reading it back does not show it`, readBack: 'mismatch' } }
     }
@@ -596,7 +635,8 @@ export function settingsRoutes(config: SettingsConfig, log: (fields: ActivityFie
         default: readBack.default,
         applies: 'after restart',
         note: 'Takes effect after the plugin reloads or Claude Code restarts.',
-        changed: !sameJson(state.value, next) || !state.configured,
+        // A reset of an option with nothing stored writes a value; one holding a default literal (memoryDir) changes nothing.
+        changed: !sameJson(state.value, next) || (before.options.inputs[id] ?? '').trim() === '',
         ...(place?.confirm === true ? { warning: 'Memories already saved are not moved to the new place.' } : {}),
         ...(restartNeeded(field, readBack.value) ? { restartNeeded: true } : {}),
       },
@@ -646,7 +686,7 @@ export function settingsRoutes(config: SettingsConfig, log: (fields: ActivityFie
     const timer = setTimeout(() => child.kill(), BACKUP_TIMEOUT_MS)
     try {
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
-      if (code !== 0) throw new Error(short(stderr.replace(/^mnemosyne[^:]*:\s*/, '')) || `the backup exited with ${code}`)
+      if (code !== 0) throw new Error(backupError(stderr, code))
       const reply = JSON.parse(stdout.trim().split('\n').pop() ?? '') as { path?: unknown; rows?: unknown }
       if (typeof reply.path !== 'string') throw new Error('the backup gave no file')
       const name = reply.path.split(/[\\/]/).pop() ?? ''

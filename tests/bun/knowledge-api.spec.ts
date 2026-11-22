@@ -341,8 +341,8 @@ describe('KAPI.1: GET /api/knowledge on a real store', () => {
     expect(itemC?.lastRecalled).toBeNull()
   })
 
-  test('KAPI.1.a3: extraction reflects MNEMOSYNE_EXTRACTION environment setting', async () => {
-    const saved = process.env.MNEMOSYNE_EXTRACTION
+  test('KAPI.1.a3: extraction reflects HALM_EXTRACTION (or the old MNEMOSYNE_EXTRACTION) environment setting', async () => {
+    const saved = { now: process.env.HALM_EXTRACTION, old: process.env.MNEMOSYNE_EXTRACTION }
     const extraction = async () => {
       const res = await get(url, '/api/knowledge', started.token)
       expect(res.status).toBe(200)
@@ -350,15 +350,24 @@ describe('KAPI.1: GET /api/knowledge on a real store', () => {
     }
     try {
       // Unset -> 'unknown'
+      delete process.env.HALM_EXTRACTION
       delete process.env.MNEMOSYNE_EXTRACTION
       expect(await extraction()).toBe('unknown')
+      process.env.HALM_EXTRACTION = 'off'
+      expect(await extraction()).toBe('off')
+      process.env.HALM_EXTRACTION = 'claude-3-5-haiku-20241022'
+      expect(await extraction()).toBe('claude-3-5-haiku-20241022')
+      // The old name alone still works; the new one wins over it.
+      delete process.env.HALM_EXTRACTION
       process.env.MNEMOSYNE_EXTRACTION = 'off'
       expect(await extraction()).toBe('off')
-      process.env.MNEMOSYNE_EXTRACTION = 'claude-3-5-haiku-20241022'
+      process.env.HALM_EXTRACTION = 'claude-3-5-haiku-20241022'
       expect(await extraction()).toBe('claude-3-5-haiku-20241022')
     } finally {
-      if (saved === undefined) delete process.env.MNEMOSYNE_EXTRACTION
-      else process.env.MNEMOSYNE_EXTRACTION = saved
+      if (saved.now === undefined) delete process.env.HALM_EXTRACTION
+      else process.env.HALM_EXTRACTION = saved.now
+      if (saved.old === undefined) delete process.env.MNEMOSYNE_EXTRACTION
+      else process.env.MNEMOSYNE_EXTRACTION = saved.old
     }
   })
 

@@ -4,12 +4,12 @@
 // by that test or by afterAll.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { connect } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import { engineEnv } from '../../hooks/engine'
-import { buildApp, CSP, DEFAULT_PARENT_CHECK_MS, openStore, parentCheckMs, runEngine, startServer, unusedByDesign, UNUSED_BY_DESIGN } from '../../ui/server'
+import { buildApp, configFromEnv, CSP, DEFAULT_PARENT_CHECK_MS, devOptions, embeddingsOn, openStore, parentCheckMs, rootModelCache, runEngine, sameFolder, startServer, unusedByDesign, UNUSED_BY_DESIGN } from '../../ui/server'
 import { body, engineCall, ROOT, tempDir, toolCall, isolatedEnv } from './helpers'
 
 const SERVER = join(ROOT, 'ui', 'server.ts')
@@ -22,12 +22,13 @@ type Child = ReturnType<typeof Bun.spawn>
 const serverEnv = (root: string, store: string, extra: Record<string, string> = {}) => ({
   ...(process.env as Record<string, string>),
   ...isolatedEnv(),
-  MNEMOSYNE_ROOT: root,
-  MNEMOSYNE_STORE: store,
-  MNEMOSYNE_CLI: CLI,
-  MNEMOSYNE_ACTIVITY_LOG: '',
-  MNEMOSYNE_PLUGIN_ROOT: ROOT,
-  MNEMOSYNE_UI_PARENT_CHECK_MS: FAST_PARENT_CHECK,
+  // The HAL-M names (0.38); the old MNEMOSYNE_ names are read as a fallback (tested below).
+  HALM_ROOT: root,
+  HALM_STORE: store,
+  HALM_CLI: CLI,
+  HALM_ACTIVITY_LOG: '',
+  HALM_PLUGIN_ROOT: ROOT,
+  HALM_UI_PARENT_CHECK_MS: FAST_PARENT_CHECK,
   ...extra,
 })
 
@@ -453,7 +454,7 @@ describe('the server ends with what started it', () => {
     }
   })
 
-  test('review r1 finding 6: MNEMOSYNE_UI_PARENT_CHECK_MS is held to 100 ms - 10 s', () => {
+  test('review r1 finding 6: HALM_UI_PARENT_CHECK_MS is held to 100 ms - 10 s', () => {
     expect(parentCheckMs(undefined)).toBe(10_000)
     expect(parentCheckMs('')).toBe(10_000)
     expect(parentCheckMs('soon')).toBe(10_000)
@@ -712,5 +713,108 @@ describe('GET /api/health-report: unusedByDesign', () => {
     const found = unusedByDesign(new Set(['facts', 'fts_facts', 'fts_facts_data', 'fts_episodes_idx', 'factsheet', 'fts_factsy', 'constructor', 'toString', 'working_memory']))
     expect(Object.keys(found).sort()).toEqual(['facts', 'fts_episodes_idx', 'fts_facts', 'fts_facts_data'])
     expect(Object.keys(UNUSED_BY_DESIGN).sort()).toEqual(unused)
+  })
+})
+
+// HAL-M Stage 2 (plan 3.3): every setting is HALM_<X>, then the old MNEMOSYNE_<X>; ACTIVITY_LOG empty is a value.
+describe('HAL-M environment names', () => {
+  test('configFromEnv: new names, old names, new over old, empty new falls back (except ACTIVITY_LOG)', () => {
+    const newOnly = configFromEnv({ HALM_ROOT: '/r', HALM_STORE: '/s', HALM_CLI: '/c', HALM_ACTIVITY_LOG: '/a', HALM_PLUGIN_ROOT: '/p', HALM_PLUGIN_ID: 'hal-m@hal-m', HALM_CLAUDE_CLI: '/claude' })
+    expect(newOnly).toEqual({ root: '/r', store: '/s', cli: '/c', activityLog: '/a', pluginRoot: '/p', pluginId: 'hal-m@hal-m', claudeCli: '/claude' })
+    const oldOnly = configFromEnv({ MNEMOSYNE_ROOT: '/r', MNEMOSYNE_STORE: '/s', MNEMOSYNE_CLI: '/c', MNEMOSYNE_ACTIVITY_LOG: '/a', MNEMOSYNE_PLUGIN_ROOT: '/p', MNEMOSYNE_PLUGIN_ID: 'mnemosyne@mnemosyne', MNEMOSYNE_CLAUDE_CLI: '/claude' })
+    expect(oldOnly).toEqual({ root: '/r', store: '/s', cli: '/c', activityLog: '/a', pluginRoot: '/p', pluginId: 'mnemosyne@mnemosyne', claudeCli: '/claude' })
+    const both = configFromEnv({ HALM_ROOT: '/new', MNEMOSYNE_ROOT: '/old', HALM_STORE: '', MNEMOSYNE_STORE: '/old-store', HALM_ACTIVITY_LOG: '', MNEMOSYNE_ACTIVITY_LOG: '/old.jsonl' })
+    expect(both.root).toBe('/new')
+    expect(both.store).toBe('/old-store')
+    // An empty HALM_ACTIVITY_LOG means "log off" and wins over an inherited old path.
+    expect(both.activityLog).toBe('')
+    expect(() => configFromEnv({})).toThrow('HALM_ROOT and HALM_STORE must be set (or the MNEMOSYNE_ names).')
+  })
+
+  test('embeddings, dev mode and the parent check read both names', () => {
+    expect(embeddingsOn({ HALM_EMBEDDINGS: 'on' })).toBe(true)
+    expect(embeddingsOn({ MNEMOSYNE_EMBEDDINGS: 'on' })).toBe(true)
+    expect(embeddingsOn({ HALM_EMBEDDINGS: 'off', MNEMOSYNE_EMBEDDINGS: 'on' })).toBe(false)
+    expect(embeddingsOn({ HALM_EMBEDDINGS: '', MNEMOSYNE_EMBEDDINGS: 'on' })).toBe(true)
+    const token = 't'.repeat(40)
+    expect(devOptions({ HALM_UI_DEV: '1', HALM_UI_PORT: '5173', HALM_UI_TOKEN: token })).toEqual({ dev: true, port: 5173, token })
+    expect(devOptions({ MNEMOSYNE_UI_DEV: '1', MNEMOSYNE_UI_PORT: '5173', MNEMOSYNE_UI_TOKEN: token })).toEqual({ dev: true, port: 5173, token })
+    expect(devOptions({ HALM_UI_DEV: '0', MNEMOSYNE_UI_DEV: '1' })).toEqual({})
+    const saved = { now: process.env.HALM_UI_PARENT_CHECK_MS, old: process.env.MNEMOSYNE_UI_PARENT_CHECK_MS }
+    try {
+      process.env.HALM_UI_PARENT_CHECK_MS = '300'
+      process.env.MNEMOSYNE_UI_PARENT_CHECK_MS = '400'
+      expect(parentCheckMs()).toBe(300)
+      delete process.env.HALM_UI_PARENT_CHECK_MS
+      expect(parentCheckMs()).toBe(400)
+    } finally {
+      if (saved.now === undefined) delete process.env.HALM_UI_PARENT_CHECK_MS
+      else process.env.HALM_UI_PARENT_CHECK_MS = saved.now
+      if (saved.old === undefined) delete process.env.MNEMOSYNE_UI_PARENT_CHECK_MS
+      else process.env.MNEMOSYNE_UI_PARENT_CHECK_MS = saved.old
+    }
+  })
+
+  test('sameFolder compares real paths: a symlinked root is the same folder, a look-alike text is not', () => {
+    const temp = tempDir('ui-same-folder')
+    try {
+      const old = join(temp.dir, '.claude', 'mnemosyne')
+      mkdirSync(old, { recursive: true })
+      const link = join(temp.dir, '.hal-m')
+      symlinkSync(old, link, 'dir')
+      expect(sameFolder(link, old)).toBe(true)
+      expect(sameFolder(`${old}/`, old)).toBe(true)
+      expect(sameFolder(join(temp.dir, 'other'), old)).toBe(false)
+      expect(sameFolder(join(temp.dir, 'missing'), join(temp.dir, 'x', '..', 'missing'))).toBe(true)
+      expect(sameFolder('C:\\Users\\U\\.hal-m', 'c:\\users\\u\\.HAL-M', 'win32')).toBe(true)
+    } finally {
+      temp.dispose()
+    }
+  })
+
+  test('rootModelCache: the engine default on the old root (or a link to it), <root>/model-cache on a real ~/.hal-m', () => {
+    const temp = tempDir('ui-model-cache')
+    try {
+      const home = temp.dir
+      const old = join(home, '.claude', 'mnemosyne')
+      const fresh = join(home, '.hal-m')
+      expect(rootModelCache(undefined, home)).toBeUndefined()
+      // A fresh install: only a real ~/.hal-m.
+      mkdirSync(fresh, { recursive: true })
+      expect(rootModelCache(fresh, home)).toBe(join(fresh, 'model-cache'))
+      // Any other root keeps the engine's default (the launcher's HALM_MODEL_CACHE names it).
+      expect(rootModelCache(join(home, 'elsewhere'), home)).toBeUndefined()
+      // ~/.hal-m as a link to the old root: the same folder as the old root, so the engine default.
+      rmSync(fresh, { recursive: true, force: true })
+      mkdirSync(old, { recursive: true })
+      symlinkSync(old, fresh, 'dir')
+      expect(rootModelCache(fresh, home)).toBeUndefined()
+      expect(rootModelCache(old, home)).toBeUndefined()
+    } finally {
+      temp.dispose()
+    }
+  })
+
+  test('runEngine: HALM_MODEL_CACHE, then MNEMOSYNE_MODEL_CACHE, sets PI_CONFIG_DIR', async () => {
+    const temp = tempDir('ui-env-cache')
+    try {
+      const fake = join(temp.dir, 'fake-cli.ts')
+      writeFileSync(
+        fake,
+        `const lines = (await Bun.stdin.text()).split('\\n').filter(Boolean)
+for (const line of lines) {
+  const { id } = JSON.parse(line)
+  console.log(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ pi: process.env.PI_CONFIG_DIR }) }] } }))
+}
+`,
+      )
+      const store = join(temp.dir, 'store')
+      const pi = async (env: Record<string, string>) => JSON.parse((await runEngine({ cli: fake, store }, [['mnemopi_stats', {}]], 'global', { ...(process.env as Record<string, string>), ...env }))[0] as string).pi
+      expect(await pi({ HALM_MODEL_CACHE: '/img/new', MNEMOSYNE_MODEL_CACHE: '/img/old' })).toBe('/img/new')
+      expect(await pi({ MNEMOSYNE_MODEL_CACHE: '/img/old' })).toBe('/img/old')
+      expect(await pi({ HALM_MODEL_CACHE: '', MNEMOSYNE_MODEL_CACHE: '/img/old' })).toBe('/img/old')
+    } finally {
+      temp.dispose()
+    }
   })
 })

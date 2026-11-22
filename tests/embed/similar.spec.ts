@@ -8,11 +8,13 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { engineEnv } from '../../hooks/engine'
+import { envOf } from '../../hooks/names'
 
 const ROOT = join(import.meta.dir, '..', '..')
 const CLI = join(ROOT, 'engine', 'src', 'cli.ts')
 
-const CACHE_HOME = process.env.MNEMOSYNE_EMBED_CACHE_HOME ?? join(tmpdir(), 'mnemosyne-embed-cache-home')
+// HALM_EMBED_CACHE_HOME, then MNEMOSYNE_EMBED_CACHE_HOME; the temp folder name is shared with embed.spec.ts.
+const CACHE_HOME = envOf('EMBED_CACHE_HOME', process.env) ?? join(tmpdir(), 'mnemosyne-embed-cache-home')
 mkdirSync(CACHE_HOME, { recursive: true })
 const stores: string[] = []
 

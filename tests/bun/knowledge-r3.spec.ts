@@ -52,7 +52,7 @@ describe('fix 1: the empty marker is written', () => {
   test('an empty model reply leaves a 0600 knowledge-empty.json, the dry run counts it, and a second apply makes no model call', async () => {
     const host = await open({ model: nothing })
     const [id] = await seed(host, ['a note that holds no facts'])
-    const first = await host.command('mnemosyne-knowledge', 'apply')
+    const first = await host.command('hal-m-knowledge', 'apply')
     expect(first.text).toContain('1 found nothing')
     expect(host.model.length).toBe(1)
     // The file exists, owner-only, and names the memory.
@@ -64,9 +64,10 @@ describe('fix 1: the empty marker is written', () => {
     const scripts = host.runs.filter(run => run.argv[1] === '-e')
     expect(scripts.length).toBeGreaterThan(0)
     expect(scripts.map(run => run.exitCode)).toEqual(scripts.map(() => 0))
+    // The 0.37 name /mnemosyne-knowledge runs the same handler.
     const dry = await host.command('mnemosyne-knowledge')
     expect(dry.text).toContain('1 memory already tried')
-    const second = await host.command('mnemosyne-knowledge', 'apply')
+    const second = await host.command('hal-m-knowledge', 'apply')
     expect(second.text).toContain('Nothing to extract')
     expect(host.model.length).toBe(1)
   })
@@ -138,7 +139,7 @@ describe('fix 3: pending write and remove-many are all or nothing', () => {
     } finally {
       db.close()
     }
-    const out = await host.command('mnemosyne-knowledge', 'apply')
+    const out = await host.command('hal-m-knowledge', 'apply')
     // The two good rows are stored, whatever happens to the bad one.
     expect(out.text).toContain('Extracted knowledge for 2 of')
     const check = new Database(join(host.store, 'mnemopi.db'), { readonly: true })

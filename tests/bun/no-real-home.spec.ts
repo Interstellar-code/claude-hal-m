@@ -9,6 +9,8 @@ const DIR = join(import.meta.dir)
 const ALLOW = new Set([
   'guard-audit.spec.ts:22', // bin/guard-audit.ts only reads the files it is given
   'ui-server.spec.ts:475', // `mkfifo`, a filesystem call
+  'launcher.spec.ts:679', // spawn() above passes env: runEnv(), built on isolatedEnv
+  'launcher.spec.ts:681', // the same spawn() helper
 ])
 
 /** `src` with comments and the inside of string/template literals blanked (same length, same newlines). */

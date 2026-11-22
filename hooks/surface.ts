@@ -7,6 +7,7 @@ export function mnemosyneStats(text: string) {
   try {
     const { status, working, episodic, memoria } = JSON.parse(text)
     if (status !== 'ok') return text
+    // The provider stays 'mnemosyne' in 0.38 (hooks/names.ts KEPT.statsProvider; not imported, so the proxy's import closure is unchanged).
     return JSON.stringify({ status, provider: 'mnemosyne', working, episodic, memoria })
   } catch {
     return text

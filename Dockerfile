@@ -12,17 +12,17 @@ ARG EMBEDDINGS=1
 ARG PUID=99
 ARG PGID=100
 
-# MNEMOSYNE_EMBEDDINGS is not set here: the entrypoint defaults it to this build's
-# choice (/opt/mnemosyne/embeddings), and a value set at run time wins.
+# Nothing an operator can set is baked here, under either name (plan 3.1): a baked
+# HALM_BIND=0.0.0.0 would beat an old template's MNEMOSYNE_BIND=127.0.0.1. ROOT, STORE,
+# PORT, BIND, SECURE_COOKIE and EMBEDDINGS get their defaults in docker/entrypoint.sh,
+# which reads HALM_<X>, then the old MNEMOSYNE_<X>, and exports HALM_<X>. EMBEDDINGS
+# defaults to this build's choice (/opt/mnemosyne/embeddings). Only image-internal
+# paths nobody sets are baked, under the new names. The /opt/mnemosyne and
+# /home/mnemosyne folders keep their names: they are inside the image only.
 ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=0 \
-    MNEMOSYNE_ROOT=/data \
-    MNEMOSYNE_STORE=/data/store \
-    MNEMOSYNE_CLI=/opt/mnemosyne/engine/node_modules/@oh-my-pi/pi-mnemopi/src/cli.ts \
-    MNEMOSYNE_PLUGIN_ROOT=/app \
-    MNEMOSYNE_MODEL_CACHE=/opt/mnemosyne/model-cache \
-    MNEMOSYNE_PORT=8787 \
-    MNEMOSYNE_BIND=0.0.0.0 \
-    MNEMOSYNE_SECURE_COOKIE=auto \
+    HALM_CLI=/opt/mnemosyne/engine/node_modules/@oh-my-pi/pi-mnemopi/src/cli.ts \
+    HALM_PLUGIN_ROOT=/app \
+    HALM_MODEL_CACHE=/opt/mnemosyne/model-cache \
     PUID=${PUID} \
     PGID=${PGID} \
     HOME=/home/mnemosyne
@@ -51,7 +51,9 @@ RUN set -eu; \
 VOLUME /data
 EXPOSE 8787
 
+# The check runs with the container's own environment (not the entrypoint's exports), so it
+# reads the port under both names, new first.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD bun -e "fetch('http://127.0.0.1:'+(process.env.MNEMOSYNE_PORT||'8787')+'/api/session').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+  CMD bun -e "const e=process.env;fetch('http://127.0.0.1:'+(e.HALM_PORT||e.MNEMOSYNE_PORT||'8787')+'/api/session').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 
 ENTRYPOINT ["/bin/sh", "/app/docker/entrypoint.sh"]

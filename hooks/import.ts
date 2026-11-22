@@ -7,6 +7,7 @@
 // C8: a proposal file (import-proposed.json) holds paths, headings, sha256 values,
 // rule ids and verdicts, never the text of a chunk or of a session.
 import { tagContext, tagListText } from './backfill'
+import { commandName } from './names'
 import type { TagContext } from './backfill'
 import type { GuardResult, NearMatch } from './guard'
 import { cleanTags, MAX_TAG_LENGTH, MAX_TAGS } from './tags'
@@ -27,8 +28,9 @@ export const IMPORT_MAX_CHUNKS = 200
 const PREFIX_MAX_CHARS = 300
 const HEADING_KEY_MAX = 120
 
+const IMPORT_COMMAND = `/${commandName('import')}`
 export const IMPORT_USAGE =
-  'Usage: /mnemosyne-import doc <path> (a dry run: a .md or .txt file under 1 MB is split at headings and every chunk is checked; nothing is written), /mnemosyne-import session <id | last> (a dry run: Haiku proposes up to 5 durable memories from a past session; nothing is written) or /mnemosyne-import apply [confirm] (backs the store up, then saves what the last dry run checked; confirm also saves the chunks that carry a warning).'
+  `Usage: ${IMPORT_COMMAND} doc <path> (a dry run: a .md or .txt file under 1 MB is split at headings and every chunk is checked; nothing is written), ${IMPORT_COMMAND} session <id | last> (a dry run: Haiku proposes up to 5 durable memories from a past session; nothing is written) or ${IMPORT_COMMAND} apply [confirm] (backs the store up, then saves what the last dry run checked; confirm also saves the chunks that carry a warning).`
 
 export type ImportArgs =
   | { mode: 'doc'; path: string }
@@ -36,7 +38,7 @@ export type ImportArgs =
   | { mode: 'apply'; confirm: boolean }
   | { mode: 'usage' }
 
-/** `/mnemosyne-import doc <path>`, `session <id | last>` or `apply [confirm]`; a path may be quoted. */
+/** `/hal-m-import doc <path>`, `session <id | last>` or `apply [confirm]`; a path may be quoted. */
 export function parseImportArgs(args: string): ImportArgs {
   const text = args.trim()
   const space = text.search(/\s/)

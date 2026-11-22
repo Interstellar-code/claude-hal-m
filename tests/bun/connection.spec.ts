@@ -320,7 +320,7 @@ describe('the page when the server stops', () => {
     await app.loadHealthReport()
     await Bun.sleep(20)
     expect(box('status').textContent).toBe(app.LOST)
-    expect(app.LOST).toContain('/mnemosyne-ui')
+    expect(app.LOST).toContain('/hal-m-ui')
     expect(app.LOST).toContain('has stopped')
     expect(box('status').className).toBe('status is-error')
     // The tab's own message is still there, but a tab switch does not bring the Connected line back.

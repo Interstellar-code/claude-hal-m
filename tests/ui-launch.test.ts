@@ -1,4 +1,4 @@
-// SRV.3: /mnemosyne-ui starts one shared dashboard server, opens its link in
+// SRV.3: /hal-m-ui (old name /mnemosyne-ui) starts one shared dashboard server, opens its link in
 // the default browser and shows it in the reply, reuses a live server, replaces a stale
 // one, and its starting session's session.end ends the spawn loop and kills
 // the server. Review r1 findings 1, 2, 3 and 8 have their tests here.
@@ -85,14 +85,17 @@ function world(on: On, o: Options = {}) {
     walkTimesOut: false,
   }
   const failures = new Map<string, number>()
-  on('env.get', () => ({ value: '/home/u' }))
+  // Only HOME is set: the hook also reads OS, HALM_NO_MIGRATE, HALM_ACTIVITY_APPEND and their MNEMOSYNE_ spellings, which stay unset.
+  on('env.get', (_$, e) => ({ value: (e as { name: string }).name === 'HOME' ? '/home/u' : undefined }) as never)
   on('session.id', () => ({ value: seen.session }))
   on('session.repo', () => ({ value: { root: '/w' } }) as never)
-  on('fs.stat', (_$, e) =>
-    o.installed === false || (e as { path: string }).path.endsWith('/embeddings.json') || (e as { path: string }).path.includes('/model-cache/')
-      ? ({ deny: 'ENOENT' } as never)
-      : ({ value: { kind: 'file' } } as never),
-  )
+  on('fs.stat', (_$, e) => {
+    const path = (e as { path: string }).path
+    // The data root: the old folder is a real folder and ~/.hal-m does not exist (state old-only), so the root stays ROOT.
+    if (path === ROOT) return { value: { kind: 'dir' } } as never
+    if (path === '/home/u/.hal-m') return { deny: 'ENOENT' } as never
+    return (o.installed === false || path.endsWith('/embeddings.json') || path.includes('/model-cache/') ? { deny: 'ENOENT' } : { value: { kind: 'file' } }) as never
+  })
   on('fs.read', (_$, e) => {
     if (e.path === INSTALLED_PACKAGE && o.installed !== false) return { value: JSON.stringify({ version: o.build ?? ENGINE_BUILD }) } as never
     if (e.path.endsWith('/.claude-plugin/plugin.json') && o.pluginVersion !== undefined) return { value: JSON.stringify({ version: o.pluginVersion }) } as never
@@ -201,21 +204,33 @@ function world(on: On, o: Options = {}) {
 const textOf = (ran: unknown) => (ran as { text?: string }).text ?? ''
 const pings = (seen: ReturnType<typeof world>) => seen.runs.filter(r => isPing(r.argv))
 const kills = (seen: ReturnType<typeof world>) => seen.runs.filter(r => isKill(r.argv)).map(r => r.argv.join(' '))
-const openUi = ($: { command: { run: (e: never) => Promise<unknown> } }) => $.command.run({ command: 'mnemosyne-ui', args: '' } as never)
+const openUi = ($: { command: { run: (e: never) => Promise<unknown> } }, command = 'hal-m-ui') => $.command.run({ command, args: '' } as never)
 const end = (sessionId: string, reason: string) => ({ reason, sessionId, resume: { id: sessionId } }) as never
 
-test('/mnemosyne-ui appears in the command list after session start', async ($, on) => {
+test('/hal-m-ui appears in the command list after session start, with its old name /mnemosyne-ui', async ($, on) => {
   const seen = world(on)
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/w', surface: null, isInteractive: false } as never)
-  expect(seen.registered).toContain('mnemosyne-ui')
-  expect(seen.registered).toContain('mnemosyne-setup')
+  expect(seen.registered).toContain('hal-m-ui')
+  expect(seen.registered).toContain('hal-m-setup')
+  // The old names stay as aliases, each right after its new name.
+  expect(seen.registered.indexOf('mnemosyne-ui')).toBe(seen.registered.indexOf('hal-m-ui') + 1)
+  expect(seen.registered.indexOf('mnemosyne-setup')).toBe(seen.registered.indexOf('hal-m-setup') + 1)
+})
+
+test('the old name /mnemosyne-ui runs the same command: it starts the dashboard and gives the link', async ($, on) => {
+  const seen = world(on)
+  const text = textOf(await openUi($, 'mnemosyne-ui'))
+  expect(seen.spawned.length).toBe(1)
+  expect(seen.spawned[0]!.argv[1]).toMatch(/\/ui\/server\.ts$/)
+  expect(text).toContain(`Link: http://127.0.0.1:4321/#token=${TOKEN_B}`)
+  await $.session.end(end('s1', 'other'))
 })
 
 for (const [why, options, needle] of [
   ['without Bun', { bun: false }, 'Bun on PATH'],
-  ['without the engine', { installed: false }, '/mnemosyne-setup'],
-  ['with an engine that is not current', { build: '18.12.3' }, '/mnemosyne-setup'],
+  ['without the engine', { installed: false }, 'run /hal-m-setup first'],
+  ['with an engine that is not current', { build: '18.12.3' }, 'run /hal-m-setup, then /hal-m-ui again'],
 ] as const) {
   test(`${why} the command says what to do and starts nothing`, async ($, on) => {
     const seen = world(on, options)
@@ -237,19 +252,21 @@ test('the first call starts one server, reads the ready line in pieces and the t
   expect(child.argv[0]).toBe('bun')
   expect(child.argv[1]).toMatch(/\/ui\/server\.ts$/)
   expect(child.input).toBeUndefined()
-  expect(child.env).toEqual({
-    MNEMOSYNE_PLUGIN_ROOT: expect.any(String),
-    MNEMOSYNE_ROOT: ROOT,
-    MNEMOSYNE_STORE: `${ROOT}/store`,
-    MNEMOSYNE_CLI: `${ROOT}/engine/node_modules/@oh-my-pi/pi-mnemopi/src/cli.ts`,
-    MNEMOSYNE_ACTIVITY_LOG: `${ROOT}/activity.jsonl`,
-    MNEMOSYNE_EXTRACTION: 'haiku',
+  // Each value under both spellings (HALM_* and MNEMOSYNE_*), the same value.
+  const values = {
+    PLUGIN_ROOT: child.argv[1]!.replace(/\/ui\/server\.ts$/, ''),
+    ROOT,
+    STORE: `${ROOT}/store`,
+    CLI: `${ROOT}/engine/node_modules/@oh-my-pi/pi-mnemopi/src/cli.ts`,
+    ACTIVITY_LOG: `${ROOT}/activity.jsonl`,
+    EXTRACTION: 'haiku',
     // EMB.3.a2: this host is not macOS arm64, so the dashboard starts with embeddings off.
-    MNEMOSYNE_EMBEDDINGS: 'off',
+    EMBEDDINGS: 'off',
     // SRV: the settings page asks `claude plugin configure` about the plugin's options by this id.
-    MNEMOSYNE_PLUGIN_ID: 'mnemosyne@mnemosyne',
-  })
-  expect(`${child.env?.MNEMOSYNE_PLUGIN_ROOT}/ui/server.ts`).toBe(child.argv[1]!)
+    PLUGIN_ID: 'hal-m@hal-m',
+  }
+  expect(child.env).toEqual(Object.fromEntries(Object.entries(values).flatMap(([key, value]) => [[`HALM_${key}`, value], [`MNEMOSYNE_${key}`, value]])))
+  expect(`${child.env?.HALM_PLUGIN_ROOT}/ui/server.ts`).toBe(child.argv[1]!)
   // No ui.json at first: nothing to ping.
   expect(pings(seen).length).toBe(0)
 
@@ -265,10 +282,31 @@ test('the first call starts one server, reads the ready line in pieces and the t
   await $.session.end(end('s1', 'other'))
 })
 
-test('with activityLog off the server gets an empty MNEMOSYNE_ACTIVITY_LOG', { options: { activityLog: 'off' } }, async ($, on) => {
+test('with activityLog off the server gets an empty HALM_ACTIVITY_LOG and MNEMOSYNE_ACTIVITY_LOG', { options: { activityLog: 'off' } }, async ($, on) => {
   const seen = world(on)
   await openUi($)
+  expect(seen.spawned[0]?.env?.HALM_ACTIVITY_LOG).toBe('')
   expect(seen.spawned[0]?.env?.MNEMOSYNE_ACTIVITY_LOG).toBe('')
+  await $.session.end(end('s1', 'other'))
+})
+
+test('the dashboard spawn env carries every variable under both spellings, HALM_X and MNEMOSYNE_X with the same value', { options: { extractionModel: 'off', activityLog: 'off' } }, async ($, on) => {
+  const seen = world(on)
+  await openUi($)
+  expect(seen.spawned.length).toBe(1)
+  const env = seen.spawned[0]!.env!
+  // CLAUDE_CLI rides along only when the hook knows a claude CLI path (UiPaths.claudeCli); the command passes none, so the server uses `claude`.
+  const keys = ['PLUGIN_ROOT', 'ROOT', 'STORE', 'CLI', 'ACTIVITY_LOG', 'EXTRACTION', 'EMBEDDINGS', 'PLUGIN_ID']
+  for (const key of keys) {
+    expect(env[`HALM_${key}`]).toBeDefined()
+    expect(env[`MNEMOSYNE_${key}`]).toBe(env[`HALM_${key}`])
+  }
+  // Nothing under one spelling only: every variable is one of these, under both names.
+  expect(Object.keys(env).sort()).toEqual(keys.flatMap(key => [`HALM_${key}`, `MNEMOSYNE_${key}`]).sort())
+  // The values follow the options under both names.
+  expect([env.HALM_EXTRACTION, env.MNEMOSYNE_EXTRACTION]).toEqual(['off', 'off'])
+  expect([env.HALM_ACTIVITY_LOG, env.MNEMOSYNE_ACTIVITY_LOG]).toEqual(['', ''])
+  expect([env.HALM_ROOT, env.MNEMOSYNE_ROOT]).toEqual([ROOT, ROOT])
   await $.session.end(end('s1', 'other'))
 })
 
@@ -525,7 +563,7 @@ test('a reused dashboard that started with another extractionModel says it must 
   const text = textOf(await openUi($))
   expect(text).toContain('started with extractionModel "off"')
   expect(text).toContain('extractionModel is "haiku" now')
-  expect(text).toContain('end the session that started it, then run /mnemosyne-ui again')
+  expect(text).toContain('end the session that started it, then run /hal-m-ui again')
   expect(text).toContain(`Link: http://127.0.0.1:5555/#token=${TOKEN_A}`)
 })
 
@@ -728,7 +766,7 @@ test('review r1 finding 6: with others still listed, a reloaded session only lea
   expect([...seen.users.keys()]).toEqual(['s10'])
 })
 
-test('SHARE.4: /clear in the only session stops the server as before, and the next /mnemosyne-ui starts a new one', async ($, on) => {
+test('SHARE.4: /clear in the only session stops the server as before, and the next /hal-m-ui starts a new one', async ($, on) => {
   const clock = mock.clock(on)
   const seen = world(on)
   await openUi($)

@@ -1,4 +1,4 @@
-// /mnemosyne-ui: start the dashboard server (ui/server.ts), or reuse the one
+// /hal-m-ui: start the dashboard server (ui/server.ts), or reuse the one
 // running, open its link in the default browser and show it in the reply
 // (DESIGN.md §3.3, "The dashboard server").
 //
@@ -15,6 +15,7 @@
 // the server's own backstops (stdin closing, its parent vanishing, and its poll
 // of the list) end it once no listed session's process runs.
 import type { EngineInterface } from 'claude-code'
+import { hookChildEnv } from './names'
 import { CLAUDE_PID_SCRIPT, claudeFromChain } from './ui-pid'
 
 export const UI_STATE = 'ui.json'
@@ -30,7 +31,7 @@ export const STOP_WAIT_MS = 600
 export const KILL_TIMEOUT_MS = 500
 export const ALIVE_TIMEOUT_MS = 1_000
 export const OPEN_TIMEOUT_MS = 5_000
-// Listing a session (`add`, when /mnemosyne-ui answers): a cold `bun` start can take a few hundred
+// Listing a session (`add`, when /hal-m-ui answers): a cold `bun` start can take a few hundred
 // ms on a busy machine, so each try gets USERS_TIMEOUT_MS and a failed one is tried once more.
 export const USERS_TIMEOUT_MS = 3_000
 export const USERS_TRIES = 2
@@ -54,7 +55,7 @@ export const PING_ENV: Readonly<Record<string, string>> = {
 export type UiPaths = {
   /** The plugin folder, holding ui/server.ts. */
   plugin: string
-  /** <root>: ~/.claude/mnemosyne, where ui.json lives. */
+  /** <root>: the HAL-M data folder (~/.hal-m, or ~/.claude/mnemosyne before the link), where ui.json lives. */
   root: string
   store: string
   cli: string
@@ -176,19 +177,20 @@ function start($: EngineInterface, paths: UiPaths, session: string) {
   const loop = (async () => {
     const stream = $.process.spawn({
       argv: ['bun', `${paths.plugin}/ui/server.ts`, '--hold'],
-      env: {
-        MNEMOSYNE_PLUGIN_ROOT: paths.plugin,
-        MNEMOSYNE_ROOT: paths.root,
-        MNEMOSYNE_STORE: paths.store,
-        MNEMOSYNE_CLI: paths.cli,
-        MNEMOSYNE_ACTIVITY_LOG: paths.activity,
+      // Each value under both spellings (HALM_* and MNEMOSYNE_*): a hook cannot delete an inherited variable (3.3 item 2).
+      env: hookChildEnv({
+        PLUGIN_ROOT: paths.plugin,
+        ROOT: paths.root,
+        STORE: paths.store,
+        CLI: paths.cli,
+        ACTIVITY_LOG: paths.activity,
         // C11: the dashboard shows the extraction setting it started with.
-        MNEMOSYNE_EXTRACTION: paths.extraction ?? 'unknown',
+        EXTRACTION: paths.extraction ?? 'unknown',
         // C11: and the embeddings setting it started with ('on'/'off'/'unknown').
-        MNEMOSYNE_EMBEDDINGS: paths.embeddings ?? 'unknown',
-        ...(pluginId ? { MNEMOSYNE_PLUGIN_ID: pluginId } : {}),
-        ...(paths.claudeCli ? { MNEMOSYNE_CLAUDE_CLI: paths.claudeCli } : {}),
-      },
+        EMBEDDINGS: paths.embeddings ?? 'unknown',
+        ...(pluginId ? { PLUGIN_ID: pluginId } : {}),
+        ...(paths.claudeCli ? { CLAUDE_CLI: paths.claudeCli } : {}),
+      }),
     })
     const pieces = stream[Symbol.asyncIterator]()
     let line = ''
@@ -297,7 +299,7 @@ async function join($: EngineInterface, paths: UiPaths, session: string) {
   return answer !== undefined
 }
 
-const NOT_LISTED = ' (this session could not be listed as one using the dashboard, so it may stop when another session ends; run /mnemosyne-ui again to retry)'
+const NOT_LISTED = ' (this session could not be listed as one using the dashboard, so it may stop when another session ends; run /hal-m-ui again to retry)'
 
 // Whether ui-users.json lists `session`: the lookup that survives a reload of this module (its maps start empty).
 async function listedIn($: EngineInterface, root: string, session: string) {
@@ -344,7 +346,7 @@ async function restartNote($: EngineInterface, paths: UiPaths, state: State) {
     changed.push(`started with ${before}, and embeddings is "${paths.embeddings}" now`)
   }
   if (changed.length === 0) return ''
-  return ` (this dashboard ${changed.join('; ')}. A running dashboard keeps what it started with: end the session that started it, then run /mnemosyne-ui again to restart it)`
+  return ` (this dashboard ${changed.join('; ')}. A running dashboard keeps what it started with: end the session that started it, then run /hal-m-ui again to restart it)`
 }
 
 // The version in <plugin>/.claude-plugin/plugin.json, or undefined when it cannot be read.
@@ -408,7 +410,7 @@ export async function openDashboard($: EngineInterface, paths: UiPaths, session:
         $,
         known,
         'running',
-        `${await restartNote($, paths, known)} (it did not answer a health check just now; if the page does not load, run /mnemosyne-ui again)${listed ? '' : NOT_LISTED}`,
+        `${await restartNote($, paths, known)} (it did not answer a health check just now; if the page does not load, run /hal-m-ui again)${listed ? '' : NOT_LISTED}`,
       )
     }
   }

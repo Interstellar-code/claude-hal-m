@@ -2,6 +2,12 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.38.0 (the machine names are HAL-M too)
+
+1. The plugin id and the marketplace are `hal-m` (`hal-m@hal-m`), the memory tools are `mcp__hal-m__memory_*`, the commands are `/hal-m-*`, the settings variables are `HALM_*`, the launcher is `bin/hal-m-mcp`, and the data folder is `~/.hal-m`. Install with `/plugin install hal-m --marketplace Interstellar-code/hal-m`. The GitHub repo is now `Interstellar-code/hal-m` (the old names redirect).
+2. Read as a fallback, so nothing breaks: the old `/mnemosyne-*` commands, the 34 `MNEMOSYNE_*` variables (the new name wins), the old `bin/mnemosyne-mcp` launcher (now a shim) and `.mnemosyne-root` marker, the `Mnemosyne-Owner` header and the `mnemosyne_session` cookies. On a PC with memory, `~/.hal-m` is made a link (a junction on Windows) to `~/.claude/mnemosyne`; nothing moves, and `HALM_NO_MIGRATE=1` turns the link off. The server image and compose file read both name sets, so an existing Unraid container with `MNEMOSYNE_*` settings keeps working. Kept: the Mnemopi engine name, the engine build suffix and the browser storage keys.
+3. Upgrading: the plugin id cannot be aliased, so each PC switches once (add `hal-m` as its own marketplace, install `hal-m@hal-m`, enter the options again, then remove the old plugin and marketplace). The options do not carry over. README "Upgrading from 0.37 (mnemosyne)" has the steps and the rollback; `scripts/migrate-hal-m.ts` and `docs/plans/hal-m-stage2-runbook.md` run and check it.
+
 ## 0.37.0 (Mnemosyne is now HAL-M)
 
 1. The product is called HAL-M: the dashboard (it was HAL-10000), README, DESIGN.md, the plugin's description, CLI and hook messages, and the server pages.

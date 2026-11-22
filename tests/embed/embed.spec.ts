@@ -6,21 +6,25 @@
 //
 // The cache is under a fixed temp home, not the user's real ~/.omp or
 // ~/.claude: reruns reuse the downloaded model instead of fetching it again.
-// CI or a lane that already downloaded it points MNEMOSYNE_EMBED_CACHE_HOME at
-// that home to skip the download; the store is always a fresh temp dir.
+// CI or a lane that already downloaded it points HALM_EMBED_CACHE_HOME (or the
+// old MNEMOSYNE_EMBED_CACHE_HOME) at that home to skip the download; the store
+// is always a fresh temp dir.
 import { afterAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { engineEnv } from '../../hooks/engine'
+import { envOf } from '../../hooks/names'
 
 const ROOT = join(import.meta.dir, '..', '..')
 const CLI = join(ROOT, 'engine', 'src', 'cli.ts')
 const MODEL = 'BAAI/bge-small-en-v1.5'
 
-// The model cache home, stable across runs: <home>/.claude/mnemosyne/model-cache/cache/fastembed.
-const CACHE_HOME = process.env.MNEMOSYNE_EMBED_CACHE_HOME ?? join(tmpdir(), 'mnemosyne-embed-cache-home')
+// The model cache home, stable across runs: <home>/.claude/mnemosyne/model-cache/cache/fastembed
+// (engineEnv's default PI_CONFIG_DIR, the old root's HOME-relative cache). The temp folder keeps its
+// 0.37 name so the three embed specs and existing CI caches share one download.
+const CACHE_HOME = envOf('EMBED_CACHE_HOME', process.env) ?? join(tmpdir(), 'mnemosyne-embed-cache-home')
 mkdirSync(CACHE_HOME, { recursive: true })
 const stores: string[] = []
 

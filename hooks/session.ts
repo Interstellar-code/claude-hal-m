@@ -11,6 +11,7 @@
 //   4. the first-prompt block (the newest summary, then pinned memories) and its caps;
 //   5. the sweep: its arguments to the engine (the kinds are fixed here, never widened), its 24-hour marker, and its reply.
 
+import { TOOL_PREFIX } from './names'
 import { OWNER_NAME_MAX } from './projects'
 
 // ---- options ----
@@ -254,7 +255,7 @@ const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
  * GET.3: what follows a memory the block or the first-prompt recall shows cut, so Claude knows the text goes on and how to read
  * the rest. With memory_get on (M1) it names the call; the line itself already carries the id and owner. Not counted in the cap.
  */
-export const cutMark = (getOn: boolean) => (getOn ? ' [cut: call mcp__mnemosyne__memory_get with this id and owner for the full text]' : ' [cut]')
+export const cutMark = (getOn: boolean) => (getOn ? ` [cut: call ${TOOL_PREFIX}memory_get with this id and owner for the full text]` : ' [cut]')
 
 /**
  * The first-prompt block: the newest summary, then the pinned memories, each with id and owner like a recall result.

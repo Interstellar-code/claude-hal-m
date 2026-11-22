@@ -20,27 +20,46 @@
 //    The always-on dashboard's own processes are stopped and restarted anyway.
 // 4. Engine: bin/install-engine.ts install() (built next to it, checked, then
 //    swapped). Plugin copy (<root>/plugin, the proxy and the dashboard): staged
-//    in plugin.next and swapped the same way. Launcher (bin/mnemosyne-mcp.cmd):
-//    rewritten with hooks/launcher.ts, keeping its store, activity log, guard
-//    mode, vocabulary, root, model cache and embeddings values.
-// 5. Restarts the "Mnemosyne dashboard" scheduled task (Windows) and prints
-//    old -> new plugin version and engine build.
+//    in plugin.next and swapped the same way. Launcher (bin/hal-m-mcp.cmd, read
+//    from bin/mnemosyne-mcp.cmd when the new one is missing): rewritten with
+//    hooks/launcher.ts, keeping its store, activity log, guard mode, vocabulary,
+//    root, model cache and embeddings values (paths under the 0.37 root follow
+//    the resolved root); the old name is rewritten as a shim that runs it.
+// 5. Restarts the "HAL-M dashboard" scheduled task (or the 0.37 "Mnemosyne
+//    dashboard" one) on Windows and prints old -> new plugin version and engine build.
+// <root> is the data root T1's resolver picks (HALM_ROOT, ~/.hal-m, or the 0.37
+// ~/.claude/mnemosyne while it is not linked yet). The updater never links,
+// moves or renames it, nor the folder it runs from: a 0.37 parent that staged
+// this release under <old root>/update-staging still finds its install here.
 // It never writes the store, config.json, vocabulary.json or the activity log,
 // holds <root>/engine.lock while it changes anything, and on failure leaves the
 // old engine and plugin copy in place. Exit codes: 0 done or up to date, 1
 // failure, 2 refused while engines run, 3 another install holds the lock.
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { EMBEDDINGS_CACHE_DIR } from '../hooks/engine'
-import { cmdWrapper, type LauncherOptions, shWrapper } from '../hooks/launcher'
+import { launcherFile, type LauncherOptions, launcherText as launcherTextFor, oldLauncherFile, shimText } from '../hooks/launcher'
+import { commandName, envOf, modelCacheDir, newRootOf, oldRootOf, rebasePath } from '../hooks/names'
 import { slashes } from '../hooks/owner'
 import { VOCAB_FILE } from '../hooks/vocab'
 import { cliOf, install, isInside, LockBusy, lockTimingFromEnv, proxyClosure, windowsPathProblem, withInstallLock } from './install-engine'
+import { dataRoot } from './migrate-root'
 
-export const REPO = 'Interstellar-code/claude-hal-m'
-export const TASK_NAME = 'Mnemosyne dashboard'
-export const SHORTCUT_NAME = 'Update Mnemosyne'
+export const REPO = 'Interstellar-code/hal-m'
+// The always-on dashboard's scheduled task (made by hand from the README): the
+// new name first, then the 0.37 one, which existing PCs keep until the runbook renames it.
+export const TASK_NAME = 'HAL-M dashboard'
+export const OLD_TASK_NAME = 'Mnemosyne dashboard'
+export const TASK_NAMES = [TASK_NAME, OLD_TASK_NAME] as const
+export const SHORTCUT_NAME = 'Update HAL-M'
+export const OLD_SHORTCUT_NAME = 'Update Mnemosyne'
+// The Start Menu scripts in the dashboard folder; the old names are rewritten as forwarders.
+export const SHORTCUT_SCRIPT = 'update-hal-m'
+export const OLD_SHORTCUT_SCRIPT = 'update-mnemosyne'
+// The always-on dashboard's folder (run-ui.ps1, start-ui.cmd, open-dashboard.vbs): new, then the 0.37 one.
+export const UI_DIR_NAME = '.hal-m-ui'
+export const OLD_UI_DIR_REL = ['.claude', 'mnemosyne-ui'] as const
 export const EXIT = { ok: 0, failed: 1, blocked: 2, busy: 3 } as const
 
 export class UpdateError extends Error {
@@ -97,27 +116,97 @@ export function parseArgs(argv: readonly string[]): UpdateOptions {
 
 // ---------------------------------------------------------------- layout
 
-/** Every path the updater reads or writes under a home folder (the Claude Code plugin's layout). */
-export function homeLayout(home: string, appData = process.env.APPDATA) {
-  const root = join(home, '.claude', 'mnemosyne')
-  const uiDir = join(home, '.claude', 'mnemosyne-ui')
+/** A path's real spelling (links followed), or undefined when it does not exist. */
+const realOf = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Every spelling of one root folder: the root itself, its real path, and each
+ * default spelling (old or new) whose real path is the same folder (a link
+ * between them). Processes started by 0.37 name the old spelling, ones started
+ * through the link the new one.
+ */
+export function rootSpellings(home: string, root: string) {
+  const spellings = [root]
+  const real = realOf(root)
+  if (real === undefined) return spellings
+  spellings.push(real)
+  const fold = (path: string | undefined) => (path !== undefined && process.platform === 'win32' ? path.toLowerCase() : path)
+  for (const other of [oldRootOf(home), newRootOf(home)]) if (fold(realOf(other)) === fold(real)) spellings.push(other)
+  return [...new Set(spellings)]
+}
+
+/**
+ * Every path the updater reads or writes under a home folder. The root comes
+ * from T1's resolver (bin/migrate-root.ts dataRoot: HALM_ROOT or MNEMOSYNE_ROOT,
+ * else ~/.hal-m, else the 0.37 ~/.claude/mnemosyne while it is not linked), so a
+ * standalone 0.37 install is still found; the updater never links or moves it.
+ */
+export function homeLayout(home: string, appData = process.env.APPDATA, env: Record<string, string | undefined> = process.env, platform: string = process.platform) {
+  const decision = dataRoot(home, env)
+  const root = decision.root
+  // The dashboard folder: the new one once it exists (or when there is no old one), else the 0.37
+  // folder the hand-made scheduled task scripts live in (moving them is a runbook step).
+  const uiDirs = [join(home, UI_DIR_NAME), join(home, ...OLD_UI_DIR_REL)]
+  const uiDir = existsSync(uiDirs[0]!) || !existsSync(uiDirs[1]!) ? uiDirs[0]! : uiDirs[1]!
   return {
     home,
     root,
+    /** The resolver's state for the root (old-only, new-links-old, both-real, explicit, ...). */
+    rootState: decision.state,
+    /** Set when the two root folders need a person (both real, a foreign link); printed once per run. */
+    rootWarning: decision.warning,
+    /** Every spelling of the root (itself, its real path, a linked default spelling), for matching command lines. */
+    roots: rootSpellings(home, root),
     engine: join(root, 'engine'),
     plugin: join(root, 'plugin'),
     store: join(root, 'store'),
-    launcher: join(root, 'bin', `mnemosyne-mcp${process.platform === 'win32' ? '.cmd' : ''}`),
+    launcher: join(root, 'bin', launcherFile(platform)),
+    /** The 0.37 launcher name: read when the new one is missing, rewritten as a shim. */
+    oldLauncher: join(root, 'bin', oldLauncherFile(platform)),
     vocabulary: join(root, VOCAB_FILE),
     activity: join(root, 'activity.jsonl'),
     embeddingsMarker: join(root, 'embeddings.json'),
     lock: join(root, 'engine.lock'),
     staging: join(root, 'update-staging'),
     uiDir,
+    /** Both dashboard folders, new first; the dashboard's processes may run from either. */
+    uiDirs,
     startMenu: join(appData ?? join(home, 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
   }
 }
 export type Layout = ReturnType<typeof homeLayout>
+
+/** The layout's own paths (no state or warning text), for checks over every path. */
+export const layoutPaths = (layout: Layout) => [
+  layout.home,
+  ...layout.roots,
+  layout.engine,
+  layout.plugin,
+  layout.store,
+  layout.launcher,
+  layout.oldLauncher,
+  layout.vocabulary,
+  layout.activity,
+  layout.embeddingsMarker,
+  layout.lock,
+  layout.staging,
+  ...layout.uiDirs,
+  layout.startMenu,
+]
+
+/** Why `source` (--from) cannot be installed from, or undefined: inside the engine or the plugin copy (real paths, so a link spelling cannot hide it). */
+export function sourceProblem(source: string, layout: Layout) {
+  for (const folder of [layout.engine, layout.plugin, `${layout.plugin}.next`, `${layout.plugin}.old`]) {
+    if (isInside(source, folder)) return `the source ${source} is inside ${folder}; pass a checkout outside the install`
+  }
+  return undefined
+}
 
 /** The dashboard's port and token for its restarted self (written by ui/update-routes.ts, read once by ui/server.ts). */
 export const HANDOFF_FILE = 'ui-handoff.json'
@@ -204,7 +293,8 @@ export function latestReleaseTag(tags: readonly string[]) {
 
 // ---------------------------------------------------------------- what is installed / offered
 
-export type InstallState = { pluginVersion?: string; engineBuild?: string; launcherText?: string }
+// launcherText: the launcher (the new name, else the 0.37 name when that is not a shim); shimText: what the old name holds.
+export type InstallState = { pluginVersion?: string; engineBuild?: string; launcherText?: string; shimText?: string }
 export type SourceState = { dir: string; pluginVersion?: string; engineBuild?: string; hasUpdater: boolean }
 
 const readJson = (file: string): Record<string, unknown> | undefined => {
@@ -219,11 +309,19 @@ const versionIn = (file: string) => {
   return typeof version === 'string' ? version : undefined
 }
 
+const readText = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : undefined)
+/** A file the shim generator wrote (either platform's form): it holds no settings to keep. */
+const isShim = (text: string) => text === shimText('win32') || text === shimText('linux')
+
 export function readInstalled(layout: Layout): InstallState {
+  const current = readText(layout.launcher)
+  const old = readText(layout.oldLauncher)
   return {
     pluginVersion: versionIn(join(layout.plugin, '.claude-plugin', 'plugin.json')),
     engineBuild: versionIn(join(layout.engine, 'node_modules', '@oh-my-pi', 'pi-mnemopi', 'package.json')),
-    launcherText: existsSync(layout.launcher) ? readFileSync(layout.launcher, 'utf8') : undefined,
+    // The first 0.38 run finds only the 0.37 name: its values are kept (F-M1 c).
+    launcherText: current ?? (old !== undefined && !isShim(old) ? old : undefined),
+    shimText: old,
   }
 }
 
@@ -262,29 +360,47 @@ export function parseLauncher(text: string) {
   return { values, unset }
 }
 
+/** True when the layout's root is the 0.37 root by its text (the rule hooks/register.ts paths() uses for the model cache). */
+const onOldRoot = (layout: Layout) => slashes(layout.root) === slashes(oldRootOf(layout.home))
+
+/** The model cache (PI_CONFIG_DIR) for a root: the relative 0.37 value on the old root (its bytes stay), else <root>/model-cache. */
+export const defaultModelCache = (layout: Layout) => (onOldRoot(layout) ? EMBEDDINGS_CACHE_DIR : slashes(modelCacheDir(layout.root)))
+
 /**
  * The launcher this update writes: engine and proxy paths pointed at the
  * layout, every user choice (store, activity log, guard mode, vocabulary, root,
  * model cache, embeddings) kept from the existing one, defaults where it had none.
+ * HALM_<X> is read before MNEMOSYNE_<X> (a 0.37 launcher has only the old names).
+ * A kept path at or under the 0.37 root is moved onto the resolved root
+ * (rebasePath), so old defaults follow the root; any other path stays as written.
  */
 export function launcherFor(layout: Layout, existing: string | undefined, embeddingsDefault: boolean): LauncherOptions {
   const { values, unset } = parseLauncher(existing ?? '')
-  const keep = (key: string, fallback: string) => values.get(key) ?? fallback
+  const named = (name: 'ACTIVITY_LOG' | 'GUARD_MODE' | 'VOCABULARY' | 'ROOT') => envOf(name, key => values.get(key))
+  const rebase = (value: string) => {
+    const moved = rebasePath(value, layout.home, layout.root)
+    return moved === value ? value : slashes(moved)
+  }
+  const keepPath = (value: string | undefined, fallback: string) => (value === undefined ? fallback : rebase(value))
   const noEmbeddings = values.get('MNEMOPI_NO_EMBEDDINGS')
+  const cache = values.get('PI_CONFIG_DIR')
   return {
-    store: keep('MNEMOPI_DATA_DIR', slashes(layout.store)),
+    store: keepPath(values.get('MNEMOPI_DATA_DIR'), slashes(layout.store)),
     cli: slashes(cliOf(layout.engine)),
     proxy: slashes(join(layout.plugin, 'bin', 'mcp-proxy.ts')),
-    activity: keep('MNEMOSYNE_ACTIVITY_LOG', slashes(layout.activity)),
+    // Empty is a value here: activityLog off (envOf keeps it).
+    activity: keepPath(named('ACTIVITY_LOG'), slashes(layout.activity)),
     embeddings: noEmbeddings !== undefined ? noEmbeddings === '' : unset.has('MNEMOPI_NO_EMBEDDINGS') ? true : embeddingsDefault,
-    guardMode: keep('MNEMOSYNE_GUARD_MODE', 'strict'),
-    vocabulary: keep('MNEMOSYNE_VOCABULARY', slashes(layout.vocabulary)),
-    root: keep('MNEMOSYNE_ROOT', slashes(layout.root)),
-    modelCacheDir: keep('PI_CONFIG_DIR', EMBEDDINGS_CACHE_DIR),
+    guardMode: named('GUARD_MODE') ?? 'strict',
+    vocabulary: keepPath(named('VOCABULARY'), slashes(layout.vocabulary)),
+    root: keepPath(named('ROOT'), slashes(layout.root)),
+    // On the old root the 0.37 value stays as written (the relative default keeps its bytes).
+    modelCacheDir: cache === undefined ? defaultModelCache(layout) : onOldRoot(layout) ? cache : rebase(cache),
   }
 }
 
-export const launcherText = (options: LauncherOptions, windows = process.platform === 'win32') => (windows ? cmdWrapper(options) : shWrapper(options))
+/** The launcher text for a platform, from T1's one generator (hooks/launcher.ts). */
+export const launcherText = (options: LauncherOptions, windows = process.platform === 'win32') => launcherTextFor(options, windows ? 'win32' : 'linux')
 
 // ---------------------------------------------------------------- processes
 
@@ -302,24 +418,36 @@ export type Classified = {
   others: Proc[]
 }
 
-/** Sorts running processes into chat connections, the dashboard's tree and other users of the install, by the layout's paths. */
+/** The Start Menu scripts' names, new and old: the updater's own, never a user of the install. */
+const UPDATER_SCRIPTS = [`${SHORTCUT_SCRIPT}.ps1`, `${OLD_SHORTCUT_SCRIPT}.ps1`]
+
+/**
+ * Sorts running processes into chat connections, the dashboard's tree and other users of the install, by the layout's paths:
+ * the plugin copy and engine under every spelling of the root (layout.roots: a 0.37 process names the old one, a link
+ * the new one), and the dashboard scripts in either dashboard folder (layout.uiDirs).
+ */
 export function classifyProcesses(processes: readonly Proc[], layout: Layout, windows = process.platform === 'win32'): Classified {
   const norm = (text: string) => {
     const s = text.replace(/\\/g, '/')
     return windows ? s.toLowerCase() : s
   }
-  const engine = norm(cliOf(layout.engine))
-  const proxy = norm(join(layout.plugin, 'bin', 'mcp-proxy.ts'))
-  const server = norm(join(layout.plugin, 'ui', 'server.ts'))
-  const loop = norm(join(layout.uiDir, 'run-ui.ps1'))
-  const starter = norm(join(layout.uiDir, 'start-ui.cmd'))
-  const inInstall = [`${norm(layout.plugin)}/`, `${norm(layout.engine)}/`]
+  const pluginRel = relative(layout.root, layout.plugin)
+  const engineRel = relative(layout.root, layout.engine)
+  const roots = layout.roots.length > 0 ? layout.roots : [layout.root]
+  const plugins = roots.map(root => join(root, pluginRel))
+  const engineDirs = roots.map(root => join(root, engineRel))
+  const engines = engineDirs.map(dir => norm(cliOf(dir)))
+  const proxies = plugins.map(dir => norm(join(dir, 'bin', 'mcp-proxy.ts')))
+  const servers = plugins.map(dir => norm(join(dir, 'ui', 'server.ts')))
+  const uiDirs = layout.uiDirs.length > 0 ? layout.uiDirs : [layout.uiDir]
+  const scripts = uiDirs.flatMap(dir => [norm(join(dir, 'run-ui.ps1')), norm(join(dir, 'start-ui.cmd'))])
+  const inInstall = [...plugins, ...engineDirs].map(dir => `${norm(dir)}/`)
   const byPid = new Map(processes.map(p => [p.pid, p]))
   const kind = (p: Proc) => {
     const c = norm(p.command)
-    if (c.includes(server) || c.includes(loop) || c.includes(starter)) return 'dashboard'
-    if (c.includes(proxy)) return 'proxy'
-    if (c.includes(engine)) return 'engine'
+    if ([...servers, ...scripts].some(path => c.includes(path))) return 'dashboard'
+    if (proxies.some(path => c.includes(path))) return 'proxy'
+    if (engines.some(path => c.includes(path))) return 'engine'
     return undefined
   }
   const kinds = new Map(processes.map(p => [p.pid, kind(p)]))
@@ -355,7 +483,7 @@ export function classifyProcesses(processes: readonly Proc[], layout: Layout, wi
     } else if (top === undefined) {
       const c = norm(p.command)
       // The updater itself (and its Start Menu script) only reads its files; Bun keeps no handle on them.
-      if (inInstall.some(path => c.includes(path)) && !c.includes('/bin/update.ts') && !c.includes('update-mnemosyne.ps1')) others.push(p)
+      if (inInstall.some(path => c.includes(path)) && !c.includes('/bin/update.ts') && !UPDATER_SCRIPTS.some(script => c.includes(script))) others.push(p)
     }
   }
   return { chats: [...chats.values()], dashboard, others }
@@ -412,20 +540,22 @@ export function planUpdate(input: {
   installed: InstallState
   source: SourceState
   expectedLauncher: string
+  /** The shim the old launcher name should hold; a missing or stale one is rewritten too. */
+  expectedShim?: string
   processes: Classified
   windows: boolean
   force: boolean
   stopEngines: boolean
 }): Plan {
   const { installed, source, processes, windows, force } = input
-  if (source.engineBuild === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no engine/package.json; it is not a claude-hal-m checkout` }
-  if (source.pluginVersion === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no .claude-plugin/plugin.json; it is not a claude-hal-m checkout` }
+  if (source.engineBuild === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no engine/package.json; it is not a hal-m checkout` }
+  if (source.pluginVersion === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no .claude-plugin/plugin.json; it is not a hal-m checkout` }
   if (!force && compareVersions(source.pluginVersion, installed.pluginVersion) < 0) {
     return { kind: 'refused', code: EXIT.failed, message: `the installed plugin ${installed.pluginVersion} is newer than ${source.pluginVersion}; nothing was changed (--force installs the older one)` }
   }
   const engine = force || installed.engineBuild !== source.engineBuild
   const plugin = force || installed.pluginVersion !== source.pluginVersion
-  const launcher = force || installed.launcherText !== input.expectedLauncher
+  const launcher = force || installed.launcherText !== input.expectedLauncher || (input.expectedShim !== undefined && installed.shimText !== input.expectedShim)
   if (!engine && !plugin && !launcher) {
     return { kind: 'up-to-date', message: `HAL-M is up to date: plugin ${installed.pluginVersion}, engine ${installed.engineBuild}.` }
   }
@@ -559,10 +689,10 @@ function swapPlugin(layout: Layout) {
 
 const psQuote = (text: string) => `'${text.replace(/'/g, "''")}'`
 
-/** update-mnemosyne.ps1: runs the update hidden and shows the result in a message box. */
+/** update-hal-m.ps1: runs the update hidden and shows the result in a message box. */
 export function shortcutScript(layout: Layout, bun: string) {
   return `# Updates HAL-M (Claude Desktop, no Claude Code) and shows the result.
-# Written by bin/update.ts; the Start Menu entry "${SHORTCUT_NAME}" runs it through update-mnemosyne.vbs, with no window.
+# Written by bin/update.ts; the Start Menu entry "${SHORTCUT_NAME}" runs it through ${SHORTCUT_SCRIPT}.vbs, with no window.
 param([switch]$StopEngines)
 $updater = ${psQuote(join(layout.plugin, 'bin', 'update.ts'))}
 $bun = ${psQuote(bun)}
@@ -586,21 +716,48 @@ $icon = if ($code -eq 0) { 'Information' } else { 'Error' }
 `
 }
 
-/** update-mnemosyne.vbs: starts the script with no console window, as open-dashboard.vbs does. */
-export const shortcutVbs = () => `' Runs update-mnemosyne.ps1 (the HAL-M update) with no console window. Written by bin/update.ts.
+/** update-hal-m.vbs: starts the script with no console window, as open-dashboard.vbs does. */
+export const shortcutVbs = () => `' Runs ${SHORTCUT_SCRIPT}.ps1 (the HAL-M update) with no console window. Written by bin/update.ts.
 Dim sh, dir
 Set sh = CreateObject("WScript.Shell")
 dir = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
-sh.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & dir & "\\update-mnemosyne.ps1""", 0, False
+sh.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & dir & "\\${SHORTCUT_SCRIPT}.ps1""", 0, False
 `
 
+/**
+ * update-mnemosyne.ps1 / .vbs, rewritten as forwarders to the new scripts (a pinned copy of the
+ * old Start Menu entry, or a hand-made link, keeps working). Paths are absolute: rewritten at every run.
+ */
+export const forwardingScript = (target: string) => `# The 0.37 name of the HAL-M update script, kept as a forwarder. Written by bin/update.ts.
+& ${psQuote(target)} @args
+`
+export const forwardingVbs = (target: string) => `' The 0.37 name of the HAL-M update script, kept as a forwarder. Written by bin/update.ts.
+CreateObject("WScript.Shell").Run "wscript.exe //B //Nologo ""${target.replace(/"/g, '""')}""", 0, False
+`
+
+/** Writes a Windows text file with \r\n line ends. */
+const writeCrlf = (file: string, text: string) => writeFileSync(file, text.replace(/\r?\n/g, '\r\n'))
+
+/**
+ * The Start Menu entry: update-hal-m.ps1/.vbs in the dashboard folder and "Update HAL-M.lnk". The 0.37
+ * "Update Mnemosyne.lnk" is removed (no second entry), and update-mnemosyne.ps1/.vbs, where they exist
+ * in either dashboard folder, are rewritten as forwarders to the new scripts (never newly created).
+ */
 async function installShortcut(layout: Layout, run: Runner) {
   mkdirSync(layout.uiDir, { recursive: true })
   const bun = join(layout.home, '.bun', 'bin', 'bun.exe')
-  writeFileSync(join(layout.uiDir, 'update-mnemosyne.ps1'), shortcutScript(layout, existsSync(bun) ? bun : process.execPath).replace(/\r?\n/g, '\r\n'))
-  writeFileSync(join(layout.uiDir, 'update-mnemosyne.vbs'), shortcutVbs().replace(/\r?\n/g, '\r\n'))
+  const script = join(layout.uiDir, `${SHORTCUT_SCRIPT}.ps1`)
+  const vbs = join(layout.uiDir, `${SHORTCUT_SCRIPT}.vbs`)
+  writeCrlf(script, shortcutScript(layout, existsSync(bun) ? bun : process.execPath))
+  writeCrlf(vbs, shortcutVbs())
+  for (const dir of layout.uiDirs) {
+    const oldScript = join(dir, `${OLD_SHORTCUT_SCRIPT}.ps1`)
+    const oldVbs = join(dir, `${OLD_SHORTCUT_SCRIPT}.vbs`)
+    if (existsSync(oldScript)) writeCrlf(oldScript, forwardingScript(script))
+    if (existsSync(oldVbs)) writeCrlf(oldVbs, forwardingVbs(vbs))
+  }
+  rmSync(join(layout.startMenu, `${OLD_SHORTCUT_NAME}.lnk`), { force: true })
   const link = join(layout.startMenu, `${SHORTCUT_NAME}.lnk`)
-  const vbs = join(layout.uiDir, 'update-mnemosyne.vbs')
   const ps = [
     `$s = (New-Object -ComObject WScript.Shell).CreateShortcut(${psQuote(link)})`,
     `$s.TargetPath = Join-Path $env:SystemRoot 'System32\\wscript.exe'`,
@@ -722,21 +879,24 @@ async function stopProcesses(pids: readonly number[], runner: Runner) {
   throw new UpdateError(`processes ${pids.join(', ')} did not stop`)
 }
 
-async function taskExists(runner: Runner) {
-  return (await runner(['schtasks.exe', '/Query', '/TN', TASK_NAME])).exitCode === 0
+/** The dashboard's scheduled task by its name: "HAL-M dashboard", else the 0.37 "Mnemosyne dashboard"; undefined when neither exists. */
+export async function findTask(runner: Runner) {
+  for (const name of TASK_NAMES) if ((await runner(['schtasks.exe', '/Query', '/TN', name])).exitCode === 0) return name
+  return undefined
 }
 
 /** Starts the always-on dashboard again through its scheduled task (the loop starts the server, hidden). */
 async function restartDashboard(layout: Layout, runner: Runner, wasRunning: boolean) {
-  if (process.platform !== 'win32') return wasRunning ? 'The dashboard was not restarted; start it again with /mnemosyne-ui.' : ''
-  if (!(await taskExists(runner))) return wasRunning ? `The dashboard was stopped; no "${TASK_NAME}" task to restart it, so start it again yourself.` : ''
-  const done = await runner(['schtasks.exe', '/Run', '/TN', TASK_NAME])
-  if (done.exitCode !== 0) return `Could not start the "${TASK_NAME}" task: ${done.stderr.trim()}`
+  if (process.platform !== 'win32') return wasRunning ? `The dashboard was not restarted; start it again with /${commandName('ui')}.` : ''
+  const task = await findTask(runner)
+  if (task === undefined) return wasRunning ? `The dashboard was stopped; no "${TASK_NAME}" (or "${OLD_TASK_NAME}") task to restart it, so start it again yourself.` : ''
+  const done = await runner(['schtasks.exe', '/Run', '/TN', task])
+  if (done.exitCode !== 0) return `Could not start the "${task}" task: ${done.stderr.trim()}`
   for (let i = 0; i < 30; i++) {
     if (classifyProcesses(await listProcesses(runner), layout).dashboard.some(p => p.command.toLowerCase().includes('server.ts'))) return 'Dashboard restarted.'
     await Bun.sleep(1000)
   }
-  return `The "${TASK_NAME}" task was started, but no dashboard process appeared within 30 seconds; see ${join(layout.uiDir, 'ui-service.log')}.`
+  return `The "${task}" task was started, but no dashboard process appeared within 30 seconds; see ${join(layout.uiDir, 'ui-service.log')}.`
 }
 
 /** Stages the latest (or the given) release tag in `dir`: git when it is installed, else the GitHub tarball and tar. */
@@ -757,7 +917,7 @@ export async function stageRelease(dir: string, tag: string | undefined, runner:
     return tag
   }
   if (tag === undefined) {
-    const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'claude-hal-m-update' } })
+    const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'hal-m-update' } })
     if (!reply.ok) throw new UpdateError(`could not list the releases (GitHub answered ${reply.status}); install Git or pass --from <checkout>`)
     tag = latestReleaseTag(((await reply.json()) as { name: string }[]).map(t => t.name))
     if (tag === undefined) throw new UpdateError(`${REPO} has no vX.Y.Z release tag`)
@@ -783,7 +943,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
   const windows = process.platform === 'win32'
   const layout = homeLayout(resolve(options.home ?? homedir()))
   if (windows) {
-    const problem = windowsPathProblem(Object.values(layout))
+    const problem = windowsPathProblem(layoutPaths(layout))
     if (problem) throw new UpdateError(problem)
   }
   if (options.installShortcut) {
@@ -815,9 +975,12 @@ export async function main(argv: readonly string[], log: (line: string) => void 
     }
   }
   const sourceDir = resolve(options.from)
-  for (const folder of [layout.engine, layout.plugin, `${layout.plugin}.next`, `${layout.plugin}.old`]) {
-    if (isInside(sourceDir, folder)) throw new UpdateError(`the source ${sourceDir} is inside ${folder}; pass a checkout outside the install`)
-  }
+  // Real paths: a 0.37 parent staged this release under <old root>/update-staging, which the
+  // resolved root may spell through the link; that is outside the engine and plugin copy either way.
+  const problem = sourceProblem(sourceDir, layout)
+  if (problem) throw new UpdateError(problem)
+  // Said once per run, by the run that does the work (a staging parent leaves it to this one).
+  if (layout.rootWarning) log(layout.rootWarning)
 
   return withInstallLock(
     layout.lock,
@@ -836,6 +999,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
         if (isInside(store, folder)) throw new UpdateError(`the store ${store} is inside ${folder}; refusing to update`)
       }
       const expectedLauncher = launcherText(launcher, windows)
+      const expectedShim = shimText(windows ? 'win32' : 'linux')
       const deadline = Date.now() + options.waitSeconds * 1000
       let processes = classifyProcesses(await listProcesses(run), layout, windows)
       // --wait: give running chats time to end before the swap is tried (it may well succeed while they run).
@@ -846,7 +1010,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
           processes = classifyProcesses(await listProcesses(run), layout, windows)
         }
       }
-      const plan = planUpdate({ installed: before, source, expectedLauncher, processes, windows, force: options.force, stopEngines: options.stopEngines })
+      const plan = planUpdate({ installed: before, source, expectedLauncher, expectedShim, processes, windows, force: options.force, stopEngines: options.stopEngines })
       if (plan.kind === 'refused') throw new UpdateError(plan.message, plan.code)
       if (plan.kind === 'up-to-date') {
         log(plan.message)
@@ -881,8 +1045,13 @@ export async function main(argv: readonly string[], log: (line: string) => void 
           log(`Plugin copy ${source.pluginVersion} is in place.`)
         }
         if (plan.launcher) {
+          // The new name first, then the old name as a shim that runs it (both by rename, never in place).
           const written = writeLauncher(layout.launcher, expectedLauncher)
           if (written !== true) messages.push(`The launcher was not rewritten (${written}); the old one keeps working. Run the update again once Claude Desktop is closed.`)
+          else {
+            const shim = writeLauncher(layout.oldLauncher, expectedShim)
+            if (shim !== true) messages.push(`The old launcher name ${layout.oldLauncher} was not rewritten as a shim (${shim}); run the update again once Claude Desktop is closed.`)
+          }
         }
       } catch (error) {
         rmSync(`${layout.plugin}.next`, { recursive: true, force: true })
@@ -915,7 +1084,7 @@ export async function main(argv: readonly string[], log: (line: string) => void 
       log('Restart Claude Desktop (and other MCP clients) to use the new version.')
       return EXIT.ok
     },
-    lockTimingFromEnv(process.env.MNEMOSYNE_LOCK_WAIT_MS),
+    lockTimingFromEnv(envOf('LOCK_WAIT_MS', process.env)),
   )
 }
 

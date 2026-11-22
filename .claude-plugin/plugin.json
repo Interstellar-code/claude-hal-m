@@ -1,14 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "mnemosyne",
+  "name": "hal-m",
   "displayName": "HAL-M",
-  "version": "0.37.0",
+  "version": "0.38.0",
   "description": "Long-term memory for Claude Code across sessions and repos, on its own private copy of the HAL-M Memory engine and its own store.",
   "author": {
     "name": "Interstellar-code"
   },
-  "homepage": "https://github.com/Interstellar-code/claude-hal-m",
-  "repository": "https://github.com/Interstellar-code/claude-hal-m",
+  "homepage": "https://github.com/Interstellar-code/hal-m",
+  "repository": "https://github.com/Interstellar-code/hal-m",
   "license": "MIT",
   "keywords": [
     "memory",
@@ -47,7 +47,7 @@
         "off"
       ],
       "default": "on",
-      "description": "on: each memory call (recall, remember, update, forget, stats, and calls from other MCP clients) adds one line to ~/.claude/mnemosyne/activity.jsonl, owner-only, capped at 1 MB with one backup, secrets masked. off: nothing is written."
+      "description": "on: each memory call (recall, remember, update, forget, stats, and calls from other MCP clients) adds one line to activity.jsonl in the HAL-M data folder (~/.hal-m, which on a PC upgraded from 0.37 links to ~/.claude/mnemosyne), owner-only, capped at 1 MB with one backup, secrets masked. off: nothing is written."
     },
     "guardMode": {
       "title": "Save guard mode",
@@ -62,8 +62,8 @@
     "memoryDir": {
       "title": "Memory store",
       "type": "string",
-      "default": "~/.claude/mnemosyne/store",
-      "description": "Leave empty for the default: ~/.claude/mnemosyne/store (macOS, Linux) or %USERPROFILE%\\.claude\\mnemosyne\\store (Windows). Or give an absolute path, or one starting with ~/."
+      "default": "~/.hal-m/store",
+      "description": "Leave empty for the default: ~/.hal-m/store (macOS, Linux) or %USERPROFILE%\\.hal-m\\store (Windows), inside the HAL-M data folder (still ~/.claude/mnemosyne until ~/.hal-m links to it). Or give an absolute path, or one starting with ~/."
     },
     "rememberTerms": {
       "title": "Remember terms",
@@ -92,13 +92,13 @@
       "title": "Share with other MCP clients",
       "type": "boolean",
       "default": false,
-      "description": "Off by default. On: writes ~/.claude/mnemosyne/bin/mnemosyne-mcp (mnemosyne-mcp.cmd on Windows), a stdio MCP server other tools (Cursor, Codex, claude mcp add) can use with this memory. Off removes it."
+      "description": "Off by default. On: writes bin/hal-m-mcp in the HAL-M data folder (hal-m-mcp.cmd on Windows; the old mnemosyne-mcp name stays as a shim that runs it), a stdio MCP server other tools (Cursor, Codex, claude mcp add) can use with this memory. Off removes it."
     },
     "extractionModel": {
       "title": "Knowledge extraction model",
       "type": "string",
       "default": "haiku",
-      "description": "The model that pulls facts, preferences, instructions, dated events and relations out of each saved memory in the background (an alias such as haiku, or a full model id). It also drives /mnemosyne-tags. off turns extraction off: no model call, and /mnemosyne-tags says so."
+      "description": "The model that pulls facts, preferences, instructions, dated events and relations out of each saved memory in the background (an alias such as haiku, or a full model id). It also drives /hal-m-tags. off turns extraction off: no model call, and /hal-m-tags says so."
     },
     "sessionSummary": {
       "title": "Summarise the last session",
@@ -127,7 +127,7 @@
         "off"
       ],
       "default": "auto",
-      "description": "auto: on only on macOS on Apple Silicon (the tested platform), off elsewhere. on: always on. off: keyword-only recall. Embeddings run on this machine only; /mnemosyne-setup downloads the model once (about 63 MB from huggingface.co), and /mnemosyne-embed fills vectors for memories saved before."
+      "description": "auto: on only on macOS on Apple Silicon (the tested platform), off elsewhere. on: always on. off: keyword-only recall. Embeddings run on this machine only; /hal-m-setup downloads the model once (about 63 MB from huggingface.co), and /hal-m-embed fills vectors for memories saved before."
     },
     "serverUrl": {
       "title": "Server URL",

@@ -1,5 +1,5 @@
 // Claude HAL-M — the importers' file and store reader (plan phase IMPORT). A hook
-// cannot read SQLite and `$.fs.read` refuses files over 4 MiB, so /mnemosyne-import runs this file:
+// cannot read SQLite and `$.fs.read` refuses files over 4 MiB, so /hal-m-import runs this file:
 //   bun bin/import.ts doc <path>                  a .md or .txt file under 1 MB, split into chunks, as JSON
 //   bun bin/import.ts --store <dir> origins <path> [--owner <owner>]  the live rows an earlier import made from <path> (only <owner>'s when given), as JSON
 //   bun bin/import.ts save <root>/import-proposed.json  the proposal on stdin, saved 0600

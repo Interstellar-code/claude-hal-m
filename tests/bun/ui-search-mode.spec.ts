@@ -135,7 +135,7 @@ for (const line of lines) {
     expect(found.results[0]).toMatchObject({ matched: 'keyword', dense_score: 0 })
     const refused = await post({ query: 'orchard', mode: 'hybrid' })
     expect(refused.status).toBe(400)
-    expect(((await refused.json()) as { error: string }).error).toContain('/mnemosyne-setup')
+    expect(((await refused.json()) as { error: string }).error).toContain('/hal-m-setup')
     expect(flags()).toEqual(['1|x'])
   })
 

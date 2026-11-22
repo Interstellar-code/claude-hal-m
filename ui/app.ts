@@ -1,7 +1,7 @@
 // The HAL-M dashboard page. Built by ui/server.ts with Bun.build at server
 // start and served as /app.js.
 //
-// The link from /mnemosyne-ui carries the token in the URL fragment
+// The link from /hal-m-ui carries the token in the URL fragment
 // (#token=...), which no request sends. The page takes it from there, removes
 // it from the address bar with history.replaceState, and keeps it in this
 // tab's sessionStorage for reloads. Every /api call sends it as an
@@ -143,7 +143,7 @@ const VIEW_NAMES: Record<View, string> = { map: 'Map', memories: 'Memories', act
 const FEED_KEEP = 1000
 const FEED_SHOW = 300
 const CONNECTED = 'Connected to the local HAL-M server.'
-export const LOST = 'The HAL-M server has stopped (its Claude session ended). Run /mnemosyne-ui in Claude Code to start it again.'
+export const LOST = 'The HAL-M server has stopped (its Claude session ended). Run /hal-m-ui in Claude Code to start it again.'
 
 type Owner = { owner: string; count: number }
 
@@ -686,9 +686,9 @@ export const ORIGIN_HELP: Record<string, string> = {
   hook: 'hook: automatic recall on a first prompt or after a compaction',
   tool: 'tool: Claude called a memory tool in Claude Code',
   trigger: 'trigger: you typed a trigger phrase, such as “remember that”',
-  external: 'external: another MCP client, through mnemosyne-mcp',
+  external: 'external: another MCP client, through hal-m-mcp',
   ui: 'ui: this dashboard (search, forget, save, retire or restore)',
-  backfill: 'backfill: the one-time tagging run, /mnemosyne-tags',
+  backfill: 'backfill: the one-time tagging run, /hal-m-tags',
   import: 'import: a document or a session log brought in through the save guard',
   session: 'session: the session summary or the expiry of unused memories, run by the plugin',
 }
@@ -1038,7 +1038,7 @@ function expire() {
     showSignIn('Your session ended. Sign in again.')
     return
   }
-  setStatus('This link no longer works (the server was restarted). Run /mnemosyne-ui again for a fresh link.', 'error')
+  setStatus('This link no longer works (the server was restarted). Run /hal-m-ui again for a fresh link.', 'error')
   // 0.17.0: the recovery card (two steps, a Copy button, what this means) and the pill in its expired state.
   setConnection('expired')
   byId('expired').hidden = false
@@ -1105,7 +1105,7 @@ async function getJson(path: string): Promise<{ status: number; body: unknown }>
 
 function expiredText(err: unknown) {
   if (!(err instanceof Expired)) return `Could not reach the server: ${failure(err)}`
-  return serverMode ? 'Your session ended. Sign in again.' : 'This link no longer works. Run /mnemosyne-ui again.'
+  return serverMode ? 'Your session ended. Sign in again.' : 'This link no longer works. Run /hal-m-ui again.'
 }
 
 // ---- The server going away ----
@@ -2520,9 +2520,9 @@ function followUpdate(box: HTMLElement, via: UpdateInfo['via'] = 'updater') {
       renderProgress(box, last)
       if (last !== null && !isRunning(last)) {
         followingUpdate = false
-        // UPDCC.1: a Claude Code install never restarts this dashboard itself: the next /mnemosyne-ui after a Claude Code restart does.
+        // UPDCC.1: a Claude Code install never restarts this dashboard itself: the next /hal-m-ui after a Claude Code restart does.
         if (last.state === 'done')
-          renderProgress(box, last, via === 'claude' ? 'Restart Claude Code, then run /mnemosyne-ui to open the new version.' : 'This dashboard was not restarted by the update: restart it to use the new version.')
+          renderProgress(box, last, via === 'claude' ? 'Restart Claude Code, then run /hal-m-ui to open the new version.' : 'This dashboard was not restarted by the update: restart it to use the new version.')
         return
       }
     }
@@ -2546,7 +2546,7 @@ async function waitForRestart(box: HTMLElement, last: UpdateStatus | null) {
     }
   }
   followingUpdate = false
-  renderProgress(box, last, 'The dashboard did not come back at this address. Open it again from the Start Menu ("Open Mnemosyne dashboard"); the update log is ~/.claude/mnemosyne/update.log.')
+  renderProgress(box, last, 'The dashboard did not come back at this address. Open it again from the Start Menu ("Open HAL-M dashboard", or "Open Mnemosyne dashboard" on older installs); the update log is update.log in the HAL-M data folder.')
 }
 
 // Dev mode: ask for the stamp of ui/ every second and reload when it changes (a restart under --watch changes it too).
@@ -4247,7 +4247,7 @@ export async function main() {
   byId('lost-retry').addEventListener('click', () => watch.retry())
   byId('expired-copy').addEventListener('click', () => {
     const button = byId<HTMLButtonElement>('expired-copy')
-    void navigator.clipboard?.writeText('/mnemosyne-ui').then(
+    void navigator.clipboard?.writeText('/hal-m-ui').then(
       () => (button.textContent = 'Copied'),
       () => (button.textContent = 'Copy failed'),
     )
@@ -4258,7 +4258,7 @@ export async function main() {
     // No link: a server deployment answers /api/session without auth; a local server does not (401).
     const session = await askSession()
     if (session === null) {
-      setStatus('Open this dashboard with the link from /mnemosyne-ui in Claude Code: it carries the key this page needs.', 'error')
+      setStatus('Open this dashboard with the link from /hal-m-ui in Claude Code: it carries the key this page needs.', 'error')
       return
     }
     serverMode = true
@@ -4279,7 +4279,7 @@ async function start() {
   try {
     await loadHealth()
   } catch (err) {
-    if (!(err instanceof Expired)) setStatus(`Could not reach the HAL-M server: ${failure(err)}.${serverMode ? '' : ' Run /mnemosyne-ui again.'}`, 'error')
+    if (!(err instanceof Expired)) setStatus(`Could not reach the HAL-M server: ${failure(err)}.${serverMode ? '' : ' Run /hal-m-ui again.'}`, 'error')
     return
   }
   setStatus(CONNECTED, 'ok')

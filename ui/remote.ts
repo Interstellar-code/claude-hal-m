@@ -24,6 +24,7 @@ import { PROJECTS_FILE } from '../hooks/projects'
 import { expireSetting, SESSION_ID } from '../hooks/session'
 import type { ExpireSetting } from '../hooks/session'
 import { VOCAB_FILE } from '../hooks/vocab'
+import { childEnv, COOKIE_NAMES, COOKIE_PLAIN, COOKIE_SECURE, envOf, KEPT, OLD_COOKIE_PLAIN, OLD_COOKIE_SECURE } from '../hooks/names'
 
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -36,7 +37,7 @@ export type ServerMode = {
   publicUrl: string
   secureCookie: 'auto' | 'on' | 'off'
   modelCacheDir: string | undefined
-  // The daily unused-expiry sweep: MNEMOSYNE_EXPIRE_UNUSED_DAYS (90 by default, 0 off), the plugin's expireUnusedDays rule.
+  // The daily unused-expiry sweep: HALM_EXPIRE_UNUSED_DAYS (or MNEMOSYNE_EXPIRE_UNUSED_DAYS; 90 by default, 0 off), the plugin's expireUnusedDays rule.
   expire: ExpireSetting
 }
 
@@ -69,29 +70,34 @@ export const PLUGIN_TOOLS: ReadonlySet<string> = new Set([
 export const PLUGIN_MEMORIES_COMMANDS: ReadonlySet<string> = new Set(['first-prompt', 'row-info'])
 export const OWNER = /^(?:global|project-[A-Za-z0-9_-]{1,300})$/
 
-/** Server mode from the environment, or an Error naming what is wrong. */
+/**
+ * Server mode from the environment, or an Error naming what is wrong. Each setting is HALM_<X>, then the
+ * old MNEMOSYNE_<X> (an empty new name counts as not set); the defaults (port 8787, cookie 'auto', bind
+ * 0.0.0.0) live here, not in the image (plan 3.1).
+ */
 export function serverModeFromEnv(env: Record<string, string | undefined>): ServerMode | Error {
-  const password = env.MNEMOSYNE_UI_PASSWORD ?? ''
-  if (password.length < MIN_PASSWORD) return new Error(`MNEMOSYNE_UI_PASSWORD must be set to at least ${MIN_PASSWORD} characters.`)
-  const port = env.MNEMOSYNE_PORT ? Number(env.MNEMOSYNE_PORT) : DEFAULT_SERVER_PORT
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return new Error('MNEMOSYNE_PORT must be a port number.')
-  const secure = (env.MNEMOSYNE_SECURE_COOKIE ?? 'auto').trim().toLowerCase()
-  const publicUrl = (env.MNEMOSYNE_PUBLIC_URL ?? '').trim().replace(/\/+$/, '')
-  if (publicUrl !== '' && !/^https?:\/\/[^\s/]+$/.test(publicUrl)) return new Error('MNEMOSYNE_PUBLIC_URL must be like https://hal-m.example.ts.net (no path).')
-  const expire = expireSetting(env.MNEMOSYNE_EXPIRE_UNUSED_DAYS)
-  if (expire.mode === 'refused') return new Error(`MNEMOSYNE_EXPIRE_UNUSED_DAYS: ${expire.reason}`)
+  const password = envOf('UI_PASSWORD', env) ?? ''
+  if (password.length < MIN_PASSWORD) return new Error(`HALM_UI_PASSWORD (or MNEMOSYNE_UI_PASSWORD) must be set to at least ${MIN_PASSWORD} characters.`)
+  const portText = envOf('PORT', env)
+  const port = portText ? Number(portText) : DEFAULT_SERVER_PORT
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return new Error('HALM_PORT (or MNEMOSYNE_PORT) must be a port number.')
+  const secure = (envOf('SECURE_COOKIE', env) ?? 'auto').trim().toLowerCase()
+  const publicUrl = (envOf('PUBLIC_URL', env) ?? '').trim().replace(/\/+$/, '')
+  if (publicUrl !== '' && !/^https?:\/\/[^\s/]+$/.test(publicUrl)) return new Error('HALM_PUBLIC_URL (or MNEMOSYNE_PUBLIC_URL) must be like https://hal-m.example.ts.net (no path).')
+  const expire = expireSetting(envOf('EXPIRE_UNUSED_DAYS', env))
+  if (expire.mode === 'refused') return new Error(`HALM_EXPIRE_UNUSED_DAYS (or MNEMOSYNE_EXPIRE_UNUSED_DAYS): ${expire.reason}`)
   return {
     expire,
     password,
     port,
-    bind: env.MNEMOSYNE_BIND || '0.0.0.0',
-    hosts: (env.MNEMOSYNE_HOSTS ?? '')
+    bind: envOf('BIND', env) || '0.0.0.0',
+    hosts: (envOf('HOSTS', env) ?? '')
       .split(',')
       .map(host => host.trim().toLowerCase())
       .filter(Boolean),
     publicUrl,
     secureCookie: secure === '1' || secure === 'on' || secure === 'true' ? 'on' : secure === '0' || secure === 'off' || secure === 'false' ? 'off' : 'auto',
-    modelCacheDir: env.MNEMOSYNE_MODEL_CACHE || undefined,
+    modelCacheDir: envOf('MODEL_CACHE', env) || undefined,
   }
 }
 
@@ -128,28 +134,45 @@ const sameBytes = (a: string, b: string) => {
 
 // ---- the dashboard session ----
 
-export const COOKIE_PLAIN = 'mnemosyne_session'
-// The __Host- prefix makes the browser refuse a cookie that is not Secure, host-only and Path=/.
-export const COOKIE_SECURE = '__Host-mnemosyne_session'
+// Four cookie names (plan 3.5, hooks/names.ts): new sessions get halm_session (__Host-halm_session when
+// Secure); a valid session from any of the four is accepted, and sign-out clears all four. The __Host- prefix
+// makes the browser refuse a cookie that is not Secure, host-only and Path=/.
+export { COOKIE_NAMES, COOKIE_PLAIN, COOKIE_SECURE, OLD_COOKIE_PLAIN, OLD_COOKIE_SECURE }
 
 export type Sessions = {
   issue(now?: number): string
   valid(value: string | undefined, now?: number): boolean
+  /** Signs a session out: a valid token is refused from now until it would have expired (kept in memory). */
+  revoke(value: string | undefined, now?: number): boolean
 }
 
 export function sessions(secret: Buffer, password: string, days = SESSION_DAYS): Sessions {
   const key = createHmac('sha256', secret).update(`session:${password}`).digest()
   const sign = (expires: string) => createHmac('sha256', key).update(expires).digest('base64url')
+  // Revoked tokens until their own expiry; only validly signed tokens get in, so the set stays small.
+  const revoked = new Map<string, number>()
+  const signedValid = (value: string | undefined, now: number) => {
+    const match = /^(\d{10,16})\.([A-Za-z0-9_-]{43})$/.exec(value ?? '')
+    if (!match?.[1] || !match[2]) return undefined
+    const expires = Number(match[1])
+    if (expires <= now) return undefined
+    return sameBytes(match[2], sign(match[1])) ? expires : undefined
+  }
   return {
     issue(now = Date.now()) {
       const expires = String(now + days * 86_400_000)
       return `${expires}.${sign(expires)}`
     },
     valid(value, now = Date.now()) {
-      const match = /^(\d{10,16})\.([A-Za-z0-9_-]{43})$/.exec(value ?? '')
-      if (!match?.[1] || !match[2]) return false
-      if (Number(match[1]) <= now) return false
-      return sameBytes(match[2], sign(match[1]))
+      if (signedValid(value, now) === undefined) return false
+      return !revoked.has(value ?? '')
+    },
+    revoke(value, now = Date.now()) {
+      for (const [token, expires] of revoked) if (expires <= now) revoked.delete(token)
+      const expires = signedValid(value, now)
+      if (expires === undefined || value === undefined) return false
+      revoked.set(value, expires)
+      return true
     },
   }
 }
@@ -185,14 +208,28 @@ export function sessionCookie(value: string, secure: boolean, days = SESSION_DAY
   return `${secure ? COOKIE_SECURE : COOKIE_PLAIN}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${days * 86_400}${secure ? '; Secure' : ''}`
 }
 
+/** Set-Cookie values that expire all four session cookies; each __Host- one is Secure, or the browser ignores it. */
 export function clearCookies(): string[] {
-  return [`${COOKIE_PLAIN}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`, `${COOKIE_SECURE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure`]
+  return COOKIE_NAMES.map(name => `${name}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${name.startsWith('__Host-') ? '; Secure' : ''}`)
 }
 
-/** A signed-in request: either cookie name carries a valid session. */
-export function signedIn(request: Request, store: Sessions): boolean {
+/** Every session token the request's cookies carry, under any of the four names (each value once). */
+export function sessionTokens(request: Request): string[] {
   const header = request.headers.get('cookie')
-  return store.valid(cookieValue(header, COOKIE_SECURE)) || store.valid(cookieValue(header, COOKIE_PLAIN))
+  const tokens = COOKIE_NAMES.map(name => cookieValue(header, name)).filter((value): value is string => value !== undefined && value !== '')
+  return [...new Set(tokens)]
+}
+
+/** A signed-in request: any of the four cookie names carries a valid session. */
+export function signedIn(request: Request, store: Sessions): boolean {
+  return sessionTokens(request).some(token => store.valid(token))
+}
+
+/** Sign-out: revokes every session the request's cookies carry, whichever of the four names carried it. */
+export function revokeSessions(request: Request, store: Sessions): number {
+  let count = 0
+  for (const token of sessionTokens(request)) if (store.revoke(token)) count += 1
+  return count
 }
 
 /** Wrong passwords in a row pause logins; a right one resets the count. */
@@ -402,18 +439,25 @@ export function runPluginResolve(ctx: RunContext, input: unknown) {
 
 // ---- /mcp: one proxy run per POST ----
 
-/** The proxy's environment, as the externalMcp launcher sets it (hooks/launcher.ts), for one owner. */
-export function proxyEnv(ctx: RunContext, owner: string): Record<string, string | undefined> {
-  return {
-    ...process.env,
-    ...engineEnv(ctx.store, owner, { embeddings: ctx.embeddings, ...(ctx.modelCacheDir ? { modelCacheDir: ctx.modelCacheDir } : {}) }),
-    MNEMOPI_EMBEDDING_MODEL: EMBEDDINGS_MODEL,
-    MNEMOSYNE_CLI: ctx.cli,
-    MNEMOSYNE_ACTIVITY_LOG: ctx.activityLog,
-    MNEMOSYNE_GUARD_MODE: 'strict',
-    MNEMOSYNE_VOCABULARY: join(ctx.root, VOCAB_FILE),
-    MNEMOSYNE_ROOT: ctx.root,
-  }
+/**
+ * The proxy's environment, as the externalMcp launcher sets it (hooks/launcher.ts), for one owner: the
+ * HALM_ names set and their MNEMOSYNE_ spellings deleted, so the child never reads a stale inherited value.
+ */
+export function proxyEnv(ctx: RunContext, owner: string, base: Record<string, string | undefined> = process.env): Record<string, string | undefined> {
+  return childEnv(
+    {
+      ...base,
+      ...engineEnv(ctx.store, owner, { embeddings: ctx.embeddings, ...(ctx.modelCacheDir ? { modelCacheDir: ctx.modelCacheDir } : {}) }),
+      MNEMOPI_EMBEDDING_MODEL: EMBEDDINGS_MODEL,
+    },
+    {
+      CLI: ctx.cli,
+      ACTIVITY_LOG: ctx.activityLog,
+      GUARD_MODE: 'strict',
+      VOCABULARY: join(ctx.root, VOCAB_FILE),
+      ROOT: ctx.root,
+    },
+  )
 }
 
 type JsonRpc = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
@@ -447,7 +491,7 @@ export async function handleMcp(ctx: RunContext, device: string, owner: string, 
         result: {
           protocolVersion: typeof asked === 'string' ? asked : '2025-06-18',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'mnemosyne', version: '1' },
+          serverInfo: { name: KEPT.serverInfoName, version: '1' },
         },
       })
       continue
@@ -528,7 +572,7 @@ export type UpkeepReport = { due: boolean; backup?: string; expired: { owner: st
 /**
  * Once a day (the same <root>/sweep marker a PC's sweep uses, so a restart does not run it again): a backup of the store
  * (bin/memories.ts backup, keeping storage.backupsKeep copies), then the unused-expiry sweep for every owner with
- * MNEMOSYNE_EXPIRE_UNUSED_DAYS (90 by default; 0 turns the sweep off). A failed backup skips the sweep.
+ * HALM_EXPIRE_UNUSED_DAYS (or MNEMOSYNE_EXPIRE_UNUSED_DAYS; 90 by default; 0 turns the sweep off). A failed backup skips the sweep.
  */
 export async function runUpkeep(ctx: RunContext, expire: ExpireSetting): Promise<UpkeepReport> {
   const script = join(ctx.pluginRoot, 'bin', 'memories.ts')
@@ -577,9 +621,9 @@ export function startUpkeep(ctx: RunContext, expire: ExpireSetting, log: (fields
     try {
       const report = await runUpkeep(ctx, expire)
       for (const done of report.expired) {
-        log({ action: 'expire', origin: 'session', owner: done.owner, client: 'mnemosyne-sweep', text: `unused-expiry sweep: ${done.count} expired`, ids: done.ids, count: done.count, ok: true })
+        log({ action: 'expire', origin: 'session', owner: done.owner, client: `${KEPT.clientLabelPrefix}sweep`, text: `unused-expiry sweep: ${done.count} expired`, ids: done.ids, count: done.count, ok: true })
       }
-      if (report.error) log({ action: 'expire', origin: 'session', owner: 'global', client: 'mnemosyne-sweep', text: 'server upkeep failed', ok: false, error: report.error })
+      if (report.error) log({ action: 'expire', origin: 'session', owner: 'global', client: `${KEPT.clientLabelPrefix}sweep`, text: 'server upkeep failed', ok: false, error: report.error })
     } catch {
       // the next tick tries again
     } finally {

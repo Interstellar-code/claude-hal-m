@@ -1873,7 +1873,7 @@ export function createMap(host: MapHost): MapView {
       if (number) number.textContent = String(counts[kind])
     }
     const note = byId('map-know-note')
-    const text = any ? knowledgeNote(state) : 'No knowledge extracted yet. Run /mnemosyne-knowledge, then reload.'
+    const text = any ? knowledgeNote(state) : 'No knowledge extracted yet. Run /hal-m-knowledge, then reload.'
     const withClear = any && state.kinds.size > 0
     // Rebuild only when the note changes, so a focused Clear keeps its node (and focus) across live events.
     const key = `${withClear ? 1 : 0}${text}`
