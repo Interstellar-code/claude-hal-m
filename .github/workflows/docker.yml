@@ -1,5 +1,7 @@
 # Builds the server image and checks it starts: the dashboard answers /api/session, a wrong
 # password is refused, the right one signs in. Nothing is pushed to a registry.
+# Two legs: embeddings '1' runs on the new HALM_ names, embeddings '0' runs on the old
+# MNEMOSYNE_ names, which the image still reads as a fallback.
 name: docker
 
 on:
@@ -9,26 +11,35 @@ on:
 
 jobs:
   build:
+    name: build (embeddings ${{ matrix.embeddings }}, ${{ matrix.names }} names)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        embeddings: ['1', '0']
+        include:
+          - embeddings: '1'
+            names: HALM
+            password_var: HALM_UI_PASSWORD
+            cookie_var: HALM_SECURE_COOKIE
+          - embeddings: '0'
+            names: MNEMOSYNE
+            password_var: MNEMOSYNE_UI_PASSWORD
+            cookie_var: MNEMOSYNE_SECURE_COOKIE
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: docker build --build-arg EMBEDDINGS=${{ matrix.embeddings }} -t mnemosyne:test .
+        run: docker build --build-arg EMBEDDINGS=${{ matrix.embeddings }} -t hal-m:test .
       - name: Start and check
         run: |
           set -eu
           mkdir -p data && sudo chown 99:100 data
-          docker run -d --name mn -p 8787:8787 -e MNEMOSYNE_UI_PASSWORD=ci-password-123 -e MNEMOSYNE_SECURE_COOKIE=off -v "$PWD/data:/data" mnemosyne:test
+          docker run -d --name halm -p 8787:8787 -e "${{ matrix.password_var }}=ci-password-123" -e "${{ matrix.cookie_var }}=off" -v "$PWD/data:/data" hal-m:test
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8787/api/session >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          docker logs mn
+          docker logs halm
           curl -fsS http://127.0.0.1:8787/api/session | tee session.json
           grep -q '"server":true' session.json
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Origin: http://127.0.0.1:8787' -H 'Content-Type: application/json' -d '{"password":"wrong-password"}' http://127.0.0.1:8787/api/login)" = 401
@@ -41,7 +52,7 @@ jobs:
           curl -fsS -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "{\"owner\":\"global\",\"requests\":\"$(printf '%s' "$REQ" | sed 's/"/\\"/g')\"}" http://127.0.0.1:8787/api/plugin/engine | tee engine.json
           grep -q 'CI container saved' engine.json
           curl -fsS -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp | grep -q memory_recall
-          docker inspect --format '{{.State.Health.Status}}' mn || true
+          docker inspect --format '{{.State.Health.Status}}' halm || true
       - name: Logs on failure
         if: failure()
-        run: docker logs mn || true
+        run: docker logs halm || true

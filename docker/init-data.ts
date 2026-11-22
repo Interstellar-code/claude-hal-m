@@ -1,6 +1,6 @@
 // Claude HAL-M — first start of the Docker image: lays out the data volume.
 //
-//   bun docker/init-data.ts [<data root>]      (default: $MNEMOSYNE_ROOT, else /data)
+//   bun docker/init-data.ts [<data root>]      (default: $HALM_ROOT, else $MNEMOSYNE_ROOT, else /data)
 //
 // Creates what is missing and never overwrites a file that exists:
 //   <root>/store/          the memory store (700); the engine makes mnemopi.db on its first run
@@ -8,13 +8,14 @@
 //   <root>/config.json     default settings (600)
 //   <root>/vocabulary.json the tag vocabulary, seeded from the store (600)
 //   <root>/activity.jsonl  the activity log, empty (600)
-// The store is $MNEMOSYNE_STORE when set, else <root>/store. Prints one JSON line
+// The store is $HALM_STORE (or the old $MNEMOSYNE_STORE) when set, else <root>/store. Prints one JSON line
 // naming the files it created.
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { configText, emptyConfig } from '../hooks/settings'
 import { VOCAB_FILE } from '../hooks/vocab'
 import { configFile } from '../bin/settings'
+import { envOf, type EnvSource } from '../hooks/names'
 import { initVocabulary } from '../bin/vocab'
 
 const IS_WINDOWS = process.platform === 'win32'
@@ -64,10 +65,16 @@ export function initData(root: string, store = join(root, 'store')): { root: str
   return { root, store, created }
 }
 
+/** The data root and store from the command line and the environment: each new name, then the old one. */
+export function dataPaths(arg: string | undefined, env: EnvSource): { root: string; store: string } {
+  const root = arg || envOf('ROOT', env) || '/data'
+  return { root, store: envOf('STORE', env) || join(root, 'store') }
+}
+
 if (import.meta.main) {
   try {
-    const root = process.argv[2] || process.env.MNEMOSYNE_ROOT || '/data'
-    const done = initData(root, process.env.MNEMOSYNE_STORE || join(root, 'store'))
+    const { root, store } = dataPaths(process.argv[2], process.env)
+    const done = initData(root, store)
     console.log(JSON.stringify({ ok: true, ...done }))
   } catch (error) {
     console.error(`init-data: ${(error as Error).message}`)

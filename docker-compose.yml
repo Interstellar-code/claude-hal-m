@@ -2,6 +2,7 @@
 # The app has no published port: it shares the Tailscale sidecar's network and is
 # reached only at https://hal-m.<your tailnet>.ts.net (tailscale serve -> 127.0.0.1:8787).
 # Set the variables in Dokploy's Environment tab or in .env (see .env.example).
+# Each setting reads HALM_<X>, else the old MNEMOSYNE_<X>.
 services:
   tailscale:
     image: tailscale/tailscale:v1.104.7
@@ -14,6 +15,7 @@ services:
       - TS_USERSPACE=false
       - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
     volumes:
+      # Default host folder is the pre-rename one, kept on purpose so existing deployments find their state.
       - ${TS_STATE:-/mnt/cache/appdata/mnemosyne-tailscale}:/var/lib/tailscale
       # A folder, not a single file, so tailscale sees edits to serve.json.
       - ./docker/tailscale:/config:ro
@@ -29,18 +31,19 @@ services:
     build:
       context: .
       args:
-        EMBEDDINGS: ${MNEMOSYNE_BUILD_EMBEDDINGS:-1}
+        EMBEDDINGS: ${HALM_BUILD_EMBEDDINGS:-${MNEMOSYNE_BUILD_EMBEDDINGS:-1}}
         PUID: ${PUID:-99}
         PGID: ${PGID:-100}
     network_mode: service:tailscale
     depends_on:
       - tailscale
     environment:
-      - MNEMOSYNE_UI_PASSWORD=${MNEMOSYNE_UI_PASSWORD:?set MNEMOSYNE_UI_PASSWORD (8+ characters)}
-      - MNEMOSYNE_PUBLIC_URL=${MNEMOSYNE_PUBLIC_URL:-}
-      - MNEMOSYNE_HOSTS=${MNEMOSYNE_HOSTS:-}
-      - MNEMOSYNE_SECURE_COOKIE=auto
-      - MNEMOSYNE_EXPIRE_UNUSED_DAYS=${MNEMOSYNE_EXPIRE_UNUSED_DAYS:-90}
+      - HALM_UI_PASSWORD=${HALM_UI_PASSWORD:-${MNEMOSYNE_UI_PASSWORD:?set HALM_UI_PASSWORD (or MNEMOSYNE_UI_PASSWORD), 8+ characters}}
+      - HALM_PUBLIC_URL=${HALM_PUBLIC_URL:-${MNEMOSYNE_PUBLIC_URL:-}}
+      - HALM_HOSTS=${HALM_HOSTS:-${MNEMOSYNE_HOSTS:-}}
+      - HALM_SECURE_COOKIE=${HALM_SECURE_COOKIE:-${MNEMOSYNE_SECURE_COOKIE:-auto}}
+      - HALM_EXPIRE_UNUSED_DAYS=${HALM_EXPIRE_UNUSED_DAYS:-${MNEMOSYNE_EXPIRE_UNUSED_DAYS:-90}}
     volumes:
-      - ${MNEMOSYNE_DATA:-/mnt/cache/appdata/mnemosyne}:/data
+      # Default host folder is the pre-rename one, kept on purpose so an existing deployment keeps the same /data.
+      - ${HALM_DATA:-${MNEMOSYNE_DATA:-/mnt/cache/appdata/mnemosyne}}:/data
     restart: unless-stopped
