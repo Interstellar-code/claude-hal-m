@@ -154,4 +154,4 @@ Test file ownership (closes the open-owner gap): T1 owns `tests/bun/names.spec.t
 1. A real Claude Code session on the Mac shows `mcp__hal-m__memory_*` and `/hal-m-setup`, with memory on the server; the old plugin is uninstalled.
 2. The server runs the 0.38.0 image with its existing `MNEMOSYNE_*` template unchanged and listens on 127.0.0.1 only.
 3. Gates match main's baseline; the final review's findings are fixed.
-4. Every finding id in both reviews and the re-check is covered by a task or declined with a reason (declined: A-M7 in 3.1, R6 in 6.6; moved to the clean-up release: R7 and the move half of F-m6; out of release: F-m9 in 6.7).
+4. Every finding id in both reviews and the re-check is covered by a task or declined with a reason (declined: A-M7 in 3.1, R6 in 6.6; moved to the clean-up release: R7 and the move half of F-m6; out of release: F-m9 in 6.7; F-m8 is covered by D5).

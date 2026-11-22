@@ -1,9 +1,9 @@
 // scripts/migrate-hal-m.ts: the 0.37 -> 0.38 switch builds only claude plugin steps,
 // in the plan's order (section 6), and never copies the server key.
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, realpathSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { copiedOptions, finishSteps, readState, rollbackSteps, runSteps, switchSteps, type PluginState, type Run } from '../../scripts/migrate-hal-m'
+import { copiedOptions, finishSteps, openSessions, readState, rollbackSteps, runSteps, switchSteps, type PluginState, type Run } from '../../scripts/migrate-hal-m'
 import { tempDir } from './helpers'
 
 const state = (installed: string[], enabled: string[], marketplaces: string[]): PluginState => ({
@@ -74,6 +74,24 @@ describe('migrate-hal-m', () => {
       ['plugin', 'enable', OLD],
     ])
     expect(() => rollbackSteps(state([NEW], [NEW], ['hal-m']))).toThrow(/runbook/)
+  })
+
+  test('the session check uses tasklist on Windows and pgrep elsewhere; a missing tool finds none', () => {
+    expect(openSessions('win32', cmd => (cmd[0] === 'tasklist' ? 'claude.exe   1234 Console' : ''))).toBe('claude.exe')
+    expect(openSessions('win32', () => 'INFO: No tasks are running')).toBe('')
+    expect(openSessions('darwin', cmd => (cmd[0] === 'pgrep' ? '11\n22\n' : ''))).toBe('pid 11, 22')
+    expect(openSessions('linux', () => { throw new Error('Executable not found') })).toBe('')
+  })
+
+  test('a linked old root is backed up through its real folder', () => {
+    const home = tempDir('switch-link')
+    const real = join(home.dir, 'elsewhere', 'mn')
+    mkdirSync(real, { recursive: true })
+    mkdirSync(join(home.dir, '.claude'))
+    symlinkSync(real, join(home.dir, '.claude', 'mnemosyne'))
+    const tar = switchSteps(state([], [], []), null, home.dir, 'x', 's')[0]?.shell ?? []
+    expect(tar.slice(-3)).toEqual(['-C', realpathSync(join(home.dir, 'elsewhere')), 'mn'])
+    home.dispose()
   })
 
   test('a dry run runs nothing; --apply stops at the first failure', () => {

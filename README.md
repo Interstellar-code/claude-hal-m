@@ -20,7 +20,7 @@ claude plugin install hal-m --marketplace Interstellar-code/hal-m
 
 Answer `y` to add the marketplace, then pick a scope (user scope for every project). The install then asks for the settings below; leave the empty ones empty. Claude Code's install screen shows values only for the scope picker and the on/off switch, so `/hal-m-setup` saves the defaults into any empty setting, and after a restart `/plugin` → hal-m → configure shows them, ready to edit. The shell form installs `hal-m@hal-m` (the plugin id and the marketplace are both `hal-m`).
 
-Since 0.38.0 the plugin id is `hal-m`, the memory tools are `mcp__hal-m__memory_*`, the commands are `/hal-m-*` (the old `/mnemosyne-*` names still answer), the settings variables are `HALM_*` (the old `MNEMOSYNE_*` names are read as a fallback), and the data folder is `~/.hal-m`. On a PC that already has memory, `~/.hal-m` is a link to the old `~/.claude/mnemosyne` folder: nothing is moved, and `HALM_NO_MIGRATE=1` turns the link off. A PC that has the old `mnemosyne` plugin switches once: see [Upgrading from 0.37 (mnemosyne)](#upgrading-from-037-mnemosyne).
+Since 0.38.0 the plugin id is `hal-m`, the memory tools are `mcp__hal-m__memory_*`, the commands are `/hal-m-*` (the old `/mnemosyne-*` names still answer), the settings variables are `HALM_*` (the old `MNEMOSYNE_*` names are read as a fallback), and the data folder is `~/.hal-m`. On a PC that already has memory, `~/.hal-m` is a link to the old `~/.claude/mnemosyne` folder: nothing is moved, and `HALM_NO_MIGRATE=1` turns the link off. Only a Claude Code session start makes that link: on a PC that runs only Claude Desktop (or the standalone install), the folder stays at `~/.claude/mnemosyne` and every `~/.hal-m` path below is under it instead, unless you run `bun bin/migrate-root.ts <your home folder>` once by hand. A PC that has the old `mnemosyne` plugin switches once: see [Upgrading from 0.37 (mnemosyne)](#upgrading-from-037-mnemosyne).
 
 Works on macOS, Linux and Windows. On Windows, `~` means `%USERPROFILE%`.
 
@@ -87,10 +87,12 @@ Run it from your normal account (the `serverKey` goes to the macOS keychain, whi
 
 If both plugins are loaded in one session, the new plugin warns at start: each save would be made twice, so finish step 6.
 
+Switch soon after you update the server, and do not refresh the old marketplace in between (`claude plugin marketplace update`, or the 0.37 dashboard's Update button). Once the repository holds 0.38, a refresh points the old `mnemosyne` entry at the `hal-m` manifest and the 0.37 plugin stops loading ("Plugin mnemosyne not found in marketplace mnemosyne"). If that happens: `claude plugin marketplace remove mnemosyne`, `claude plugin marketplace add 'https://github.com/Interstellar-code/hal-m.git#v0.37.0'`, `claude plugin install mnemosyne@mnemosyne`, or go straight on with the switch (the script then copies no options, so enter them again).
+
 ### Roll back
 
 1. Before step 6: `claude plugin uninstall hal-m@hal-m` and `claude plugin enable mnemosyne@mnemosyne`. The old plugin's options and key were never touched.
-2. After step 6: install 0.37.0 again from its tag (`claude plugin marketplace add 'https://github.com/Interstellar-code/hal-m.git#v0.37.0'`, then `claude plugin install mnemosyne@mnemosyne`), give it a new device key if the old one was revoked, and set its options again with `claude plugin configure`. Do not restore a file over `settings.json`.
+2. After step 6: first `claude plugin uninstall hal-m@hal-m` (two plugins loaded would save everything twice), then install 0.37.0 again from its tag (`claude plugin marketplace add 'https://github.com/Interstellar-code/hal-m.git#v0.37.0'`, then `claude plugin install mnemosyne@mnemosyne`), give it a new device key if the old one was revoked, and set its options again with `claude plugin configure`. Do not restore a file over `settings.json`.
 3. The `~/.hal-m` link can stay: 0.37 ignores it. To remove it, check that it is a link (`ls -ld ~/.hal-m` starts with `l`) and run `rm ~/.hal-m` (no `-r`, no trailing slash); on Windows run `rmdir %USERPROFILE%\.hal-m` from cmd. A recursive delete or a trailing slash goes through the link and empties your real memory folder.
 
 A server needs no switch: its image reads both name sets, so an existing container with `MNEMOSYNE_*` settings keeps working after you rebuild it (see "Run it as a server" below). Rebuild it first, then switch the PCs.

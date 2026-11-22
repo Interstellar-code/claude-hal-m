@@ -15,9 +15,11 @@
 // Dry run by default: prints each step. --apply runs them, stopping at the first
 // failure. Only claude plugin commands change Claude Code's settings; the script
 // never edits settings.json, never handles the server key, and never removes ~/.hal-m.
-import { existsSync } from 'node:fs'
+// HALM_SWITCH_ALLOW_SESSIONS=1 skips the open-session check; it exists for tests that run
+// the script from inside a Claude Code session against a throwaway CLAUDE_CONFIG_DIR.
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { MARKETPLACE_NAME, OLD_MARKETPLACE_NAME, OLD_PLUGIN_ID, PLUGIN_ID } from '../hooks/names'
 
 export const REPO_SOURCE = 'Interstellar-code/hal-m'
@@ -79,8 +81,10 @@ export function switchSteps(state: PluginState, options: { values: Record<string
   const steps: Step[] = []
   const oldRoot = join(home, '.claude', 'mnemosyne')
   if (existsSync(oldRoot)) {
+    // The real folder, so a linked ~/.claude/mnemosyne is backed up, not just the link.
+    const real = realpathSync(oldRoot)
     const tarball = join(home, 'hal-m-switch-backup-' + stamp + '.tgz')
-    steps.push({ say: 'Back up ' + oldRoot + ' to ' + tarball, shell: ['tar', '-czf', tarball, '-C', join(home, '.claude'), 'mnemosyne'] })
+    steps.push({ say: 'Back up ' + real + ' to ' + tarball, shell: ['tar', '-czf', tarball, '-C', dirname(real), basename(real)] })
   }
   if (!state.marketplaces.has(MARKETPLACE_NAME)) steps.push({ say: 'Add the hal-m marketplace beside the old one', args: ['plugin', 'marketplace', 'add', source] })
   if (state.enabled.has(OLD_PLUGIN_ID)) steps.push({ say: 'Disable ' + OLD_PLUGIN_ID + ' (its options and key stay)', args: ['plugin', 'disable', OLD_PLUGIN_ID] })
@@ -107,6 +111,20 @@ export function rollbackSteps(state: PluginState): Step[] {
   if (state.installed.has(PLUGIN_ID)) steps.push({ say: 'Uninstall ' + PLUGIN_ID, args: ['plugin', 'uninstall', PLUGIN_ID, '--keep-data'] })
   if (!state.enabled.has(OLD_PLUGIN_ID)) steps.push({ say: 'Enable ' + OLD_PLUGIN_ID, args: ['plugin', 'enable', OLD_PLUGIN_ID] })
   return steps
+}
+
+/** Open Claude Code processes, described, or '' when none. A missing tool counts as none found. */
+export function openSessions(platform: string, spawn = (cmd: string[]) => Bun.spawnSync(cmd, { stdout: 'pipe', stderr: 'pipe' }).stdout.toString()): string {
+  try {
+    if (platform === 'win32') {
+      const out = spawn(['tasklist', '/FI', 'IMAGENAME eq claude.exe', '/NH'])
+      return /claude\.exe/i.test(out) ? 'claude.exe' : ''
+    }
+    const pids = spawn(['pgrep', '-x', 'claude']).trim()
+    return pids ? 'pid ' + pids.split('\n').join(', ') : ''
+  } catch {
+    return ''
+  }
 }
 
 const describe = (step: Step) => (step.shell ?? ['claude', ...(step.args ?? [])]).join(' ') + (step.stdin ? '  <<< ' + step.stdin : '')
@@ -145,8 +163,10 @@ if (import.meta.main) {
   }
   try {
     if (!['switch', 'finish', 'rollback'].includes(mode) || !source) throw new Error('usage: bun scripts/migrate-hal-m.ts [switch|finish|rollback] [--apply] [--marketplace <source>]')
-    const sessions = Bun.spawnSync(['pgrep', '-x', 'claude'], { stdout: 'pipe' }).stdout.toString().trim()
-    if (apply && sessions && !process.env.HALM_SWITCH_ALLOW_SESSIONS) throw new Error('A Claude Code session is running (pid ' + sessions.split('\n').join(', ') + '). Close every session and run this from a plain terminal.')
+    if (apply && !process.env.HALM_SWITCH_ALLOW_SESSIONS) {
+      const running = openSessions(process.platform)
+      if (running) throw new Error('A Claude Code session is running (' + running + '). Close every session and run this from a plain terminal.')
+    }
     const state = readState(run)
     let steps: Step[]
     let hadKey = false
@@ -154,9 +174,13 @@ if (import.meta.main) {
       let options = null
       if (state.installed.has(OLD_PLUGIN_ID)) {
         const conf = run(['plugin', 'configure', OLD_PLUGIN_ID, '--json'])
-        if (conf.code !== 0) throw new Error('claude plugin configure ' + OLD_PLUGIN_ID + ' --json failed: ' + conf.out.trim())
-        options = copiedOptions(conf.out)
-        hadKey = options.hadKey
+        if (conf.code === 0) {
+          options = copiedOptions(conf.out)
+          hadKey = options.hadKey
+        } else {
+          // The old plugin may no longer load (its marketplace was refreshed to 0.38): switch anyway.
+          console.log('Note: could not read ' + OLD_PLUGIN_ID + "'s options (" + conf.out.trim().split('\n')[0] + '). No options are copied; enter them again after the switch with claude plugin configure ' + PLUGIN_ID + '.\n')
+        }
       }
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       steps = switchSteps(state, options, home, source, stamp)
