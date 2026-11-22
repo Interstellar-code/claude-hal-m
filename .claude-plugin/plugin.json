@@ -7,8 +7,8 @@
   "author": {
     "name": "Interstellar-code"
   },
-  "homepage": "https://github.com/Interstellar-code/claude-hal-m",
-  "repository": "https://github.com/Interstellar-code/claude-hal-m",
+  "homepage": "https://github.com/Interstellar-code/hal-m",
+  "repository": "https://github.com/Interstellar-code/hal-m",
   "license": "MIT",
   "keywords": [
     "memory",

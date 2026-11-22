@@ -63,7 +63,7 @@ describe('the release check', () => {
   test('fetchLatest: the newest vX.Y.Z tag and its engine build', async () => {
     const { fetcher, calls } = fakeGitHub(['v0.26.1', 'v0.28.0', 'v0.29.0-rc1', 'nightly'], '18.12.3-mnemosyne.13')
     expect(await fetchLatest(fetcher)).toEqual({ tag: 'v0.28.0', plugin: '0.28.0', engine: '18.12.3-mnemosyne.13' })
-    expect(calls[1]).toBe('https://raw.githubusercontent.com/Interstellar-code/claude-hal-m/v0.28.0/engine/package.json')
+    expect(calls[1]).toBe('https://raw.githubusercontent.com/Interstellar-code/hal-m/v0.28.0/engine/package.json')
   })
   test('a failed check is silent: undefined, never a throw', async () => {
     expect(await fetchLatest(fakeGitHub([], '', true).fetcher)).toBeUndefined()

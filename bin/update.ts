@@ -46,7 +46,7 @@ import { VOCAB_FILE } from '../hooks/vocab'
 import { cliOf, install, isInside, LockBusy, lockTimingFromEnv, proxyClosure, windowsPathProblem, withInstallLock } from './install-engine'
 import { dataRoot } from './migrate-root'
 
-export const REPO = 'Interstellar-code/claude-hal-m'
+export const REPO = 'Interstellar-code/hal-m'
 // The always-on dashboard's scheduled task (made by hand from the README): the
 // new name first, then the 0.37 one, which existing PCs keep until the runbook renames it.
 export const TASK_NAME = 'HAL-M dashboard'
@@ -548,8 +548,8 @@ export function planUpdate(input: {
   stopEngines: boolean
 }): Plan {
   const { installed, source, processes, windows, force } = input
-  if (source.engineBuild === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no engine/package.json; it is not a claude-hal-m checkout` }
-  if (source.pluginVersion === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no .claude-plugin/plugin.json; it is not a claude-hal-m checkout` }
+  if (source.engineBuild === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no engine/package.json; it is not a hal-m checkout` }
+  if (source.pluginVersion === undefined) return { kind: 'refused', code: EXIT.failed, message: `${source.dir} has no .claude-plugin/plugin.json; it is not a hal-m checkout` }
   if (!force && compareVersions(source.pluginVersion, installed.pluginVersion) < 0) {
     return { kind: 'refused', code: EXIT.failed, message: `the installed plugin ${installed.pluginVersion} is newer than ${source.pluginVersion}; nothing was changed (--force installs the older one)` }
   }
@@ -917,7 +917,7 @@ export async function stageRelease(dir: string, tag: string | undefined, runner:
     return tag
   }
   if (tag === undefined) {
-    const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'claude-hal-m-update' } })
+    const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'hal-m-update' } })
     if (!reply.ok) throw new UpdateError(`could not list the releases (GitHub answered ${reply.status}); install Git or pass --from <checkout>`)
     tag = latestReleaseTag(((await reply.json()) as { name: string }[]).map(t => t.name))
     if (tag === undefined) throw new UpdateError(`${REPO} has no vX.Y.Z release tag`)

@@ -10,8 +10,8 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/Interstellar-code/claude-hal-m</Support>
-  <Project>https://github.com/Interstellar-code/claude-hal-m</Project>
+  <Support>https://github.com/Interstellar-code/hal-m</Support>
+  <Project>https://github.com/Interstellar-code/hal-m</Project>
   <Overview>Claude HAL-M server: one shared memory store for every PC, its dashboard, /api/plugin/* and /mcp. Reached only through Unraid's Tailscale Serve at https://hal-m.&lt;your tailnet&gt;.ts.net; the app listens on 127.0.0.1:8787 inside the container. The image is built locally (docker build -t hal-m:local . in a checkout). See README "Run it on Unraid".</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI/>

@@ -140,7 +140,7 @@ const writePrivate = (file: string, value: unknown) => {
 /** The newest release and its engine build, from GitHub, within CHECK_TIMEOUT_MS; undefined on any failure. */
 export async function fetchLatest(fetcher: typeof fetch = fetch): Promise<Latest | undefined> {
   const signal = AbortSignal.timeout(CHECK_TIMEOUT_MS)
-  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'claude-hal-m-dashboard' }
+  const headers = { accept: 'application/vnd.github+json', 'user-agent': 'hal-m-dashboard' }
   try {
     const reply = await fetcher(`https://api.github.com/repos/${REPO}/tags?per_page=100`, { headers, signal })
     if (!reply.ok) return undefined

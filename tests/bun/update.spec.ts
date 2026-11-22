@@ -185,8 +185,8 @@ describe('planUpdate', () => {
     expect(planUpdate({ ...older, force: true }).kind).toBe('update')
   })
   test('a folder that is not a checkout is refused', () => {
-    expect(planUpdate({ ...base, source: { ...source, engineBuild: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a claude-hal-m checkout') })
-    expect(planUpdate({ ...base, source: { ...source, pluginVersion: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a claude-hal-m checkout') })
+    expect(planUpdate({ ...base, source: { ...source, engineBuild: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a hal-m checkout') })
+    expect(planUpdate({ ...base, source: { ...source, pluginVersion: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a hal-m checkout') })
   })
   test('Windows: running chats do not refuse the plan (the swap is tried; a running engine does not always lock it)', () => {
     const plan = planUpdate({ ...base, processes: classifyProcesses(processes(), layout) })
@@ -387,7 +387,7 @@ describe('stageRelease (fake runner and fetch, no network)', () => {
       throw new Error('no network in tests')
     }) as unknown as typeof fetch
     expect(await stageRelease(join(dir, 'staging'), undefined, runner, fetcher)).toBe('v0.27.0')
-    expect(calls.at(-1)).toEqual(['git', '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', 'v0.27.0', 'https://github.com/Interstellar-code/claude-hal-m.git', join(dir, 'staging')])
+    expect(calls.at(-1)).toEqual(['git', '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', 'v0.27.0', 'https://github.com/Interstellar-code/hal-m.git', join(dir, 'staging')])
   })
   test('with git and --tag: no listing', async () => {
     const { dir } = tempDir('update-stage')
@@ -419,7 +419,7 @@ describe('stageRelease (fake runner and fetch, no network)', () => {
       return { stdout: '', stderr: '', exitCode: 0 }
     }
     expect(await stageRelease(staging, undefined, runner, fetcher)).toBe('v0.27.0')
-    expect(urls[1]).toBe('https://codeload.github.com/Interstellar-code/claude-hal-m/tar.gz/refs/tags/v0.27.0')
+    expect(urls[1]).toBe('https://codeload.github.com/Interstellar-code/hal-m/tar.gz/refs/tags/v0.27.0')
     expect(calls.at(-1)).toEqual(['tar', '-xzf', `${staging}.tar.gz`, '-C', staging, '--strip-components=1'])
     expect(tarballSeen).toBe(true)
     expect(existsSync(`${staging}.tar.gz`)).toBe(false)

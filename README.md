@@ -9,13 +9,13 @@ HAL-M (formerly Mnemosyne) is long-term memory for Claude Code. A fact you save 
 You need [Bun](https://bun.sh) on your `PATH`. At the prompt of a Claude Code session:
 
 ```
-/plugin install mnemosyne --marketplace Interstellar-code/claude-hal-m
+/plugin install mnemosyne --marketplace Interstellar-code/hal-m
 ```
 
 Or from a shell:
 
 ```sh
-claude plugin install mnemosyne --marketplace Interstellar-code/claude-hal-m
+claude plugin install mnemosyne --marketplace Interstellar-code/hal-m
 ```
 
 Answer `y` to add the marketplace, then pick a scope (user scope for every project). The install then asks for the settings below; leave the empty ones empty. Claude Code's install screen shows values only for the scope picker and the on/off switch, so `/mnemosyne-setup` saves the defaults into any empty setting, and after a restart `/plugin` → mnemosyne → configure shows them, ready to edit.
@@ -24,7 +24,7 @@ The plugin id (`mnemosyne`), the memory tool names (`mcp__mnemosyne__*`) and the
 
 Works on macOS, Linux and Windows. On Windows, `~` means `%USERPROFILE%`.
 
-> The marketplace install has not been tested end to end yet. Every test so far loaded the plugin from a checkout (`claude --plugin-dir <repo>`). If the install fails, use that instead and [open an issue](https://github.com/Interstellar-code/claude-hal-m/issues).
+> The marketplace install has not been tested end to end yet. Every test so far loaded the plugin from a checkout (`claude --plugin-dir <repo>`). If the install fails, use that instead and [open an issue](https://github.com/Interstellar-code/hal-m/issues).
 
 ## Update
 
@@ -726,7 +726,7 @@ Set up, in an Unraid terminal (or `ssh root@<unraid>`):
 
 1. Get the code and build the image (a few minutes the first time: it installs the engine and the embedding model):
    ```sh
-   git clone https://github.com/Interstellar-code/claude-hal-m /mnt/cache/appdata/hal-m-src
+   git clone https://github.com/Interstellar-code/hal-m /mnt/cache/appdata/hal-m-src
    cd /mnt/cache/appdata/hal-m-src && git checkout v<version> && docker build -t hal-m:local .
    ```
 2. Copy the template and fill in three values: `MyIP` (a free address on your `br0` LAN, or leave it empty), the dashboard password (8 or more characters), and the public URL (`https://hal-m.<tailnet>.ts.net`):
