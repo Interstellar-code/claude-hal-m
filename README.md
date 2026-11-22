@@ -1,6 +1,6 @@
-# Claude Mnemosyne
+# Claude HAL-M
 
-Long-term memory for Claude Code. A fact you save in one session is there in the next one, in any repo.
+HAL-M (formerly Mnemosyne) is long-term memory for Claude Code. A fact you save in one session is there in the next one, in any repo.
 
 ![How memory flows](docs/architecture.png)
 
@@ -9,20 +9,22 @@ Long-term memory for Claude Code. A fact you save in one session is there in the
 You need [Bun](https://bun.sh) on your `PATH`. At the prompt of a Claude Code session:
 
 ```
-/plugin install mnemosyne --marketplace Interstellar-code/claude-mnemosyne
+/plugin install mnemosyne --marketplace Interstellar-code/claude-hal-m
 ```
 
 Or from a shell:
 
 ```sh
-claude plugin install mnemosyne --marketplace Interstellar-code/claude-mnemosyne
+claude plugin install mnemosyne --marketplace Interstellar-code/claude-hal-m
 ```
 
-Answer `y` to add the marketplace, then pick a scope (user scope for every project). The install then asks for the settings below; leave the empty ones empty. Claude Code's install screen shows values only for the scope picker and the on/off switch, so `/mnemosyne-setup` saves the defaults into any empty setting, and after a restart `/plugin` → Mnemosyne → configure shows them, ready to edit.
+Answer `y` to add the marketplace, then pick a scope (user scope for every project). The install then asks for the settings below; leave the empty ones empty. Claude Code's install screen shows values only for the scope picker and the on/off switch, so `/mnemosyne-setup` saves the defaults into any empty setting, and after a restart `/plugin` → mnemosyne → configure shows them, ready to edit.
+
+The plugin id (`mnemosyne`), the memory tool names (`mcp__mnemosyne__*`) and the `MNEMOSYNE_*` settings keep the old name for now, so existing installs and rules keep working.
 
 Works on macOS, Linux and Windows. On Windows, `~` means `%USERPROFILE%`.
 
-> The marketplace install has not been tested end to end yet. Every test so far loaded the plugin from a checkout (`claude --plugin-dir <repo>`). If the install fails, use that instead and [open an issue](https://github.com/Interstellar-code/claude-mnemosyne/issues).
+> The marketplace install has not been tested end to end yet. Every test so far loaded the plugin from a checkout (`claude --plugin-dir <repo>`). If the install fails, use that instead and [open an issue](https://github.com/Interstellar-code/claude-hal-m/issues).
 
 ## Update
 
@@ -36,7 +38,7 @@ After updating to 0.8.0, **run `/mnemosyne-setup` before you save anything**: it
 
 ## Updating without Claude Code
 
-On a machine that uses Mnemosyne only through Claude Desktop (or another MCP client) there is no `claude plugin update`. Since 0.28.0 one command updates the engine, the proxy and the dashboard copy under `~/.claude/mnemosyne`, with Bun on the PATH:
+On a machine that uses HAL-M only through Claude Desktop (or another MCP client) there is no `claude plugin update`. Since 0.28.0 one command updates the engine, the proxy and the dashboard copy under `~/.claude/mnemosyne`, with Bun on the PATH:
 
 ```sh
 bun bin/update.ts                   # from any checkout of 0.28.0 or later: installs the latest release
@@ -53,10 +55,10 @@ It downloads the newest `vX.Y.Z` release into `~/.claude/mnemosyne/update-stagin
 
 Your store, `config.json`, `vocabulary.json` and activity log are never touched. If any step fails, the old engine and plugin copy stay in place and the message says what is installed.
 
-**Open chats (Windows).** The update runs while Claude Desktop has Mnemosyne connected; open chats keep the old engine until Claude Desktop restarts. A running engine can keep its files locked: if Windows refuses the swap, the update puts the old version back, lists the processes holding it (how many, which pids) and exits 2. Quit Claude Desktop and run it again, or:
+**Open chats (Windows).** The update runs while Claude Desktop has HAL-M connected; open chats keep the old engine until Claude Desktop restarts. A running engine can keep its files locked: if Windows refuses the swap, the update puts the old version back, lists the processes holding it (how many, which pids) and exits 2. Quit Claude Desktop and run it again, or:
 
 - `--wait 600` waits up to 10 minutes for them to end before the swap;
-- `--stop-engines` stops them first (open chats lose Mnemosyne until Claude Desktop is restarted). Nothing is stopped without this flag.
+- `--stop-engines` stops them first (open chats lose HAL-M until Claude Desktop is restarted). Nothing is stopped without this flag.
 
 Other options: `--tag v0.28.0` installs that release, `--force` reinstalls the same version (or an older one, which is otherwise refused). Exit codes: 0 done or already up to date, 1 failed, 2 refused while engines run, 3 another install holds `engine.lock`.
 
@@ -64,7 +66,7 @@ Other options: `--tag v0.28.0` installs that release, `--force` reinstalls the s
 
 Restart Claude Desktop (and other MCP clients) afterwards to use the new version.
 
-**From the dashboard.** The Health tab's System panel shows the version and, once a day, checks GitHub for the latest release: "Mnemosyne v0.28.0 · v0.29.0 available" with an **Update…** button, or "up to date". On a Claude Code install (from 0.33.0) the same button runs `claude plugin update` for you and shows its output; when it finishes, restart Claude Code to load the new version, and the next `/mnemosyne-ui` restarts the dashboard on it. A checkout run with `--plugin-dir` gets no button. The confirm lists the plugin version and engine build before and after, says that memories are not touched and that open Claude Desktop chats keep the old engine until it restarts; Cancel is the default. Update starts the same `bin/update.ts`, detached and windowless, and the panel shows its progress (`~/.claude/mnemosyne/update-status.json`, full output in `update.log`). When the dashboard comes back through its scheduled task it keeps its address, so the page reloads itself; otherwise the panel says to open it again from the Start Menu. If chats hold the files, the panel says so in plain words; it never stops them.
+**From the dashboard.** The Health tab's System panel shows the version and, once a day, checks GitHub for the latest release: "HAL-M v0.28.0 · v0.29.0 available" with an **Update…** button, or "up to date". On a Claude Code install (from 0.33.0) the same button runs `claude plugin update` for you and shows its output; when it finishes, restart Claude Code to load the new version, and the next `/mnemosyne-ui` restarts the dashboard on it. A checkout run with `--plugin-dir` gets no button. The confirm lists the plugin version and engine build before and after, says that memories are not touched and that open Claude Desktop chats keep the old engine until it restarts; Cancel is the default. Update starts the same `bin/update.ts`, detached and windowless, and the panel shows its progress (`~/.claude/mnemosyne/update-status.json`, full output in `update.log`). When the dashboard comes back through its scheduled task it keeps its address, so the page reloads itself; otherwise the panel says to open it again from the Start Menu. If chats hold the files, the panel says so in plain words; it never stops them.
 
 ## Uninstall
 
@@ -86,7 +88,7 @@ In a Claude Code session, run once:
 /mnemosyne-setup
 ```
 
-This installs the Mnemosyne Memory engine into `~/.claude/mnemosyne/engine/` (about 135 MB, and about 280 MB more when embeddings are on) and creates the store at `~/.claude/mnemosyne/store/`. The engine comes from the plugin's own copy (the `engine/` folder of this repo: the `@oh-my-pi/pi-mnemopi` 18.12.3 source with a few changes, listed in [engine/UPSTREAM.md](engine/UPSTREAM.md)); only its four `@oh-my-pi` dependencies are downloaded from npm. Setup builds the new engine next to the old one and swaps it in only once it answers, so a failed setup leaves the old engine working.
+This installs the HAL-M Memory engine into `~/.claude/mnemosyne/engine/` (about 135 MB, and about 280 MB more when embeddings are on) and creates the store at `~/.claude/mnemosyne/store/`. The engine comes from the plugin's own copy (the `engine/` folder of this repo: the `@oh-my-pi/pi-mnemopi` 18.12.3 source with a few changes, listed in [engine/UPSTREAM.md](engine/UPSTREAM.md)); only its four `@oh-my-pi` dependencies are downloaded from npm. Setup builds the new engine next to the old one and swaps it in only once it answers, so a failed setup leaves the old engine working.
 
 If you use the memory from other MCP clients (see below), restart them after setup: a client keeps the engine it started with, and an outside agent's proxy that started before the setup keeps refusing saves until its client is restarted.
 
@@ -275,7 +277,7 @@ Security is as before: every write is a POST behind the token, the Host and Orig
 1. What it expires: only memories of the kinds `context` (project state), `event` (including session summaries), `error` (bug notes) and `artifact` (references), that have no end date yet, are not pinned and were neither saved nor recalled for that many days (a memory's last use is the later of the two). A memory with an unreadable `metadata` or no scope is spared. A `fact`, `preference`, `instruction`, `decision` or `unknown` memory is never touched, whatever the number, and no setting can widen the list.
 2. It never deletes. Expiring gives the memory an end date, so it stops being recalled; the Review tab's Not live list shows it as `expired` and Restore brings it back.
 3. The number is 30 to 3650; `0` turns the sweep off; 1 to 29 (or anything that is not a whole number) is refused and no sweep runs.
-4. When: at most once a day (a marker file, `expire-sweep.json`, in the Mnemosyne root), started in the background by a session's first prompt, for the current owner's own memories only (this project's in `per-project` scope, the global ones in `global` scope), and at most 50 memories per run, longest unused first; the rest wait for the next day. The store is backed up first, and if the backup fails nothing is expired. Each expiry is recorded in the audit trail as `expire-sweep`, and the activity log gets one `expire` line with counts and ids.
+4. When: at most once a day (a marker file, `expire-sweep.json`, in the HAL-M root), started in the background by a session's first prompt, for the current owner's own memories only (this project's in `per-project` scope, the global ones in `global` scope), and at most 50 memories per run, longest unused first; the rest wait for the next day. The store is backed up first, and if the backup fails nothing is expired. Each expiry is recorded in the audit trail as `expire-sweep`, and the activity log gets one `expire` line with counts and ids.
 5. Preview it, changing nothing: `bun bin/memories.ts --store ~/.claude/mnemosyne/store expire` (add `--days N` or `--owner <owner>`). It lists what would expire and prints the exact `--apply` command to run it by hand.
 
 ### Engine logs and platforms
@@ -338,7 +340,7 @@ Starts a small local web page for your memories and opens it in your default bro
 
 The header shows how many memories are in how many projects (global is counted apart: "in 13 projects + global"), and a connection pill: teal "Local · live" while the server answers, amber "Reconnecting…" when it has stopped (an amber strip under the header counts down to the next check, offers Try now, and the page's data is dimmed as out of date), and "Link expired" when the server was restarted (a card then says how to get a fresh link with `/mnemosyne-ui`, with a Copy button; nothing is lost). The plugin and engine versions are behind the ⓘ button. The page has nine tabs and opens on Map:
 
-- **Map:** the solar-system Galaxy view: the sun and writer nodules, planets and crafts with their styles, land, moons, asteroids, belts, black holes, satellites, comets and beams, clouds and ice cap (see [The galaxy](#the-galaxy)). Arrange by, Find, the Bodies strip, the Details panel, and the live events; Timeline and Meaning unchanged. Two new files in the Mnemosyne root: `activity-daily.json` (counts only) and `projects.json` (project names and the remote's host only); a project is recorded the next time a Claude session starts in it.
+- **Map:** the solar-system Galaxy view: the sun and writer nodules, planets and crafts with their styles, land, moons, asteroids, belts, black holes, satellites, comets and beams, clouds and ice cap (see [The galaxy](#the-galaxy)). Arrange by, Find, the Bodies strip, the Details panel, and the live events; Timeline and Meaning unchanged. Two new files in the HAL-M root: `activity-daily.json` (counts only) and `projects.json` (project names and the remote's host only); a project is recorded the next time a Claude session starts in it.
 - **Memories:** every memory, one line each:
   - **Each row** shows the kind as a glyph, the text with its lead in bold and up to three tags under it, the project as a chip (global in gold), the reach, importance as five pips, a recall bar, and the saved time.
   - **Reach** follows the map's colours: all (a gold dot: the global owner, every project reads it), shared (a dashed blue ring: a project's memory every project can recall) and project.
@@ -469,7 +471,7 @@ Another dry run, now for every memory, tagged or not: it proposes tags from the 
 
 ### Knowledge extraction: what Claude learned
 
-After each save, and after an update that changes a memory's text, Mnemosyne asks the `extractionModel` (Haiku by default) to pull out the facts, preferences, instructions, dated events and relations in that memory. The save returns at once; the call runs in the background. The engine's own prompt builds the request, and the engine checks and stores the answer. Every run is one line in the activity log, action `extract`.
+After each save, and after an update that changes a memory's text, HAL-M asks the `extractionModel` (Haiku by default) to pull out the facts, preferences, instructions, dated events and relations in that memory. The save returns at once; the call runs in the background. The engine's own prompt builds the request, and the engine checks and stores the answer. Every run is one line in the activity log, action `extract`.
 
 Only the memory's text goes to the model, through Claude Code's own model channel; nothing leaves your machine for another service. One model call per save is the cost. The setting `extractionModel` picks the model (a short name such as `haiku`, the default, or a full model id). It also drives `/mnemosyne-tags`. Set it to `off` and nothing is extracted, no model call is made, and `/mnemosyne-tags` and `/mnemosyne-knowledge` say that extraction is off.
 
@@ -519,10 +521,10 @@ Since 0.8.5 the dashboard has a Settings tab (the last one, after Health) where 
 
 ### Two homes for settings
 
-1. **Mnemosyne config** (`~/.claude/mnemosyne/config.json`). Every number that used to be fixed in the code lives here: the save guard's limits, the tag counts, the recall counts and weights, the expiry days, the activity-log size, the backups kept and which memory tools exist. The hooks, the outside-agent wrapper and the dashboard read the file on every call, so a change applies on the next save or recall, with no restart. Only the values that differ from the default are stored, and with no file every setting is at its default and Mnemosyne behaves exactly as in 0.8.4. The file is owner-only (`0600`) and is written safely (a new file is moved over the old one, and the old one is kept as `config.json.bak`). You can edit it by hand: a value that is the wrong type or outside its range is ignored (the default is used), and the Settings tab shows a warning naming the setting.
-2. **Plugin options** (the ten options in the second table below, also reached through `/plugin` → Mnemosyne → configure or `/config`). Claude Code stores these. The Settings tab reads and changes them only through the official `claude plugin configure` command, one option per change, and reads the value back to confirm it. A change takes effect after the plugin reloads or Claude Code restarts, and the tab says so ("Restart needed for: ..."). An install started with `--plugin-dir` has no plugin id, so there the options are read-only and the tab points to `/config`.
+1. **HAL-M config** (`~/.claude/mnemosyne/config.json`). Every number that used to be fixed in the code lives here: the save guard's limits, the tag counts, the recall counts and weights, the expiry days, the activity-log size, the backups kept and which memory tools exist. The hooks, the outside-agent wrapper and the dashboard read the file on every call, so a change applies on the next save or recall, with no restart. Only the values that differ from the default are stored, and with no file every setting is at its default and HAL-M behaves exactly as in 0.8.4. The file is owner-only (`0600`) and is written safely (a new file is moved over the old one, and the old one is kept as `config.json.bak`). You can edit it by hand: a value that is the wrong type or outside its range is ignored (the default is used), and the Settings tab shows a warning naming the setting.
+2. **Plugin options** (the ten options in the second table below, also reached through `/plugin` → mnemosyne → configure or `/config`). Claude Code stores these. The Settings tab reads and changes them only through the official `claude plugin configure` command, one option per change, and reads the value back to confirm it. A change takes effect after the plugin reloads or Claude Code restarts, and the tab says so ("Restart needed for: ..."). An install started with `--plugin-dir` has no plugin id, so there the options are read-only and the tab points to `/config`.
 
-Each row carries badges: where it is stored (Mnemosyne config, Plugin option, Read-only) and when a change takes effect:
+Each row carries badges: where it is stored (HAL-M config, Plugin option, Read-only) and when a change takes effect:
 
 | Badge | Meaning |
 |---|---|
@@ -576,7 +578,7 @@ The ranking weights are sent with every recall and also pinned in the engine's e
 | Option | Default | Allowed | What it does |
 |---|---|---|---|
 | `scope` | global | global, per-project | `global`: one memory for every repo. `per-project`: each repo keeps its own; ask for "global" to share a fact. |
-| `showActivity` | on | on, status, off | `on`: a dim line in the conversation when Mnemosyne recalls, plus a status line under the prompt. `status`: the status line only. `off`: silent. |
+| `showActivity` | on | on, status, off | `on`: a dim line in the conversation when HAL-M recalls, plus a status line under the prompt. `status`: the status line only. `off`: silent. |
 | `activityLog` | on | on, off | `on`: each memory call adds one line to `~/.claude/mnemosyne/activity.jsonl` (see [Activity log](#activity-log)). `off`: nothing is written. |
 | `guardMode` | strict | strict, warn | `strict`: a save the guard warns about is refused until it is sent again with `confirm: true`. `warn`: it is saved at once, flagged, and the reply shows the warnings (see [The save guard](#the-save-guard)). Secrets and empty, very short or over-length text are refused in both. |
 | `memoryDir` | ~/.claude/mnemosyne/store | text | Where memories are stored: an absolute path or one starting with `~/`. |
@@ -587,7 +589,7 @@ The ranking weights are sent with every recall and also pinned in the engine's e
 | `embeddings` | auto | auto, on, off | `auto`: meaning-based recall on only on macOS on Apple Silicon, off elsewhere. `on`: always on. `off`: keyword-only recall. Local only; `/mnemosyne-setup` downloads the model once (see [Embeddings](#embeddings-meaning-based-recall)). |
 | `sessionSummary` | off | off, on | `off`: nothing. `on`: when a session ends (exit, `/clear` or resume) a small marker is left (the session id, its owner and its transcript path; no text). On a later session's first prompt, after the reply and in the background, Haiku (the `extractionModel`) summarises that session's redacted conversation (at most 30,000 characters leave this machine) into one session-summary memory of at most 600 characters, kept 30 days. The next session's first prompt shows the newest summary and the pinned memories. |
 | `expireUnusedDays` | 90 | text | Once a day, in the background, a memory of the kinds project state, session summary, bug note or reference that nobody has recalled for this many days gets an end date and stops being recalled. Nothing is deleted and it can be restored in the dashboard's Review tab. Pinned memories, facts, preferences, rules and decisions are never touched, and the store is backed up first. `0` turns the sweep off; 1 to 29 are refused. Preview it: `bun bin/memories.ts --store <store> expire`. |
-| `serverUrl` |  | text | Empty: memory stays on this PC. Your Mnemosyne server (for example `https://mnemosyne.<tailnet>.ts.net`): every PC uses that one memory. Recall, saves, the owner lookup and the first-prompt block go to the server, no local engine is needed, and the store-wide commands (`/mnemosyne-tags`, `-import`, `-knowledge`, `-embed`) run there. A server that does not answer turns memory off for 60 seconds at a time ("memory offline"). |
+| `serverUrl` |  | text | Empty: memory stays on this PC. Your HAL-M server (for example `https://hal-m.<tailnet>.ts.net`): every PC uses that one memory. Recall, saves, the owner lookup and the first-prompt block go to the server, no local engine is needed, and the store-wide commands (`/mnemosyne-tags`, `-import`, `-knowledge`, `-embed`) run there. A server that does not answer turns memory off for 60 seconds at a time ("memory offline"). |
 | `serverKey` |  | text | The key from the server dashboard (Settings, MCP connection). Sent only to `serverUrl`, on stdin to a short Bun process, never on a command line. |
 
 The tab draws the plugin options from the schema the `claude` command reports, so an option a later version adds appears there by itself, in an "Other plugin options" group.
@@ -684,19 +686,19 @@ Saving text this owner already holds. Since 0.11.0 the `memory_remember` reply c
 
 ## Run it as a server (Docker, Unraid, Dokploy)
 
-Since 0.36.0 one Mnemosyne store can live on an always-on machine and serve every PC over Tailscale: each Claude Code install points at it instead of keeping its own memory, and other MCP clients can use it too. The repo has the template: `Dockerfile`, `docker-compose.yml`, `docker/` and `.env.example`.
+Since 0.36.0 one HAL-M store can live on an always-on machine and serve every PC over Tailscale: each Claude Code install points at it instead of keeping its own memory, and other MCP clients can use it too. The repo has the template: `Dockerfile`, `docker-compose.yml`, `docker/` and `.env.example`.
 
-The compose file runs two containers. `tailscale` joins your tailnet as `mnemosyne` and serves HTTPS on port 443 with a Tailscale certificate (`docker/tailscale/serve.json`, Funnel off). `mnemosyne` runs `bun ui/server.ts --server` inside the Tailscale container's network, so nothing is published on the host's own network. The image is Debian with Bun 1.4.3; the engine and, by default, the local embedding model are installed when it is built. Data lives in one volume, `/data` (store, settings, vocabulary, activity log, device keys, backups).
+The compose file runs two containers. `tailscale` joins your tailnet as `hal-m` and serves HTTPS on port 443 with a Tailscale certificate (`docker/tailscale/serve.json`, Funnel off). `hal-m` runs `bun ui/server.ts --server` inside the Tailscale container's network, so nothing is published on the host's own network. The image is Debian with Bun 1.4.3; the engine and, by default, the local embedding model are installed when it is built. Data lives in one volume, `/data` (store, settings, vocabulary, activity log, device keys, backups).
 
 Steps, with Dokploy:
 
 1. In the Tailscale admin console, make an auth key (Settings, Keys). A tagged key (for example `tag:server`, defined in your ACL policy) keeps the node from expiring with your login. Turn on HTTPS certificates (DNS, HTTPS Certificates) if you have not.
 2. In Dokploy, create a Compose app from this GitHub repository (branch or release tag), compose path `docker-compose.yml`.
-3. In its Environment tab set `MNEMOSYNE_UI_PASSWORD` (8 or more characters) and `TS_AUTHKEY`. Optional: `MNEMOSYNE_EXPIRE_UNUSED_DAYS` (the daily sweep that expires unused notes, 90 by default, 0 off), `MNEMOSYNE_PUBLIC_URL` (`https://mnemosyne.<tailnet>.ts.net`, the address shown in copied settings), `MNEMOSYNE_HOSTS`, `MNEMOSYNE_DATA` and `TS_STATE` (host folders), `MNEMOSYNE_BUILD_EMBEDDINGS=0` (no model in the image), `TS_EXTRA_ARGS`. `.env.example` lists them all.
+3. In its Environment tab set `MNEMOSYNE_UI_PASSWORD` (8 or more characters) and `TS_AUTHKEY`. Optional: `MNEMOSYNE_EXPIRE_UNUSED_DAYS` (the daily sweep that expires unused notes, 90 by default, 0 off), `MNEMOSYNE_PUBLIC_URL` (`https://hal-m.<tailnet>.ts.net`, the address shown in copied settings), `MNEMOSYNE_HOSTS`, `MNEMOSYNE_DATA` and `TS_STATE` (host folders), `MNEMOSYNE_BUILD_EMBEDDINGS=0` (no model in the image), `TS_EXTRA_ARGS`. `.env.example` lists them all.
 4. Deploy. The first build downloads the engine's packages and the model, so it takes a few minutes.
-5. Open `https://mnemosyne.<tailnet>.ts.net` from a machine on the tailnet and sign in with the password.
+5. Open `https://hal-m.<tailnet>.ts.net` from a machine on the tailnet and sign in with the password.
 6. Settings, MCP connection: create a key for each device. A key is shown once; revoke one there when a device is gone.
-7. On each PC, set the plugin's `serverUrl` (the address above) and `serverKey` (that device's key), in Claude Code (`/plugin`, Mnemosyne, configure), and start a new session.
+7. On each PC, set the plugin's `serverUrl` (the address above) and `serverKey` (that device's key), in Claude Code (`/plugin`, mnemosyne, configure), and start a new session.
 8. Other MCP clients use `POST <address>/mcp` with `Authorization: Bearer <key>`; the dashboard copies the JSON for you. A save is recorded as `mcp:<device name>`. Clients that speak only stdio, such as Claude Desktop, may need the `mcp-remote` bridge (`npx mcp-remote <address>/mcp --header "Authorization: Bearer <key>"`).
 
 Without Dokploy, copy `.env.example` to `.env`, fill it in and run `docker compose up -d --build` in the checkout.
@@ -712,35 +714,35 @@ Upgrading: redeploy (pull the new tag and rebuild). The data volume is kept; the
 
 What the server does for every PC: once a day it backs the store up and runs the unused-expiry sweep for every project; each PC's saves and recalls land in the server's activity log (the Activity tab and the live map show them as Claude's, with the device name in the line); and each project's name and kind reach the server's registry at a session start, so the map names them.
 
-What client mode does not do yet: on a PC with `serverUrl` set there is no knowledge extraction, no session summaries, and `/mnemosyne-tags`, `/mnemosyne-import`, `/mnemosyne-knowledge` and `/mnemosyne-embed` answer that they run on the server. Run those on the server, for example `docker compose exec mnemosyne bun /app/bin/vocab.ts --root /data list`. When the server does not answer, the session marks memory offline for 60 seconds ("Mnemosyne · memory offline") and Claude works without it.
+What client mode does not do yet: on a PC with `serverUrl` set there is no knowledge extraction, no session summaries, and `/mnemosyne-tags`, `/mnemosyne-import`, `/mnemosyne-knowledge` and `/mnemosyne-embed` answer that they run on the server. Run those on the server, for example `docker compose exec hal-m bun /app/bin/vocab.ts --root /data list`. When the server does not answer, the session marks memory offline for 60 seconds ("HAL-M · memory offline") and Claude works without it.
 
 **Security.** The dashboard needs the password (30-day cookie, a pause after 5 wrong tries), and `/api/plugin/*` and `/mcp` need a device key; the server stores only each key's SHA-256. Reach it only through Tailscale: do not publish port 8787 or turn on Funnel.
 
 ### Run it on Unraid (a plain container with its own Tailscale name)
 
-This runs the server as one ordinary Unraid container, editable in the Docker tab, with its own LAN address and its own Tailscale name (`https://mnemosyne.<tailnet>.ts.net` on port 443, a real certificate), using Unraid's built-in Tailscale option instead of the compose file's sidecar. No auth key is needed: you approve the device once through a link. The template is `docker/unraid/my-Mnemosyne.xml`.
+This runs the server as one ordinary Unraid container, editable in the Docker tab, with its own LAN address and its own Tailscale name (`https://hal-m.<tailnet>.ts.net` on port 443, a real certificate), using Unraid's built-in Tailscale option instead of the compose file's sidecar. No auth key is needed: you approve the device once through a link. The template is `docker/unraid/my-HAL-M.xml`.
 
 Set up, in an Unraid terminal (or `ssh root@<unraid>`):
 
 1. Get the code and build the image (a few minutes the first time: it installs the engine and the embedding model):
    ```sh
-   git clone https://github.com/Interstellar-code/claude-mnemosyne /mnt/cache/appdata/mnemosyne-src
-   cd /mnt/cache/appdata/mnemosyne-src && git checkout v<version> && docker build -t mnemosyne:local .
+   git clone https://github.com/Interstellar-code/claude-hal-m /mnt/cache/appdata/hal-m-src
+   cd /mnt/cache/appdata/hal-m-src && git checkout v<version> && docker build -t hal-m:local .
    ```
-2. Copy the template and fill in three values: `MyIP` (a free address on your `br0` LAN, or leave it empty), the dashboard password (8 or more characters), and the public URL (`https://mnemosyne.<tailnet>.ts.net`):
+2. Copy the template and fill in three values: `MyIP` (a free address on your `br0` LAN, or leave it empty), the dashboard password (8 or more characters), and the public URL (`https://hal-m.<tailnet>.ts.net`):
    ```sh
-   cp docker/unraid/my-Mnemosyne.xml /boot/config/plugins/dockerMan/templates-user/
-   nano /boot/config/plugins/dockerMan/templates-user/my-Mnemosyne.xml
+   cp docker/unraid/my-HAL-M.xml /boot/config/plugins/dockerMan/templates-user/
+   nano /boot/config/plugins/dockerMan/templates-user/my-HAL-M.xml
    ```
-   You can also leave the values empty and fill them in the web UI (Docker, Add Container, template "Mnemosyne", Apply).
+   You can also leave the values empty and fill them in the web UI (Docker, Add Container, template "HAL-M", Apply).
 3. Create the folders and start it (the web UI's Apply does the same):
    ```sh
-   mkdir -p /mnt/cache/appdata/mnemosyne /mnt/cache/appdata/mnemosyne-tailscale
-   php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container Mnemosyne
+   mkdir -p /mnt/cache/appdata/hal-m /mnt/cache/appdata/hal-m-tailscale
+   php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container HAL-M
    ```
-   `rebuild_container` leaves a container stopped when it is not set to autostart: turn autostart on in the Docker tab, or run `docker start Mnemosyne`.
-4. `docker logs Mnemosyne` prints `To authenticate, visit: https://login.tailscale.com/a/...` the first time. Open it and approve the device `mnemosyne`. In the Tailscale admin console (Machines), use the device's menu to Disable key expiry, or it drops off the tailnet after 180 days. Tailscale must have MagicDNS and HTTPS certificates turned on.
-5. Open `https://mnemosyne.<tailnet>.ts.net`, sign in, and go on with step 6 of the Dokploy steps above (device keys, then each PC's `serverUrl` and `serverKey`).
+   `rebuild_container` leaves a container stopped when it is not set to autostart: turn autostart on in the Docker tab, or run `docker start HAL-M`.
+4. `docker logs HAL-M` prints `To authenticate, visit: https://login.tailscale.com/a/...` the first time. Open it and approve the device `mnemosyne`. In the Tailscale admin console (Machines), use the device's menu to Disable key expiry, or it drops off the tailnet after 180 days. Tailscale must have MagicDNS and HTTPS certificates turned on.
+5. Open `https://hal-m.<tailnet>.ts.net`, sign in, and go on with step 6 of the Dokploy steps above (device keys, then each PC's `serverUrl` and `serverKey`).
 
 What the template sets, and why:
 
@@ -757,29 +759,33 @@ Move a PC's existing memory to the server (once, before that PC switches to `ser
    ```
 2. On Unraid, stop the server and keep a copy of its data:
    ```sh
-   docker stop Mnemosyne
-   cp -a /mnt/cache/appdata/mnemosyne /mnt/cache/appdata/mnemosyne-premigrate
-   rm -f /mnt/cache/appdata/mnemosyne/store/mnemopi.db*
+   docker stop HAL-M
+   cp -a /mnt/cache/appdata/hal-m /mnt/cache/appdata/hal-m-premigrate
+   rm -f /mnt/cache/appdata/hal-m/store/mnemopi.db*
    ```
 3. From the PC, copy the store and the files that go with it (project names, tags, activity, map layout). Leave out `config.json` and `embeddings.json` (they hold the PC's own paths) and never overwrite the server's `server-secret` or `keys.json`:
    ```sh
-   scp /tmp/mnemopi.db root@<unraid>:/mnt/cache/appdata/mnemosyne/store/
-   cd ~/.claude/mnemosyne && scp projects.json vocabulary.json tags-proposed.json activity.jsonl* activity-daily.json meaning.json root@<unraid>:/mnt/cache/appdata/mnemosyne/
+   scp /tmp/mnemopi.db root@<unraid>:/mnt/cache/appdata/hal-m/store/
+   cd ~/.claude/mnemosyne && scp projects.json vocabulary.json tags-proposed.json activity.jsonl* activity-daily.json meaning.json root@<unraid>:/mnt/cache/appdata/hal-m/
    ```
 4. On Unraid, give the files to the server's user and start it; the Health tab's total should match the PC's:
    ```sh
-   chown -R 99:100 /mnt/cache/appdata/mnemosyne && docker start Mnemosyne
+   chown -R 99:100 /mnt/cache/appdata/hal-m && docker start HAL-M
    ```
 
 Upgrade:
 
 ```sh
-cd /mnt/cache/appdata/mnemosyne-src && git fetch --tags && git checkout v<new version>
-docker build -t mnemosyne:local .
-php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container Mnemosyne
+cd /mnt/cache/appdata/hal-m-src && git fetch --tags && git checkout v<new version>
+docker build -t hal-m:local .
+php /usr/local/emhttp/plugins/dynamix.docker.manager/scripts/rebuild_container HAL-M
 ```
 
 The data and the Tailscale login are kept; the dashboard password stays in the template.
+
+Coming from 0.36.x, when the server was called Mnemosyne: the server address changes from `https://mnemosyne.<tailnet>.ts.net` to `https://hal-m.<tailnet>.ts.net`, so set the new address as `serverUrl` on every PC and as `MNEMOSYNE_PUBLIC_URL` (and in `MNEMOSYNE_HOSTS` if you set it).
+- Unraid: stop the old container, move `appdata/mnemosyne` to `appdata/hal-m` (and `mnemosyne-src` to `hal-m-src`), install `my-HAL-M.xml` with your password copied over, remove the old container and its template, then build and rebuild as above. The new Tailscale name logs in again: approve the device, turn off its key expiry, and remove the old `mnemosyne` device.
+- Compose or Dokploy: the data folder defaults stay as they were. Run `docker compose up -d --build --remove-orphans` so the old `mnemosyne` container is removed, and approve the `hal-m` device in Tailscale.
 
 ## How it works
 
@@ -790,11 +796,11 @@ The plugin hooks into Claude Code at four points:
 - **Your prompt:** on the first prompt (again after a compaction), or one starting with a term above, looks up memories and attaches them to that prompt.
 - **Tool calls:** when Claude calls a memory tool, checks a save with the guard, runs the engine and returns the answer.
 
-Mnemosyne shows a dim line in the conversation when it recalls and a status line under the prompt; `showActivity` quiets them.
+HAL-M shows a dim line in the conversation when it recalls and a status line under the prompt; `showActivity` quiets them.
 
 Where an organization manages Claude Code, the system-prompt rules are skipped unless the organization lists this plugin in its managed settings; the tools and trigger terms still work.
 
-Memories live in a local SQLite file. Mnemosyne runs on its own private copy of the Mnemosyne Memory engine, built from the plugin's `engine/` folder. Design notes: [DESIGN.md](DESIGN.md).
+Memories live in a local SQLite file. HAL-M runs on its own private copy of the HAL-M Memory engine, built from the plugin's `engine/` folder. Design notes: [DESIGN.md](DESIGN.md).
 
 ## License
 

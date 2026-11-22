@@ -1,4 +1,4 @@
-// Claude Mnemosyne — stdio MCP proxy for other clients (userConfig externalMcp).
+// Claude HAL-M — stdio MCP proxy for other clients (userConfig externalMcp).
 //
 // Runs the engine and passes through only the plugin's own six tools, named
 // memory_* as in the plugin (the engine calls them mnemopi_*). The
@@ -149,7 +149,7 @@ function infoOfMemory(dbPath: string, id: unknown): RowInfo | undefined {
 }
 const otherOwnerHint = (memoryOwner: string, ownOwner: string) =>
   `This memory belongs to ${memoryOwner}, not to ${ownOwner}, the owner this MCP server writes as, so it can only be read here. ` +
-  `Change it from the Mnemosyne dashboard, from a Claude Code session in that project, or through a server started with MNEMOSYNE_OWNER=${memoryOwner}.`
+  `Change it from the HAL-M dashboard, from a Claude Code session in that project, or through a server started with MNEMOSYNE_OWNER=${memoryOwner}.`
 
 const engine = Bun.spawn(['bun', cli, 'mcp'], { stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' })
 const listIds = new Set<unknown>()
@@ -252,7 +252,7 @@ void (async () => {
       }
       if ((name === 'memory_update' || name === 'memory_remember') && build !== ENGINE_BUILD) {
         // memory_remember too: an older engine's 24 h trim deletes every row whose trust tier is not IMPORTED, which a save of this build's is not.
-        const reason = `${name} needs the Mnemosyne engine build ${ENGINE_BUILD}; installed is ${build}. Run /mnemosyne-setup in Claude Code.`
+        const reason = `${name} needs the HAL-M engine build ${ENGINE_BUILD}; installed is ${build}. Run /mnemosyne-setup in Claude Code.`
         // A refused save logs no memory text: the line is built from no arguments.
         refuse(message.id, action, name === 'memory_remember' ? {} : given, { code: -32000, message: reason })
         continue
@@ -350,7 +350,7 @@ void (async () => {
           text: callText(action, { ...args, tags: Array.isArray(tags) ? cleanTags(tags, { ...tagRulesNow(), max: settings.tags.maxPerMemory }) : undefined }),
           args: { ...args },
           ...(getInfo !== undefined ? { info: getInfo } : {}),
-          ...(warned.length > 0 ? { warnings: warned.map(hit => `Mnemosyne guard warning: ${hit.message}`) } : {}),
+          ...(warned.length > 0 ? { warnings: warned.map(hit => `HAL-M guard warning: ${hit.message}`) } : {}),
         })
       }
       // memory_get's owner was checked above; the engine's get takes only the id.
@@ -423,7 +423,7 @@ for await (const line of lines(engine.stdout)) {
       .map((tool: { name: string; description?: string; inputSchema?: Schema }) => ({
         ...tool,
         name: publicTool(tool.name),
-        description: publicDescription(publicTool(tool.name), tool.description?.replaceAll('Mnemopi', 'Mnemosyne'), settings),
+        description: publicDescription(publicTool(tool.name), tool.description?.replaceAll('Mnemopi', 'HAL-M'), settings),
         inputSchema: publicSchema(publicTool(tool.name), tool.inputSchema, settings),
       }))
       // M2: only the tools on the allow-list are listed (all six, by default).

@@ -378,7 +378,7 @@ export function noticesFile(bundles: readonly { name: string; packages: BundledP
   const all = named.flatMap(entry => entry.packages)
   const seen = new Set<string>()
   return [
-    'Third-party notices for the vendored libraries of the Mnemosyne dashboard',
+    'Third-party notices for the vendored libraries of the HAL-M dashboard',
     '',
     ...named.flatMap(entry => [
       `ui/vendor/${entry.bundle} bundles: ${entry.packages.map(pkg => `${pkg.name} ${pkg.version}`).join(', ')}`,

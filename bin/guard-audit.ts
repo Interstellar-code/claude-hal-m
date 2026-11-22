@@ -1,4 +1,4 @@
-// Claude Mnemosyne — a read-only audit of a store against the save guard (plan
+// Claude HAL-M — a read-only audit of a store against the save guard (plan
 // phase GUARD): how many stored memories the guard would allow, warn about or
 // block today.
 //   bun bin/guard-audit.ts --store <dir>

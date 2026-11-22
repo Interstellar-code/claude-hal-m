@@ -1,4 +1,4 @@
-// Claude Mnemosyne — one activity log entry (C3 in the mnemosyne-ui plan).
+// Claude HAL-M — one activity log entry (C3 in the mnemosyne-ui plan).
 //
 // Imports nothing (no claude-code, no Bun), so the hooks, the external proxy
 // and the dashboard server build the same line. The writer is bin/activity.ts.

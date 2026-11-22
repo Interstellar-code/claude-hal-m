@@ -1,4 +1,4 @@
-/* Mnemosyne dashboard. Colours and layout follow the design mockups
+/* HAL-M dashboard. Colours and layout follow the design mockups
    (design/*.dc.html); every style lives here, since the CSP refuses inline ones. */
 :root {
   /* Light palette (also the fallback for browsers without light-dark()). */

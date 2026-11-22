@@ -2,6 +2,14 @@
 
 Newest first. Each release is tagged `vX.Y.Z` on GitHub; the README and DESIGN.md describe the contracts.
 
+## 0.37.0 (Mnemosyne is now HAL-M)
+
+1. The product is called HAL-M: the dashboard (it was HAL-10000), README, DESIGN.md, the plugin's description, CLI and hook messages, and the server pages.
+2. The GitHub repo is `Interstellar-code/claude-hal-m`. The old `claude-mnemosyne` URL redirects, so existing installs and clones keep working.
+3. Server: the image is `hal-m:local`, the Unraid template is `docker/unraid/my-HAL-M.xml` (container HAL-M, Tailscale name `hal-m`, appdata folder `hal-m`), and the compose service is `hal-m`. The compose data folder defaults are unchanged.
+4. Upgrading a 0.36.x server: its address becomes `https://hal-m.<tailnet>.ts.net`, so every PC's `serverUrl` (and `MNEMOSYNE_PUBLIC_URL`) changes. On Unraid, move the appdata folders and switch to the new template; with compose, run `docker compose up -d --build --remove-orphans` (the data folder defaults are unchanged). README "Run it on Unraid" lists the steps.
+5. Unchanged for now, so nothing breaks: the plugin id `mnemosyne`, the memory tools `mcp__mnemosyne__*`, the `MNEMOSYNE_*` settings and the `~/.claude/mnemosyne` data folder. Renaming those is a later, separate release.
+
 ## 0.36.3 (the Unraid template is in the repo)
 
 1. `docker/unraid/my-Mnemosyne.xml`: the Unraid template the server runs from on Unraid, with the password, LAN address and public URL left for you to fill in.

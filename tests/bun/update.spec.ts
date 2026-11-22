@@ -175,8 +175,8 @@ describe('planUpdate', () => {
     expect(planUpdate({ ...older, force: true }).kind).toBe('update')
   })
   test('a folder that is not a checkout is refused', () => {
-    expect(planUpdate({ ...base, source: { ...source, engineBuild: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a claude-mnemosyne checkout') })
-    expect(planUpdate({ ...base, source: { ...source, pluginVersion: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a claude-mnemosyne checkout') })
+    expect(planUpdate({ ...base, source: { ...source, engineBuild: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a claude-hal-m checkout') })
+    expect(planUpdate({ ...base, source: { ...source, pluginVersion: undefined } })).toMatchObject({ kind: 'refused', message: expect.stringContaining('not a claude-hal-m checkout') })
   })
   test('Windows: running chats do not refuse the plan (the swap is tried; a running engine does not always lock it)', () => {
     const plan = planUpdate({ ...base, processes: classifyProcesses(processes(), layout) })
@@ -196,13 +196,13 @@ describe('planUpdate', () => {
     expect(message).toContain('Nothing was changed; the previous version keeps working.')
     expect(message).toContain('Quit Claude Desktop')
     expect(lockedMessage(sorted, false)).toContain('Part of the update is in place')
-    expect(lockedMessage({ chats: [{ engines: [{ pid: 9, ppid: 1, command: '' }] }], dashboard: [], others: [] }, true)).toContain('A Claude chat uses Mnemosyne (1 MCP connection running)')
+    expect(lockedMessage({ chats: [{ engines: [{ pid: 9, ppid: 1, command: '' }] }], dashboard: [], others: [] }, true)).toContain('A Claude chat uses HAL-M (1 MCP connection running)')
   })
-  test('nothing of Mnemosyne found: no chats are blamed, another program is named as the likely holder', () => {
+  test('nothing of HAL-M found: no chats are blamed, another program is named as the likely holder', () => {
     const message = lockedMessage({ chats: [], dashboard: [], others: [] }, true)
     expect(message).not.toContain('Claude chat')
     expect(message).not.toContain('Quit Claude Desktop')
-    expect(message).toContain('No Mnemosyne process was found')
+    expect(message).toContain('No HAL-M process was found')
     expect(message).toContain('Close what holds it, then update again.')
   })
   test('the message names the folder the refused rename was for', () => {
@@ -367,7 +367,7 @@ describe('stageRelease (fake runner and fetch, no network)', () => {
       throw new Error('no network in tests')
     }) as unknown as typeof fetch
     expect(await stageRelease(join(dir, 'staging'), undefined, runner, fetcher)).toBe('v0.27.0')
-    expect(calls.at(-1)).toEqual(['git', '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', 'v0.27.0', 'https://github.com/Interstellar-code/claude-mnemosyne.git', join(dir, 'staging')])
+    expect(calls.at(-1)).toEqual(['git', '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', 'v0.27.0', 'https://github.com/Interstellar-code/claude-hal-m.git', join(dir, 'staging')])
   })
   test('with git and --tag: no listing', async () => {
     const { dir } = tempDir('update-stage')
@@ -399,7 +399,7 @@ describe('stageRelease (fake runner and fetch, no network)', () => {
       return { stdout: '', stderr: '', exitCode: 0 }
     }
     expect(await stageRelease(staging, undefined, runner, fetcher)).toBe('v0.27.0')
-    expect(urls[1]).toBe('https://codeload.github.com/Interstellar-code/claude-mnemosyne/tar.gz/refs/tags/v0.27.0')
+    expect(urls[1]).toBe('https://codeload.github.com/Interstellar-code/claude-hal-m/tar.gz/refs/tags/v0.27.0')
     expect(calls.at(-1)).toEqual(['tar', '-xzf', `${staging}.tar.gz`, '-C', staging, '--strip-components=1'])
     expect(tarballSeen).toBe(true)
     expect(existsSync(`${staging}.tar.gz`)).toBe(false)
@@ -411,7 +411,7 @@ describe('main refusals before anything runs', () => {
     const { dir } = tempDir('update-main')
     const error = await main(['--from', dir, '--home', join(dir, 'nobody')], () => {}).catch(e => e)
     expect(error).toBeInstanceOf(UpdateError)
-    expect((error as UpdateError).message).toContain('no Mnemosyne install at')
+    expect((error as UpdateError).message).toContain('no HAL-M install at')
     expect((error as UpdateError).code).toBe(EXIT.failed)
   })
   test('a source inside the install is refused', async () => {

@@ -223,7 +223,7 @@ test('KINDREQ.1.a1: remember with no kind is refused before any engine run, nami
   const runs = world(on, '{"status":"stored","memory_id":"m1"}')
   for (const input of [{}, { kind: undefined }, { kind: null }] as const) {
     const bare = await $.tool.call({ tool: 'mcp__mnemosyne__memory_remember', content: 'a note with no kind given', ...input } as never)
-    expect(bare.deny).toBe(`Mnemosyne: ${missingKindMessage('memory_remember')}`)
+    expect(bare.deny).toBe(`HAL-M: ${missingKindMessage('memory_remember')}`)
     expect(bare.deny).toContain(KIND_LIST)
     expect(bare.deny).toContain('Resend')
     expect(bare.result).toBeUndefined()
@@ -276,7 +276,7 @@ test('META.1.a2: remember with an unknown kind is refused before any engine run'
   const runs = world(on, '{"status":"stored"}')
   for (const kind of ['unknown', 'note', 7]) {
     const ran = await $.tool.call({ tool: 'mcp__mnemosyne__memory_remember', content: 'a note with a bad kind', kind })
-    expect(ran.deny).toContain('Mnemosyne: unknown kind')
+    expect(ran.deny).toContain('HAL-M: unknown kind')
     expect(ran.deny).toContain('fact, preference, instruction (rule or runbook)')
   }
   expect(runs.length).toBe(0)
@@ -291,7 +291,7 @@ test('META.1.a2: update takes kind as memory_type, alone or with content; an unk
   expect(both.result).toBe('{"status":"updated"}')
   expect(request(runs[1]!).arguments).toEqual({ memory_id: 'm1', content: 'the new text of it', memory_type: 'event', metadata: { guard: null }, validator: 'claude-code' })
   const bad = await $.tool.call({ tool: 'mcp__mnemosyne__memory_update', memory_id: 'm1', kind: 'unknown' })
-  expect(bad.deny).toContain('Mnemosyne: unknown kind')
+  expect(bad.deny).toContain('HAL-M: unknown kind')
   expect(runs.length).toBe(2)
 })
 
@@ -780,7 +780,7 @@ test('a store inside ~/.omp is refused before any engine run', { options: { memo
   const runs = world(on, '{}')
   const ran = await $.tool.call({ tool: 'mcp__mnemosyne__memory_stats' })
 
-  expect(ran.deny).toBe('Mnemosyne: memoryDir must not be inside ~/.omp.')
+  expect(ran.deny).toBe('HAL-M: memoryDir must not be inside ~/.omp.')
   expect(runs.length).toBe(0)
 })
 
@@ -950,7 +950,7 @@ test('setup fills only blank settings, through claude plugin configure', async (
   expect((ran as { text?: string }).text).toContain('Saved defaults for rememberTerms, recallTerms')
 })
 
-test('stats say Mnemosyne, keep the counts, and pass non-JSON through', async ($, on) => {
+test('stats say HAL-M, keep the counts, and pass non-JSON through', async ($, on) => {
   world(on, '{"status":"ok","provider":"mnemopi","bank":"default","working":{"n":2},"episodic":{"n":1},"memoria":{},"stats":{}}')
   const ran = await $.tool.call({ tool: 'mcp__mnemosyne__memory_stats' })
 
@@ -979,15 +979,15 @@ function activityWorld(on: On, exitCode = 0) {
 test('showActivity on: a dim line with the count, and a status line', async ($, on) => {
   const { logs, statuses } = activityWorld(on)
   await $.prompt.submit({ text: 'How do I install deps?' } as never)
-  expect(logs).toEqual(['Mnemosyne: recalled 1 memory for this prompt'])
-  expect(statuses).toEqual(['Mnemosyne · recalled 1'])
+  expect(logs).toEqual(['HAL-M: recalled 1 memory for this prompt'])
+  expect(statuses).toEqual(['HAL-M · recalled 1'])
 })
 
 test('showActivity status: the status line only', { options: { showActivity: 'status' } }, async ($, on) => {
   const { logs, statuses } = activityWorld(on)
   await $.prompt.submit({ text: 'How do I install deps?' } as never)
   expect(logs).toEqual([])
-  expect(statuses).toEqual(['Mnemosyne · recalled 1'])
+  expect(statuses).toEqual(['HAL-M · recalled 1'])
 })
 
 test('showActivity off: silent', { options: { showActivity: 'off' } }, async ($, on) => {
@@ -1002,7 +1002,7 @@ test('a compaction says it will recall again', async ($, on) => {
   on('session.compact', () => ({ messages: [summary] }))
   await $.prompt.submit({ text: 'How do I install deps?' } as never)
   await $.session.compact({ trigger: 'manual', messages: [summary] } as never)
-  expect(logs.at(-1)).toBe('Mnemosyne: conversation compacted; will recall again on the next prompt')
+  expect(logs.at(-1)).toBe('HAL-M: conversation compacted; will recall again on the next prompt')
 })
 
 test('session start says memory is ready', async ($, on) => {
@@ -1011,22 +1011,22 @@ test('session start says memory is ready', async ($, on) => {
   on('tool.register', () => ({ value: {} }) as never)
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/w', surface: null, isInteractive: false } as never)
-  expect(logs).toEqual(['Mnemosyne: memory ready'])
-  expect(statuses).toEqual(['Mnemosyne · ready'])
+  expect(logs).toEqual(['HAL-M: memory ready'])
+  expect(statuses).toEqual(['HAL-M · ready'])
 })
 
 test('a recall term logs the topic, singular for one memory', async ($, on) => {
   const { logs, statuses } = activityWorld(on)
   await $.prompt.submit({ text: 'what do you remember about pnpm? and more', origin: { kind: 'composer' } } as never)
-  expect(logs).toEqual(['Mnemosyne: recalled 1 memory for "pnpm"'])
-  expect(statuses).toEqual(['Mnemosyne · recalled 1'])
+  expect(logs).toEqual(['HAL-M: recalled 1 memory for "pnpm"'])
+  expect(statuses).toEqual(['HAL-M · recalled 1'])
 })
 
 test('an engine failure says recall failed, not found nothing', async ($, on) => {
   const { logs, statuses } = activityWorld(on, 1)
   await $.prompt.submit({ text: 'How do I install deps?' } as never)
-  expect(logs).toEqual(['Mnemosyne: recall failed'])
-  expect(statuses).toEqual(['Mnemosyne · recall failed'])
+  expect(logs).toEqual(['HAL-M: recall failed'])
+  expect(statuses).toEqual(['HAL-M · recall failed'])
 })
 
 // ENG.5 / ENG.6: the engine build, the staged setup, memory_update.
@@ -1078,8 +1078,8 @@ test('memory_update with nothing to change, or tags that are not an array, is de
   const empty = await $.tool.call({ tool: 'mcp__mnemosyne__memory_update', memory_id: 'm1' })
   const bad = await $.tool.call({ tool: 'mcp__mnemosyne__memory_update', memory_id: 'm1', tags: 'build' })
 
-  expect(empty.deny).toBe('Mnemosyne: memory_update needs content, importance, tags, kind or pinned.')
-  expect(bad.deny).toBe('Mnemosyne: tags must be an array of strings.')
+  expect(empty.deny).toBe('HAL-M: memory_update needs content, importance, tags, kind or pinned.')
+  expect(bad.deny).toBe('HAL-M: tags must be an array of strings.')
   expect(runs.length).toBe(0)
 })
 
@@ -1197,14 +1197,14 @@ test('AUTO.1: a newer engine build is never replaced at session start (no downgr
   const started = await startWith($, on, NEWER, { installTo: ENGINE_BUILD })
   await settle()
   expect(installs(started.runs)).toEqual([])
-  expect(started.toasts).toEqual(['Mnemosyne Memory engine is out of date. Run /mnemosyne-setup to update it.'])
+  expect(started.toasts).toEqual(['HAL-M Memory engine is out of date. Run /mnemosyne-setup to update it.'])
 })
 
 test('AUTO.1: a unreadable engine build is never replaced at session start (no downgrade); the toast asks for /mnemosyne-setup', async ($, on) => {
   const started = await startWith($, on, '18.12.3', { installTo: ENGINE_BUILD })
   await settle()
   expect(installs(started.runs)).toEqual([])
-  expect(started.toasts).toEqual(['Mnemosyne Memory engine is out of date. Run /mnemosyne-setup to update it.'])
+  expect(started.toasts).toEqual(['HAL-M Memory engine is out of date. Run /mnemosyne-setup to update it.'])
 })
 
 test('AUTO.1: a failed auto-update says so and points at /mnemosyne-setup; saves stay refused', async ($, on) => {
@@ -1222,7 +1222,7 @@ test('AUTO.1: after a failed auto-update, a later session start in the same proc
   await $.session.start({ cwd: '/w', surface: null, isInteractive: false } as never)
   await settle()
   expect(installs(stale.runs).length).toBe(1)
-  expect(stale.toasts.at(-1)).toBe('Mnemosyne Memory engine is out of date. Run /mnemosyne-setup to update it.')
+  expect(stale.toasts.at(-1)).toBe('HAL-M Memory engine is out of date. Run /mnemosyne-setup to update it.')
 })
 
 test('AUTO.1: when another session holds the install lock, the update waits for that engine instead of reporting a failure', async ($, on) => {
@@ -1273,7 +1273,7 @@ test('AUTO.1: a missing engine is not auto-installed (the first install download
   await $.session.start({ cwd: '/w', surface: null, isInteractive: false } as never)
   await settle()
   expect(installs(runs)).toEqual([])
-  expect(toasts).toEqual(['Mnemosyne Memory engine not installed. Run /mnemosyne-setup.'])
+  expect(toasts).toEqual(['HAL-M Memory engine not installed. Run /mnemosyne-setup.'])
 })
 
 test('session start with the current engine raises no toast', async ($, on) => {
@@ -1295,7 +1295,7 @@ test('setup installs the plugin\'s engine copy through install-engine.ts, never 
   const secured = runs.findIndex(r => r.argv[1] === '-e' && (r.argv[2] ?? '').includes('mkdirSync(d'))
   expect(secured).toBeGreaterThanOrEqual(0)
   expect(secured).toBeLessThan(runs.indexOf(install!))
-  expect((ran as { text?: string }).text).toContain('Mnemosyne ready. Engine: /home/u/.claude/mnemosyne/engine.')
+  expect((ran as { text?: string }).text).toContain('HAL-M ready. Engine: /home/u/.claude/mnemosyne/engine.')
 })
 
 test('a failed install says so and that the installed engine is unchanged', async ($, on) => {
@@ -1332,7 +1332,7 @@ for (const memoryDir of ['~/.claude/mnemosyne/Engine/store', '~/.claude/mnemosyn
     const runs = world(on, '{}')
     const ran = await $.tool.call({ tool: 'mcp__mnemosyne__memory_stats' })
 
-    expect(ran.deny).toBe('Mnemosyne: memoryDir must not be inside the engine folder (/home/u/.claude/mnemosyne/engine).')
+    expect(ran.deny).toBe('HAL-M: memoryDir must not be inside the engine folder (/home/u/.claude/mnemosyne/engine).')
     expect(runs.length).toBe(0)
   })
 }
@@ -1341,7 +1341,7 @@ test('setup refuses a store inside the engine folder before running the installe
   const runs = world(on, '{}')
   const ran = await $.command.run({ command: 'mnemosyne-setup', args: '' } as never)
 
-  expect((ran as { text?: string }).text).toBe('Mnemosyne setup failed: memoryDir must not be inside the engine folder (/home/u/.claude/mnemosyne/engine).')
+  expect((ran as { text?: string }).text).toBe('HAL-M setup failed: memoryDir must not be inside the engine folder (/home/u/.claude/mnemosyne/engine).')
   expect(runs.some(r => (r.argv[1] ?? '').endsWith('/bin/install-engine.ts'))).toBe(false)
 })
 
@@ -1474,7 +1474,7 @@ test('a tool call the engine fails logs ok false and the error text', async ($, 
   const failing = world(on, '{}', true, 1)
   const ran = await $.tool.call({ tool: 'mcp__mnemosyne__memory_remember', kind: 'fact', content: 'a durable test fact' })
   expect(ran.deny).toContain('engine exited 1')
-  expect(lines(failing)).toMatchObject([{ action: 'remember', origin: 'tool', ok: false, error: 'Mnemosyne: engine exited 1:' }])
+  expect(lines(failing)).toMatchObject([{ action: 'remember', origin: 'tool', ok: false, error: 'HAL-M: engine exited 1:' }])
 })
 
 test('an engine reply with an error, or not_found, logs ok false while the tool result is unchanged', async ($, on) => {
@@ -1493,8 +1493,8 @@ test('a refused tool call logs ok false with the refusal', async ($, on) => {
     ['update', 'tool', false],
     ['update', 'tool', false],
   ])
-  expect(got[0].error).toContain('Mnemosyne Memory engine is out of date')
-  expect(got[1].error).toBe('Mnemosyne: memory_update needs content, importance, tags, kind or pinned.')
+  expect(got[0].error).toContain('HAL-M Memory engine is out of date')
+  expect(got[1].error).toBe('HAL-M: memory_update needs content, importance, tags, kind or pinned.')
 })
 
 test('a compaction logs action rearm, origin hook', async ($, on) => {
@@ -2936,20 +2936,20 @@ test('SETUP.STATUS: with the model already cached, setup says so and never claim
   const { logs, statuses } = await setupLines($, on, true)
   expect([...logs, ...statuses].join('\n')).not.toContain('downloading')
   expect(logs.join('\n')).not.toContain('huggingface.co')
-  expect(statuses[0]).toBe('Mnemosyne · embedding model already cached; installing the engine')
+  expect(statuses[0]).toBe('HAL-M · embedding model already cached; installing the engine')
 })
 
 test('SETUP.STATUS: setup clears its status line when it finishes', { options: { embeddings: 'on' } }, async ($, on) => {
   const downloaded = await setupLines($, on, false)
   expect(downloaded.statuses[0]).toContain('downloading the embedding model')
-  expect(downloaded.text).toContain('Mnemosyne ready')
+  expect(downloaded.text).toContain('HAL-M ready')
   expect(downloaded.statuses.at(-1)).toBeUndefined()
 })
 
 test('SETUP.STATUS: a failed setup clears its status line too', { options: { embeddings: 'off' } }, async ($, on) => {
   const failed = await setupLines($, on, false, 1)
   expect(failed.text).toContain('Engine install failed')
-  expect(failed.statuses[0]).toBe('Mnemosyne · installing the engine')
+  expect(failed.statuses[0]).toBe('HAL-M · installing the engine')
   expect(failed.statuses.at(-1)).toBeUndefined()
 })
 
@@ -3508,7 +3508,7 @@ test('WIRE.1.a5: the rules text with no config is the 0.8.4 text, byte for byte 
   world(on, '{}')
   const base = { model: 'm', promptModel: 'm', surfaces: [], outputStyle: null }
   const composed = await $.prompt.compose({ ...base, tools: ['mcp__mnemosyne__memory_remember'], traits: [] } as never)
-  expect(composed.sections.find(s => s.id === 'mnemosyne:rules')?.text).toBe(`# Long-term memory (Mnemosyne)
+  expect(composed.sections.find(s => s.id === 'mnemosyne:rules')?.text).toBe(`# Long-term memory (HAL-M)
 mcp__mnemosyne__memory_remember / _recall / _update / _forget keep facts across sessions and repos.
 - Remember: lasting preferences, conventions, decisions, runbooks the user states. One self-contained fact per call.
 - With each fact, pass kind (required: a save without it is refused): fact, preference, instruction (a rule or runbook), decision, context (project state), error (a bug note), artifact (a reference) or event (a session summary).
@@ -3755,24 +3755,24 @@ async function recallHeadingWith($: Engine, on: On, tools: Record<string, boolea
 
 test('WIRE.3.a3: the recall heading names update and forget when both are on (C3, the 0.8.4 text)', async ($, on) => {
   const text = await recallHeadingWith($, on, {})
-  expect(text).toBe('Long-term memories that may be relevant (Mnemosyne; mcp__mnemosyne__memory_update and _forget take the id and owner):\n- [m1 owner=global] use pnpm')
+  expect(text).toBe('Long-term memories that may be relevant (HAL-M; mcp__mnemosyne__memory_update and _forget take the id and owner):\n- [m1 owner=global] use pnpm')
 })
 
 test('WIRE.3.a3: the recall heading does not name memory_forget when it is off', async ($, on) => {
   const text = await recallHeadingWith($, on, { memory_forget: false })
-  expect(text).toBe('Long-term memories that may be relevant (Mnemosyne; mcp__mnemosyne__memory_update takes the id and owner):\n- [m1 owner=global] use pnpm')
+  expect(text).toBe('Long-term memories that may be relevant (HAL-M; mcp__mnemosyne__memory_update takes the id and owner):\n- [m1 owner=global] use pnpm')
   expect(text).not.toContain('forget')
 })
 
 test('WIRE.3.a3: the recall heading does not name memory_update when it is off', async ($, on) => {
   const text = await recallHeadingWith($, on, { memory_update: false })
-  expect(text).toBe('Long-term memories that may be relevant (Mnemosyne; mcp__mnemosyne__memory_forget takes the id and owner):\n- [m1 owner=global] use pnpm')
+  expect(text).toBe('Long-term memories that may be relevant (HAL-M; mcp__mnemosyne__memory_forget takes the id and owner):\n- [m1 owner=global] use pnpm')
   expect(text).not.toContain('update')
 })
 
 test('WIRE.3.a3: the recall heading names neither tool when both are off', async ($, on) => {
   const text = await recallHeadingWith($, on, { memory_update: false, memory_forget: false })
-  expect(text).toBe('Long-term memories that may be relevant (Mnemosyne):\n- [m1 owner=global] use pnpm')
+  expect(text).toBe('Long-term memories that may be relevant (HAL-M):\n- [m1 owner=global] use pnpm')
 })
 
 test('WIRE.3.a2: session.end drops the session from the registered record', async ($, on) => {
@@ -3840,7 +3840,7 @@ test('IMPORT.1: a stale engine stops both modes before bin/import.ts reads anyth
 test('IMPORT.1: a failed bin/import.ts is reported with its reason and nothing is written', async ($, on) => {
   const state = tagsWorld(on, [])
   const text = (await importRun($, 'doc /w/notes.md')).text ?? ''
-  expect(text).toContain('Mnemosyne import failed')
+  expect(text).toContain('HAL-M import failed')
   expect(state.backups).toEqual([])
   expect(state.engine.some(run => String(run.init?.stdin).includes('mnemopi_remember'))).toBe(false)
 })
@@ -3874,7 +3874,7 @@ test('IMPORT.3: pinned: true is sent as the engine metadata merge { pinned }, wi
 test('IMPORT.3: a pinned value that is not a boolean is refused before any engine run', async ($, on) => {
   const runs = world(on, '{"status":"updated"}')
   const ran = await $.tool.call({ tool: 'mcp__mnemosyne__memory_update', memory_id: 'm1', pinned: 'yes' })
-  expect(ran.deny).toBe('Mnemosyne: pinned must be true or false.')
+  expect(ran.deny).toBe('HAL-M: pinned must be true or false.')
   expect(runs).toEqual([])
 })
 
@@ -4014,9 +4014,9 @@ test('GET.1: an unknown id is not_found without an engine run; a malformed id is
   const dashed = await $.tool.call({ tool: 'mcp__mnemosyne__memory_get', memory_id: '--store' })
 
   expect(JSON.parse(String(unknown.result))).toEqual({ status: 'not_found', memory_id: 'nope' })
-  expect(malformed.deny).toBe('Mnemosyne: memory_id must be the id of a memory (from memory_recall).')
-  expect(missing.deny).toBe('Mnemosyne: memory_id must be the id of a memory (from memory_recall).')
-  expect(dashed.deny).toBe('Mnemosyne: memory_id must be the id of a memory (from memory_recall).')
+  expect(malformed.deny).toBe('HAL-M: memory_id must be the id of a memory (from memory_recall).')
+  expect(missing.deny).toBe('HAL-M: memory_id must be the id of a memory (from memory_recall).')
+  expect(dashed.deny).toBe('HAL-M: memory_id must be the id of a memory (from memory_recall).')
   expect(runs.length).toBe(0)
 })
 
@@ -4078,7 +4078,7 @@ test('GET.3: the session-start block marks the pinned memory it cuts', async ($,
     return { text: e.text, context: e.context }
   })
   await $.prompt.submit({ text: 'hello there' } as never)
-  const block = (seen[0] ?? []).find(part => part.startsWith('Mnemosyne: what we were doing last time'))!
+  const block = (seen[0] ?? []).find(part => part.startsWith('HAL-M: what we were doing last time'))!
   const cut = block.split('\n').find(line => line.startsWith('- Pinned [w2 owner=global]'))!
   expect(cut).toEndWith(`…${cutMark(true)}`)
 })

@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the recall evaluation harness (0.26.0, gbrain step 1).
+// Claude HAL-M — the recall evaluation harness (0.26.0, gbrain step 1).
 //
 // Every later ranking change (the graph arm, RRF fusion, a reranker) is measured with this before it ships:
 //   bun bin/eval.ts capture    [--root R] [--log F]                      real recall queries from the activity log → <root>/eval/queries.jsonl
@@ -11,7 +11,7 @@
 // Safety: `run` and `gold-draft` replay against a snapshot copy of the store (VACUUM INTO a temp folder), never the live one,
 // and every recall is sent with update_recall_counts false, so nothing in the store changes. The engine runs with the plugin's
 // own environment (hooks/engine.ts): local only, the weights pinned. Queries, labels and runs hold your memory ids and query
-// text, so they live under the Mnemosyne root (0700 folder, 0600 files), never in the plugin's repository.
+// text, so they live under the HAL-M root (0700 folder, 0600 files), never in the plugin's repository.
 import { Database } from 'bun:sqlite'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'

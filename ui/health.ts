@@ -118,7 +118,7 @@ export function findings(data: HealthData, meaning = false): Finding[] {
     out.push({
       level: 'act',
       title: `No agent has recalled anything in ${days}`,
-      detail: dashboard > 0 ? `The only ${plural(dashboard, 'recall', 'recalls')} in the log came from dashboard searches. Check that your agents have the Mnemosyne memory tools switched on.` : 'Nothing in the log recalled a memory. Check that your agents have the Mnemosyne memory tools switched on.',
+      detail: dashboard > 0 ? `The only ${plural(dashboard, 'recall', 'recalls')} in the log came from dashboard searches. Check that your agents have the HAL-M memory tools switched on.` : 'Nothing in the log recalled a memory. Check that your agents have the HAL-M memory tools switched on.',
       action: 'settings',
       actionLabel: 'Open Settings',
     })

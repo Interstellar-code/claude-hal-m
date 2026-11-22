@@ -1,4 +1,4 @@
-// Claude Mnemosyne - who is using the dashboard server.
+// Claude HAL-M - who is using the dashboard server.
 //
 // <root>/ui-users.json beside ui.json lists the Claude sessions that opened or reused the server:
 //   { "users": [ { "session": "<id>", "pid": <the session's Claude process, or null>, "at": <ms>, "start": "<its ps lstart>" } ] }

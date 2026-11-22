@@ -1,6 +1,6 @@
-// Claude Mnemosyne — the hooks module.
+// Claude HAL-M — the hooks module.
 //
-// Long-term memory on the Mnemosyne Memory engine, in a home of its own: the
+// Long-term memory on the HAL-M Memory engine, in a home of its own: the
 // engine is a private copy under ~/.claude/mnemosyne/engine (installed by
 // /mnemosyne-setup) and the store defaults to ~/.claude/mnemosyne/store. See
 // DESIGN.md.
@@ -112,9 +112,9 @@ export { ENGINE_BUILD } from './engine-build'
 // The upstream base version; the plugin's own build of it is ENGINE_BUILD (engine/UPSTREAM.md).
 export const ENGINE_VERSION = '18.12.3'
 const ENGINE_PACKAGE = '@oh-my-pi/pi-mnemopi'
-const NOT_INSTALLED = 'Mnemosyne Memory engine not installed: ask the user to run /mnemosyne-setup.'
+const NOT_INSTALLED = 'HAL-M Memory engine not installed: ask the user to run /mnemosyne-setup.'
 // memory_remember is refused on a stale engine too: that engine's 24 h trim deletes every row whose trust tier is not IMPORTED, and a save made with this build's honest provenance is not.
-const NOT_CURRENT = `Mnemosyne Memory engine is out of date (memory_remember and memory_update need build ${ENGINE_BUILD}; an older engine would delete this plugin's saves after 24 hours): ask the user to run /mnemosyne-setup.`
+const NOT_CURRENT = `HAL-M Memory engine is out of date (memory_remember and memory_update need build ${ENGINE_BUILD}; an older engine would delete this plugin's saves after 24 hours): ask the user to run /mnemosyne-setup.`
 
 // Where a person typed the prompt; another plugin's or session's text never triggers a save.
 const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
@@ -129,7 +129,7 @@ function rulesSection(settings: ResolvedSettings) {
     ? `${on('memory_recall') ? 'recall first, and if a close memory exists, ' : 'if a close memory exists, '}update it (or save the new fact with replaces: the old id, which retires the old one) instead of saving another.`
     : `${on('memory_recall') ? 'recall first, and if a close memory exists, ' : 'if a close memory exists, '}save the new fact with replaces: the old id, which retires the old one, instead of saving another.`
   const lines = [
-    '# Long-term memory (Mnemosyne)',
+    '# Long-term memory (HAL-M)',
     `${names.join(' / ')} keep facts across sessions and repos.`,
     '- Remember: lasting preferences, conventions, decisions, runbooks the user states. One self-contained fact per call.',
     '- With each fact, pass kind (required: a save without it is refused): fact, preference, instruction (a rule or runbook), decision, context (project state), error (a bug note), artifact (a reference) or event (a session summary).',
@@ -145,7 +145,7 @@ function rulesSection(settings: ResolvedSettings) {
 function recallHeading(has: (tool: ToolName) => boolean) {
   const rowTools = [...(has('memory_update') ? ['mcp__mnemosyne__memory_update'] : []), ...(has('memory_forget') ? [has('memory_update') ? '_forget' : 'mcp__mnemosyne__memory_forget'] : [])]
   const note = rowTools.length === 0 ? '' : `; ${rowTools.join(' and ')} ${rowTools.length === 1 ? 'takes' : 'take'} the id and owner`
-  return `Long-term memories that may be relevant (Mnemosyne${note}):`
+  return `Long-term memories that may be relevant (HAL-M${note}):`
 }
 
 const recalled = atom({ plugin: 'mnemosyne', key: 'recalled' } as const, {} as Recalled)
@@ -339,7 +339,7 @@ async function paths($: EngineInterface, options: PluginOptions) {
   }
 }
 
-// ---- Plugin client mode (docs/plans/remote-server.md): serverUrl set, the memory lives on a Mnemosyne server ----
+// ---- Plugin client mode (docs/plans/remote-server.md): serverUrl set, the memory lives on a HAL-M server ----
 //
 // Every engine run, the first-prompt block, row-info and the owner lookup go through `bun bin/remote.ts <op>` (a hook has
 // no fetch). The key rides on that process's stdin only, never its argv or env. No local engine, store sweep, summaries or
@@ -361,9 +361,9 @@ export const HELLO_TIMEOUT_MS = 3_000
 export const OFFLINE_MS = 60_000
 const REMOTE_UNREACHABLE = 75
 const REMOTE_REFUSED = 77
-export const OFFLINE_ERROR = 'Mnemosyne server unreachable (memory offline)'
-export const REFUSED_ERROR = 'Mnemosyne server refused the key: check serverKey'
-export const SERVER_ONLY = 'This runs on the Mnemosyne server; open its dashboard or run it there.'
+export const OFFLINE_ERROR = 'HAL-M server unreachable (memory offline)'
+export const REFUSED_ERROR = 'HAL-M server refused the key: check serverKey'
+export const SERVER_ONLY = 'This runs on the HAL-M server; open its dashboard or run it there.'
 
 class RemoteError extends Error {
   constructor(
@@ -425,9 +425,9 @@ async function helloAtStart($: EngineInterface, options: PluginOptions) {
   try {
     const said = await hello($, options)
     if ('failed' in said) {
-      if (said.kind === 'offline') $.ui.toast(`Mnemosyne server ${url} is not reachable: memory is off until it is back.`)
-      else if (said.kind === 'refused') $.ui.toast(`Mnemosyne server ${url} refused the key: check serverKey.`)
-      else $.ui.toast(`Mnemosyne server ${url} did not answer: ${said.failed}`)
+      if (said.kind === 'offline') $.ui.toast(`HAL-M server ${url} is not reachable: memory is off until it is back.`)
+      else if (said.kind === 'refused') $.ui.toast(`HAL-M server ${url} refused the key: check serverKey.`)
+      else $.ui.toast(`HAL-M server ${url} did not answer: ${said.failed}`)
     } else {
       activity($, options, `memory ready on ${url}`, 'ready')
       // The server's registry learns this project's name and kind (the map and project lists use them).
@@ -841,14 +841,14 @@ type Retired = { oldId: string; newId?: string; owner?: string; ok: boolean; lin
  */
 async function retireReplaced($: EngineInterface, options: PluginOptions, oldId: string, newId: string | undefined, as?: string): Promise<Retired> {
   const base = { oldId, ...(newId === undefined ? {} : { newId }), ...(as === undefined ? {} : { owner: as }) }
-  const failed = (why: string): Retired => ({ ...base, ok: false, line: `\nMnemosyne: replaces ${oldId} did not retire it: ${why} The new memory is saved${newId === undefined ? '' : ` (${newId})`}; the old one was left as it was.`, error: why })
+  const failed = (why: string): Retired => ({ ...base, ok: false, line: `\nHAL-M: replaces ${oldId} did not retire it: ${why} The new memory is saved${newId === undefined ? '' : ` (${newId})`}; the old one was left as it was.`, error: why })
   if (newId === undefined) return failed('the save gave no memory id to point it at.')
   if (newId === oldId) return failed('it is the memory just saved (the same text), so there is nothing to retire.')
   try {
     const [answer] = await runAll($, options, [['mnemopi_invalidate', { memory_id: oldId, replacement_id: newId, validator: 'claude-code' }]], as)
     if (answer instanceof Error) return failed(`${answer.message}.`.replace(/\.\.$/, '.'))
     const status = (JSON.parse(String(answer)) as { status?: unknown }).status
-    if (status === 'invalidated') return { ...base, ok: true, line: `\nMnemosyne: retired ${oldId}, replaced by ${newId}. It is not deleted: it can be restored.`, error: '' }
+    if (status === 'invalidated') return { ...base, ok: true, line: `\nHAL-M: retired ${oldId}, replaced by ${newId}. It is not deleted: it can be restored.`, error: '' }
     return failed(`no memory ${oldId} found${as === undefined ? ' for this project' : ` for owner ${as}`}.`)
   } catch (err) {
     return failed(`${(err as Error).message}.`.replace(/\.\.$/, '.'))
@@ -894,13 +894,13 @@ async function fillDefaults($: EngineInterface) {
   return saved.exitCode === 0 ? Object.keys(blank) : []
 }
 
-// Shows what Mnemosyne just did: a dim transcript line (`on`) and a status line
+// Shows what HAL-M just did: a dim transcript line (`on`) and a status line
 // under the prompt (`on`, `status`). Not sent to the model; never throws.
 function activity($: EngineInterface, options: PluginOptions, line: string, status?: string) {
   const mode = options.showActivity === 'off' || options.showActivity === 'status' ? options.showActivity : 'on'
   try {
-    if (mode === 'on') $.ui.log(`Mnemosyne: ${line}`)
-    if (mode !== 'off') $.ui.status(`Mnemosyne · ${status ?? line}`)
+    if (mode === 'on') $.ui.log(`HAL-M: ${line}`)
+    if (mode !== 'off') $.ui.status(`HAL-M · ${status ?? line}`)
   } catch {
     // a UI failure must not break a hook
   }
@@ -1060,7 +1060,7 @@ async function localMemories($: EngineInterface, options: PluginOptions, args: r
 // A progress line under the prompt (undefined clears it); a UI failure must not stop the run.
 function progress($: EngineInterface, text: string | undefined) {
   try {
-    $.ui.status(text === undefined ? undefined : `Mnemosyne · ${text}`)
+    $.ui.status(text === undefined ? undefined : `HAL-M · ${text}`)
   } catch {
     // no status line
   }
@@ -1331,7 +1331,7 @@ async function knowledgeSurvey($: EngineInterface, options: PluginOptions) {
 export async function knowledgeDryRun($: EngineInterface, options: PluginOptions) {
   const model = extractionModelOf(options)
   if (extractionOff(model)) return 'Knowledge extraction is off (extractionModel is "off"): set it, then try again.'
-  if (!(await isCurrent($, options))) return 'The Mnemosyne engine is out of date (the backfill needs the knowledge tools): run /mnemosyne-setup, then try again.'
+  if (!(await isCurrent($, options))) return 'The HAL-M engine is out of date (the backfill needs the knowledge tools): run /mnemosyne-setup, then try again.'
   const { root, pending, rows } = await knowledgeSurvey($, options)
   const empty = await readEmptyFile($, root)
   const perOwner = new Map<string, { missing: number; pending: number; empty: number; forgotten: number }>()
@@ -1376,7 +1376,7 @@ export async function knowledgeDryRun($: EngineInterface, options: PluginOptions
 export async function knowledgeApply($: EngineInterface, options: PluginOptions, signal: AbortSignal) {
   const model = extractionModelOf(options)
   if (extractionOff(model)) return 'Knowledge extraction is off (extractionModel is "off"): set it, then try again.'
-  if (!(await isCurrent($, options))) return 'The Mnemosyne engine is out of date (the backfill needs the knowledge tools): run /mnemosyne-setup, then try again.'
+  if (!(await isCurrent($, options))) return 'The HAL-M engine is out of date (the backfill needs the knowledge tools): run /mnemosyne-setup, then try again.'
   const { root, pending, rows } = await knowledgeSurvey($, options)
   const empty = await readEmptyFile($, root)
   const counts = { stored: 0, empty: 0, failed: 0, stale: 0, gone: 0, notReached: 0 }
@@ -1947,13 +1947,13 @@ function autoUpdate($: EngineInterface, options: PluginOptions): Promise<boolean
   if (found !== undefined) return found
   // Toasts only, never the status line, so nothing is left in the footer when the update ends (SETUP.STATUS).
   const work = (async () => {
-    $.ui.toast(`Mnemosyne: updating the memory engine to build ${ENGINE_BUILD} in the background.`)
+    $.ui.toast(`HAL-M: updating the memory engine to build ${ENGINE_BUILD} in the background.`)
     const embeddings = await embeddingsOn($, options)
     const installed = await runInstaller($, options, embeddings).catch((error: unknown) => ({ exitCode: 1, stdout: '', stderr: String(error) }))
     let current = await isCurrent($, options)
     // Another session holds the install lock: it is installing, so wait for its engine rather than report a failure.
     if (!current && installed.exitCode === LOCK_BUSY_EXIT) {
-      $.ui.toast('Mnemosyne: another session is updating the memory engine; waiting for it.')
+      $.ui.toast('HAL-M: another session is updating the memory engine; waiting for it.')
       for (let waited = 0; !current && waited < SETUP_TIMEOUT_MS; waited += LOCK_POLL_MS) {
         if (!(await $.clock.sleep(LOCK_POLL_MS).then(() => true, () => false))) break
         current = await isCurrent($, options)
@@ -1961,10 +1961,10 @@ function autoUpdate($: EngineInterface, options: PluginOptions): Promise<boolean
     }
     if (current) {
       await syncWrapper($, options).catch(() => undefined)
-      $.ui.toast(`Mnemosyne: memory engine updated to build ${ENGINE_BUILD}.`)
+      $.ui.toast(`HAL-M: memory engine updated to build ${ENGINE_BUILD}.`)
     } else {
       const reason = `${installed.stderr}\n${installed.stdout}`.trim().slice(-300)
-      $.ui.toast(`Mnemosyne: the memory engine update failed; the old engine is unchanged. Run /mnemosyne-setup to retry.${reason ? `\n${reason}` : ''}`)
+      $.ui.toast(`HAL-M: the memory engine update failed; the old engine is unchanged. Run /mnemosyne-setup to retry.${reason ? `\n${reason}` : ''}`)
     }
     if (!current) updateFailed.add(options)
     return current
@@ -2270,7 +2270,7 @@ export const register: Register = (on, options) => {
   on('session.start', { cwd: /.*/ }, async ($, e, next) => {
     await $.command.register({
       name: 'mnemosyne-setup',
-      description: `Install the Mnemosyne Memory engine (${ENGINE_PACKAGE} ${ENGINE_BUILD}, the plugin's own copy) into ~/.claude/mnemosyne`,
+      description: `Install the HAL-M Memory engine (${ENGINE_PACKAGE} ${ENGINE_BUILD}, the plugin's own copy) into ~/.claude/mnemosyne`,
     })
     await $.command.register({
       name: 'mnemosyne-tags',
@@ -2282,7 +2282,7 @@ export const register: Register = (on, options) => {
     })
     await $.command.register({
       name: 'mnemosyne-ui',
-      description: 'Open the Mnemosyne dashboard: a local page on 127.0.0.1, opened in your default browser',
+      description: 'Open the HAL-M dashboard: a local page on 127.0.0.1, opened in your default browser',
     })
     await $.command.register({
       name: 'mnemosyne-knowledge',
@@ -2303,12 +2303,12 @@ export const register: Register = (on, options) => {
       void track(options, helloAtStart($, options))
       return next(e)
     }
-    if (!(await isInstalled($, options))) $.ui.toast('Mnemosyne Memory engine not installed. Run /mnemosyne-setup.')
+    if (!(await isInstalled($, options))) $.ui.toast('HAL-M Memory engine not installed. Run /mnemosyne-setup.')
     else {
       // A stale engine keeps recall, forget and stats working; memory_remember and memory_update wait for the update (AUTO.1), then refuse if it failed (an old engine's 24 h trim would delete the new saves).
       if (!(await isCurrent($, options))) {
         if (isOlderBuild(await installedBuild($, options)) && !updateFailed.has(options)) void autoUpdate($, options)
-        else $.ui.toast('Mnemosyne Memory engine is out of date. Run /mnemosyne-setup to update it.')
+        else $.ui.toast('HAL-M Memory engine is out of date. Run /mnemosyne-setup to update it.')
       }
       await Promise.all([secure($, options), syncWrapper($, options)]).catch(() => undefined)
       activity($, options, 'memory ready', 'ready')
@@ -2316,7 +2316,7 @@ export const register: Register = (on, options) => {
     void registerProject($, options) // fire and forget: no host call it makes (repo, cwd, env) delays the session start
     // SESSION.4: a refused expireUnusedDays says so once here; a sweep that is due runs in the background (it also runs from the first prompt, so a process that only ever sees /clear still sweeps).
     const sweepSetting = expireSetting(options.expireUnusedDays)
-    if (sweepSetting.mode === 'refused') $.ui.toast(`Mnemosyne: ${sweepSetting.reason}`)
+    if (sweepSetting.mode === 'refused') $.ui.toast(`HAL-M: ${sweepSetting.reason}`)
     void track(options, maybeSweep($, options))
     void track(options, pruneLogs($, options)) // HARDEN.3: after the start, bounded, errors swallowed
 
@@ -2327,13 +2327,13 @@ export const register: Register = (on, options) => {
     const server = serverUrlOf(options)
     if (server !== undefined) {
       const said = await hello($, options, true)
-      const where = `Mnemosyne uses the server at ${server} and needs no local engine.`
+      const where = `HAL-M uses the server at ${server} and needs no local engine.`
       if ('failed' in said) return { text: `${where} The server did not answer: ${said.failed}` }
       const engine = typeof said.engine === 'string' ? said.engine : 'unknown'
       return { text: `${where} The server answered: engine build ${engine}${typeof said.embeddings === 'boolean' ? `, embeddings ${said.embeddings ? 'on' : 'off'}` : ''}.` }
     }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
-    if (bun?.exitCode !== 0) return { text: 'Mnemosyne needs Bun on PATH: https://bun.sh' }
+    if (bun?.exitCode !== 0) return { text: 'HAL-M needs Bun on PATH: https://bun.sh' }
 
     // SETUP.STATUS: whether this setup put a line in the status bar; only then does it clear the line at the end.
     let shown = false
@@ -2358,7 +2358,7 @@ export const register: Register = (on, options) => {
       // SETUP.STATUS: the download line only when the model is not in <root>'s cache yet; a cached model is loaded from disk.
       if (embeddings && !(await modelCached($, pluginRoot))) {
         show('downloading the embedding model from huggingface.co (about 63 MB)')
-        $.ui.log('Mnemosyne: /mnemosyne-setup downloads the embedding model BAAI/bge-small-en-v1.5 from huggingface.co (Qdrant/bge-small-en-v1.5-onnx-Q, about 63 MB), once.')
+        $.ui.log('HAL-M: /mnemosyne-setup downloads the embedding model BAAI/bge-small-en-v1.5 from huggingface.co (Qdrant/bge-small-en-v1.5-onnx-Q, about 63 MB), once.')
       } else show(embeddings ? 'embedding model already cached; installing the engine' : 'installing the engine')
       const installed = await runInstaller($, options, embeddings)
       if (installed.exitCode !== 0) {
@@ -2390,9 +2390,9 @@ export const register: Register = (on, options) => {
       const embeddingsNote = embeddings ? '\nEmbeddings on: the model is downloaded and local only.' : ''
       const platformNote = `\n${intelMac ? `${INTEL_MAC_NOTE}\n` : ''}${PLATFORM_NOTE}`
       void track(options, pruneLogs($, options))
-      return { text: `Mnemosyne ready. Engine: ${engine}. Store: ${store}.${external}${saved}${embeddingsNote}${platformNote}\n${stats}` }
+      return { text: `HAL-M ready. Engine: ${engine}. Store: ${store}.${external}${saved}${embeddingsNote}${platformNote}\n${stats}` }
     } catch (err) {
-      return { text: `Mnemosyne setup failed: ${(err as Error).message}` }
+      return { text: `HAL-M setup failed: ${(err as Error).message}` }
     } finally {
       // SETUP.STATUS: the setup's progress line ends with the setup, on success and on failure; the reply says how it went.
       if (shown) progress($, undefined)
@@ -2407,13 +2407,13 @@ export const register: Register = (on, options) => {
       const copied = await Promise.resolve()
         .then(() => $.ui.copy({ text: server }))
         .catch(() => undefined)
-      return { text: `Mnemosyne uses the server at ${server}: open it in your browser for the dashboard${copied?.isCopied === true ? ' (the link is on the clipboard)' : ''}.` }
+      return { text: `HAL-M uses the server at ${server}: open it in your browser for the dashboard${copied?.isCopied === true ? ' (the link is on the clipboard)' : ''}.` }
     }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
-    if (bun?.exitCode !== 0) return { text: 'The Mnemosyne dashboard needs Bun on PATH: https://bun.sh' }
+    if (bun?.exitCode !== 0) return { text: 'The HAL-M dashboard needs Bun on PATH: https://bun.sh' }
     try {
-      if (!(await isInstalled($, options))) return { text: 'The Mnemosyne dashboard needs the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The Mnemosyne engine is out of date: run /mnemosyne-setup, then /mnemosyne-ui again.' }
+      if (!(await isInstalled($, options))) return { text: 'The HAL-M dashboard needs the engine: run /mnemosyne-setup first.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date: run /mnemosyne-setup, then /mnemosyne-ui again.' }
       const { root, store, cli, activity: log } = await paths($, options)
       const activityLog = options.activityLog === 'off' ? '' : log
       const session = await $.session.id()
@@ -2423,47 +2423,47 @@ export const register: Register = (on, options) => {
       const embeddings = (await embeddingsOn($, options)) ? 'on' : 'off'
       return await openDashboard($, { plugin: slashes($.plugin.root), root, store, cli, activity: activityLog, extraction, embeddings }, session)
     } catch (err) {
-      return { text: `Mnemosyne dashboard failed: ${(err as Error).message}` }
+      return { text: `HAL-M dashboard failed: ${(err as Error).message}` }
     }
   })
 
   // The tag backfill: no argument is a dry run (the only mode that calls a model); apply writes the saved proposals.
   on('command.run', { command: 'mnemosyne-tags' }, async ($, e, next) => {
-    if (clientMode(options)) return { text: `/mnemosyne-tags runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+    if (clientMode(options)) return { text: `/mnemosyne-tags runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply' && mode !== 'retag') return { text: TAGS_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The tag backfill needs Bun on PATH: https://bun.sh' }
     try {
       if (!(await isInstalled($, options))) return { text: 'The tag backfill needs the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The Mnemosyne engine is out of date (the backfill needs memory_update): run /mnemosyne-setup, then try again.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (the backfill needs memory_update): run /mnemosyne-setup, then try again.' }
       return { text: mode === 'apply' ? await tagsApply($, options, next.signal) : await tagsDryRun($, options, next.signal, mode === 'retag') }
     } catch (err) {
-      return { text: `Mnemosyne tag backfill failed: ${(err as Error).message}` }
+      return { text: `HAL-M tag backfill failed: ${(err as Error).message}` }
     }
-  }).catch(() => ({ text: 'Mnemosyne: the tag backfill failed.' }))
+  }).catch(() => ({ text: 'HAL-M: the tag backfill failed.' }))
 
   // The importers: doc and session are dry runs (nothing is written); apply backs the store up, then saves what the last dry run checked.
   on('command.run', { command: 'mnemosyne-import' }, async ($, e, next) => {
-    if (clientMode(options)) return { text: `/mnemosyne-import runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+    if (clientMode(options)) return { text: `/mnemosyne-import runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const parsed = parseImportArgs(e.args)
     if (parsed.mode === 'usage') return { text: IMPORT_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The importers need Bun on PATH: https://bun.sh' }
     try {
       if (!(await isInstalled($, options))) return { text: 'The importers need the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The Mnemosyne engine is out of date (an import saves with this build\'s provenance): run /mnemosyne-setup, then try again.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (an import saves with this build\'s provenance): run /mnemosyne-setup, then try again.' }
       if (parsed.mode === 'doc') return { text: await importDocDryRun($, options, parsed.path) }
       if (parsed.mode === 'apply') return { text: await importApply($, options, parsed.confirm, next.signal) }
       return { text: await importSessionDryRun($, options, parsed.target, next.signal) }
     } catch (err) {
-      return { text: `Mnemosyne import failed: ${(err as Error).message.slice(0, 300)}` }
+      return { text: `HAL-M import failed: ${(err as Error).message.slice(0, 300)}` }
     }
-  }).catch(() => ({ text: 'Mnemosyne: the import failed.' }))
+  }).catch(() => ({ text: 'HAL-M: the import failed.' }))
 
   // The knowledge backfill: no argument is a dry run; apply extracts pending and older memories.
   on('command.run', { command: 'mnemosyne-knowledge' }, async ($, e, next) => {
-    if (clientMode(options)) return { text: `/mnemosyne-knowledge runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+    if (clientMode(options)) return { text: `/mnemosyne-knowledge runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply') return { text: KNOWLEDGE_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
@@ -2472,21 +2472,21 @@ export const register: Register = (on, options) => {
       if (!(await isInstalled($, options))) return { text: 'The knowledge backfill needs the engine: run /mnemosyne-setup first.' }
       return { text: mode === 'apply' ? await knowledgeApply($, options, next.signal) : await knowledgeDryRun($, options) }
     } catch (err) {
-      return { text: `Mnemosyne knowledge backfill failed: ${(err as Error).message}` }
+      return { text: `HAL-M knowledge backfill failed: ${(err as Error).message}` }
     }
-  }).catch(() => ({ text: 'Mnemosyne: the knowledge backfill failed.' }))
+  }).catch(() => ({ text: 'HAL-M: the knowledge backfill failed.' }))
 
   // The embeddings backfill: no argument is a dry run, "apply" fills the vectors,
   // "rebuild" also allows a model change (which wipes and rebuilds every vector).
   on('command.run', { command: 'mnemosyne-embed' }, async ($, e) => {
-    if (clientMode(options)) return { text: `/mnemosyne-embed runs on the Mnemosyne server (${serverUrlOf(options)}): open its dashboard or run it there.` }
+    if (clientMode(options)) return { text: `/mnemosyne-embed runs on the HAL-M server (${serverUrlOf(options)}): open its dashboard or run it there.` }
     const mode = e.args.trim().toLowerCase()
     if (mode !== '' && mode !== 'apply' && mode !== 'rebuild') return { text: EMBED_USAGE }
     const bun = await $.process.run(['bun', '--version']).catch(() => null)
     if (bun?.exitCode !== 0) return { text: 'The embeddings backfill needs Bun on PATH: https://bun.sh' }
     try {
       if (!(await isInstalled($, options))) return { text: 'The embeddings backfill needs the engine: run /mnemosyne-setup first.' }
-      if (!(await isCurrent($, options))) return { text: 'The Mnemosyne engine is out of date (the backfill needs the reembed command): run /mnemosyne-setup, then try again.' }
+      if (!(await isCurrent($, options))) return { text: 'The HAL-M engine is out of date (the backfill needs the reembed command): run /mnemosyne-setup, then try again.' }
       const { cli, store } = await paths($, options)
       if (!(await embeddingsOn($, options))) {
         return { text: 'Embeddings are off: set the embeddings option to on (or run /mnemosyne-setup on macOS arm64 to download the model), then try again.' }
@@ -2502,12 +2502,12 @@ export const register: Register = (on, options) => {
         timeoutMs: REEMBED_TIMEOUT_MS,
       })
       const output = `${ran.stdout}${ran.stderr}`.trim()
-      if (ran.exitCode !== 0 && output === '') return { text: `Mnemosyne embeddings backfill failed (exit ${ran.exitCode}).` }
+      if (ran.exitCode !== 0 && output === '') return { text: `HAL-M embeddings backfill failed (exit ${ran.exitCode}).` }
       return { text: output.split('\n').slice(-6).join('\n') }
     } catch (err) {
-      return { text: `Mnemosyne embeddings backfill failed: ${(err as Error).message}` }
+      return { text: `HAL-M embeddings backfill failed: ${(err as Error).message}` }
     }
-  }).catch(() => ({ text: 'Mnemosyne: the embeddings backfill failed.' }))
+  }).catch(() => ({ text: 'HAL-M: the embeddings backfill failed.' }))
 
   // A session that opened or reused the dashboard ends (exit, /clear, resume...): the server stops with its last user.
   on('session.end', async ($, e, next) => {
@@ -2587,27 +2587,27 @@ export const register: Register = (on, options) => {
     const answer = await (async (): Promise<{ result: string; reply: string } | { deny: string }> => {
       try {
         if (guard?.verdict === 'block') {
-          return { deny: `Mnemosyne: the save guard blocked this save (${guardIds.join(', ')}). ${guard.hits.map(hit => hit.message).join(' ')}` }
+          return { deny: `HAL-M: the save guard blocked this save (${guardIds.join(', ')}). ${guard.hits.map(hit => hit.message).join(' ')}` }
         }
         // Before the warnings, so a warned save without a kind is fixed in one retry, not two.
-        if (missingKind) return { deny: `Mnemosyne: ${missingKindMessage('memory_remember')}` }
+        if (missingKind) return { deny: `HAL-M: ${missingKindMessage('memory_remember')}` }
         if (nearRefused) {
-          return { deny: `Mnemosyne: the save guard warns about this save (G3). ${nearDuplicateMessage(near)} Or resend with confirm: true if a new memory is wanted.` }
+          return { deny: `HAL-M: the save guard warns about this save (G3). ${nearDuplicateMessage(near)} Or resend with confirm: true if a new memory is wanted.` }
         }
         if (needsConfirm) {
-          return { deny: `Mnemosyne: the save guard warns about this save (${guardIds.join(', ')}). ${guard!.hits.map(hit => hit.message).join(' ')} Resend with confirm: true if the save is wanted.` }
+          return { deny: `HAL-M: the save guard warns about this save (${guardIds.join(', ')}). ${guard!.hits.map(hit => hit.message).join(' ')} Resend with confirm: true if the save is wanted.` }
         }
         if (tool === 'memory_remember') {
           const badKind = kindProblem(input.kind)
-          if (badKind !== undefined) return { deny: `Mnemosyne: ${badKind}` }
+          if (badKind !== undefined) return { deny: `HAL-M: ${badKind}` }
           const badDays = expiresInDaysProblem(input.expires_in_days)
-          if (badDays !== undefined) return { deny: `Mnemosyne: ${badDays}` }
+          if (badDays !== undefined) return { deny: `HAL-M: ${badDays}` }
           const badReplaces = replacesProblem(input)
-          if (badReplaces !== undefined) return { deny: `Mnemosyne: ${badReplaces}` }
+          if (badReplaces !== undefined) return { deny: `HAL-M: ${badReplaces}` }
         }
         if (tool === 'memory_update') {
           const refused = updateArgs(input, rules)
-          if (typeof refused === 'string') return { deny: `Mnemosyne: ${refused}` }
+          if (typeof refused === 'string') return { deny: `HAL-M: ${refused}` }
         }
         if (!(await isInstalled($, options))) {
           await paths($, options) // a bad HOME or memoryDir says so rather than "not installed"
@@ -2618,7 +2618,7 @@ export const register: Register = (on, options) => {
         // Kind and scope come from a read-only look at the store; an unknown or hidden row is not_found, with nothing about other owners.
         let info: RowInfo | undefined
         if (tool === 'memory_get') {
-          if (typeof input.memory_id !== 'string' || !MEMORY_ID.test(input.memory_id)) return { deny: 'Mnemosyne: memory_id must be the id of a memory (from memory_recall).' }
+          if (typeof input.memory_id !== 'string' || !MEMORY_ID.test(input.memory_id)) return { deny: 'HAL-M: memory_id must be the id of a memory (from memory_recall).' }
           const found = JSON.parse(await memoriesCli($, options, ['row-info', input.memory_id])) as RowInfo | null
           info = found ?? undefined
           if (!visibleTo(info, as ?? (await owner($, options)))) {
@@ -2648,17 +2648,17 @@ export const register: Register = (on, options) => {
         const kept = tool === 'memory_remember' ? keptStatus(text) : undefined
         if (kept !== undefined) {
           const keptId = savedId(text)
-          retireLine = `\nMnemosyne: this text is already stored as ${kept} memory ${keptId ?? 'unknown'}. It was left as it is and recall keeps hiding it; the user can restore it from the dashboard.`
+          retireLine = `\nHAL-M: this text is already stored as ${kept} memory ${keptId ?? 'unknown'}. It was left as it is and recall keeps hiding it; the user can restore it from the dashboard.`
           if (replacesId !== undefined) retireLine += ` replaces ${replacesId} was not retired.`
         } else if (replacesId !== undefined) {
           retired = await retireReplaced($, options, replacesId, savedId(text), replacesOwner)
           retireLine = retired.line
         }
         // One warning line per hit, after the engine's reply; `reply` stays the engine's own text.
-        const warnings = (warnIds.length > 0 ? guard!.hits.map(hit => `\nMnemosyne guard warning: ${hit.message}`).join('') : '') + (near.length > 0 ? `\nMnemosyne guard warning: ${nearDuplicateMessage(near)}` : '')
+        const warnings = (warnIds.length > 0 ? guard!.hits.map(hit => `\nHAL-M guard warning: ${hit.message}`).join('') : '') + (near.length > 0 ? `\nHAL-M guard warning: ${nearDuplicateMessage(near)}` : '')
         return { reply: text, result: name === 'mnemopi_recall' ? JSON.stringify(compact(text, await getOn()))  : name === 'mnemopi_get' ? mnemosyneGet(text, info) : name === 'mnemopi_stats' ? mnemosyneStats(text) : `${kept !== undefined ? keptReply(text) : text}${warnings}${retireLine}` }
       } catch (err) {
-        return { deny: `Mnemosyne: ${(err as Error).message}` }
+        return { deny: `HAL-M: ${(err as Error).message}` }
       }
     })()
     if (action !== undefined) {
@@ -2704,7 +2704,7 @@ export const register: Register = (on, options) => {
       }
     }
     return 'deny' in answer ? { deny: answer.deny } : { result: answer.result }
-  }).catch(() => ({ deny: 'Mnemosyne: its tool failed.' }))
+  }).catch(() => ({ deny: 'HAL-M: its tool failed.' }))
 
   const rememberTerms = terms(options.rememberTerms)
   const recallTerms = terms(options.recallTerms)
@@ -2784,7 +2784,7 @@ export const register: Register = (on, options) => {
       // The save itself is Claude's memory_remember call, logged with origin tool.
       logged.push({ action: 'remember', origin: 'trigger', text: remember, ok: true })
       context.push(
-        `The user invoked a Mnemosyne remember trigger. Call mcp__mnemosyne__memory_remember exactly once, with a kind, with a self-contained version of:\n${remember}\nIf it is a secret or credential, do not save it; say so.`,
+        `The user invoked a HAL-M remember trigger. Call mcp__mnemosyne__memory_remember exactly once, with a kind, with a self-contained version of:\n${remember}\nIf it is a secret or credential, do not save it; say so.`,
       )
     }
     // A recall term is the reason for the recall, even on a first prompt.
@@ -2827,7 +2827,7 @@ export const register: Register = (on, options) => {
         const lines = found.map(r => `- [${r.id} owner=${r.owner}] ${r.content}${r.truncated ? cutMark(hasTool('memory_get')) : ''}`)
         context.push(`${recallHeading(hasTool)}\n${lines.join('\n')}`)
       } else if (asked !== undefined) {
-        context.push(`Mnemosyne recall for "${topic ?? asked}" found nothing.`)
+        context.push(`HAL-M recall for "${topic ?? asked}" found nothing.`)
       }
     } catch (err) {
       // recall is best effort; the prompt goes on without it

@@ -60,7 +60,7 @@ describe('the release check', () => {
   test('fetchLatest: the newest vX.Y.Z tag and its engine build', async () => {
     const { fetcher, calls } = fakeGitHub(['v0.26.1', 'v0.28.0', 'v0.29.0-rc1', 'nightly'], '18.12.3-mnemosyne.13')
     expect(await fetchLatest(fetcher)).toEqual({ tag: 'v0.28.0', plugin: '0.28.0', engine: '18.12.3-mnemosyne.13' })
-    expect(calls[1]).toBe('https://raw.githubusercontent.com/Interstellar-code/claude-mnemosyne/v0.28.0/engine/package.json')
+    expect(calls[1]).toBe('https://raw.githubusercontent.com/Interstellar-code/claude-hal-m/v0.28.0/engine/package.json')
   })
   test('a failed check is silent: undefined, never a throw', async () => {
     expect(await fetchLatest(fakeGitHub([], '', true).fetcher)).toBeUndefined()
@@ -437,9 +437,9 @@ describe('the version line and the confirm (ui/update.ts)', () => {
     expect(view.parseUpdateInfo({ current: { plugin: '0.27.0' }, latest: null, available: true })).toMatchObject({ available: false, latest: null })
   })
   test('the three states of the line', () => {
-    expect(view.versionText(info())).toBe('Mnemosyne v0.27.0 · v0.28.0 available')
-    expect(view.versionText(info({ available: false, latest: { tag: 'v0.27.0', plugin: '0.27.0', engine: null } }))).toBe('Mnemosyne v0.27.0 · up to date')
-    expect(view.versionText(info({ available: false, latest: null }))).toBe('Mnemosyne v0.27.0')
+    expect(view.versionText(info())).toBe('HAL-M v0.27.0 · v0.28.0 available')
+    expect(view.versionText(info({ available: false, latest: { tag: 'v0.27.0', plugin: '0.27.0', engine: null } }))).toBe('HAL-M v0.27.0 · up to date')
+    expect(view.versionText(info({ available: false, latest: null }))).toBe('HAL-M v0.27.0')
   })
   test('the confirm says what changes and what does not', () => {
     expect(view.confirmLines(info())).toEqual([
@@ -484,7 +484,7 @@ describe('the Version cell on a stand-in document', () => {
     await withDocument(() => {
       const h = host()
       const cell = view.versionCell(info(), h.host) as FakeNode
-      expect(cell.textContent).toContain('Mnemosyne v0.27.0 · v0.28.0 available')
+      expect(cell.textContent).toContain('HAL-M v0.27.0 · v0.28.0 available')
       const ask = cell.button('Update…')!
       const confirm = cell.all().find(node => node.className === 'confirm')!
       expect(ask.hidden).toBe(false)

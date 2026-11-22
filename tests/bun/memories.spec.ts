@@ -642,7 +642,7 @@ describe('META.2: the save paths write honest source, trust tier and veracity', 
     }
   }
   const rowOf = (host: Host, content: string) => rows(host).find(row => row.content === content)!
-  const idOf = (reply: { result?: string }) => JSON.parse(String(reply.result).split('\nMnemosyne')[0]!).memory_id as string
+  const idOf = (reply: { result?: string }) => JSON.parse(String(reply.result).split('\nHAL-M')[0]!).memory_id as string
   const DAY = 86_400_000
   /** Within a minute of `days` from now. */
   const inDays = (value: string | null, days: number) => {
@@ -777,7 +777,7 @@ describe('META.4: replaces retires, never deletes', () => {
       db.close()
     }
   }
-  const first = (reply: { result?: string }) => JSON.parse(String(reply.result).split('\nMnemosyne')[0]!)
+  const first = (reply: { result?: string }) => JSON.parse(String(reply.result).split('\nHAL-M')[0]!)
   const recalled = async (host: Host, query: string) => (JSON.parse((await host.tool('memory_recall', { query })).result!) as { id: string }[]).map(row => row.id)
   /** A row written straight through the engine as another owner, the way an older project's memory sits in the store. */
   const seed = async (host: Host, owner: string, content: string, scope: string) =>

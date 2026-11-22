@@ -1,4 +1,4 @@
-// Claude Mnemosyne — prints the owner id Mnemosyne uses for a folder (issue #43),
+// Claude HAL-M — prints the owner id HAL-M uses for a folder (issue #43),
 // so another program (Switch) can ask instead of copying the formula.
 //   bun bin/owner.ts <path>      prints project-<name>-<hash>
 //   bun bin/owner.ts --global    prints global

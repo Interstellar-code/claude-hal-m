@@ -975,7 +975,7 @@ describe('SESSION.1 and SESSION.2: the summary of the last session and the first
     host.setSession('fresh-1')
     const first = (await host.prompt('Do you remember the short replies preference?')) as { context?: string[] }
     const context = first.context!
-    expect(context[0]).toContain('Mnemosyne: what we were doing last time, and pinned memories:')
+    expect(context[0]).toContain('HAL-M: what we were doing last time, and pinned memories:')
     expect(context[0]).toContain(`- Last session [`)
     expect(context[0]).toContain(`- Pinned [${pinned} owner=global] Rohit prefers short replies`)
     // the recall found the same pinned row; it is listed once, in the block
@@ -988,7 +988,7 @@ describe('SESSION.1 and SESSION.2: the summary of the last session and the first
     const host = await open()
     await save(host, 'The release branch is cut from main on the first Monday of the month.', 'fact')
     const out = (await host.prompt('When is the release branch cut from main?')) as { context?: string[] }
-    expect((out.context ?? []).some(text => text.includes('Mnemosyne: what we were doing last time'))).toBe(false)
+    expect((out.context ?? []).some(text => text.includes('HAL-M: what we were doing last time'))).toBe(false)
   })
 
   test('the first-prompt recall switch off shows no block', async () => {

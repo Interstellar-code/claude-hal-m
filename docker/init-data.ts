@@ -1,4 +1,4 @@
-// Claude Mnemosyne — first start of the Docker image: lays out the data volume.
+// Claude HAL-M — first start of the Docker image: lays out the data volume.
 //
 //   bun docker/init-data.ts [<data root>]      (default: $MNEMOSYNE_ROOT, else /data)
 //

@@ -1,4 +1,4 @@
-// Claude Mnemosyne — type declarations.
+// Claude HAL-M — type declarations.
 
 /** session id -> true once that session's first prompt has had its recall */
 export type Recalled = Readonly<Record<string, true>>

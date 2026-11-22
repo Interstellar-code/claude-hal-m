@@ -23,7 +23,7 @@ const BASE = {
 const GOLDEN: Record<string, string> = {
   "sh-emb-strict-log": [
     "#!/bin/sh",
-    "# Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "# Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "# serving only remember / recall / update / forget / stats / get.",
     "# MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "# MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -61,7 +61,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\n") + "\n",
   "sh-emb-warn-log": [
     "#!/bin/sh",
-    "# Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "# Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "# serving only remember / recall / update / forget / stats / get.",
     "# MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "# MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -99,7 +99,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\n") + "\n",
   "sh-noemb-strict-log": [
     "#!/bin/sh",
-    "# Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "# Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "# serving only remember / recall / update / forget / stats / get.",
     "# MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "# MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -137,7 +137,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\n") + "\n",
   "sh-noemb-warn-log": [
     "#!/bin/sh",
-    "# Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "# Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "# serving only remember / recall / update / forget / stats / get.",
     "# MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "# MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -175,7 +175,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\n") + "\n",
   "sh-noemb-warn-nolog": [
     "#!/bin/sh",
-    "# Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "# Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "# serving only remember / recall / update / forget / stats / get.",
     "# MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "# MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -213,7 +213,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\n") + "\n",
   "cmd-emb-strict-log": [
     "@echo off",
-    "rem Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "rem Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "rem serving only remember / recall / update / forget / stats / get.",
     "rem MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "rem MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -252,7 +252,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\r\n") + "\r\n",
   "cmd-emb-warn-log": [
     "@echo off",
-    "rem Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "rem Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "rem serving only remember / recall / update / forget / stats / get.",
     "rem MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "rem MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -291,7 +291,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\r\n") + "\r\n",
   "cmd-noemb-strict-log": [
     "@echo off",
-    "rem Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "rem Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "rem serving only remember / recall / update / forget / stats / get.",
     "rem MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "rem MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",
@@ -330,7 +330,7 @@ const GOLDEN: Record<string, string> = {
   ].join("\r\n") + "\r\n",
   "cmd-noemb-warn-log": [
     "@echo off",
-    "rem Written by the Mnemosyne plugin (externalMcp). A stdio MCP server over its store,",
+    "rem Written by the HAL-M plugin (externalMcp). A stdio MCP server over its store,",
     "rem serving only remember / recall / update / forget / stats / get.",
     "rem MNEMOSYNE_OWNER picks the owner: global (default) or a project-... id.",
     "rem MNEMOSYNE_ACTIVITY_LOG is the activity log each call is recorded in; empty when activityLog is off.",

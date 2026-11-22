@@ -96,7 +96,7 @@ describe('IMPORT.1: the dry run', () => {
     const reply = (await host.command('mnemosyne-import', 'doc ~/docs/home.md')).text
     expect(reply).toContain('Dry run for home.md: 1 chunk ')
     const relative = (await host.command('mnemosyne-import', 'doc ../nothing/here.md')).text
-    expect(relative).toContain('Mnemosyne import failed: there is no such file')
+    expect(relative).toContain('HAL-M import failed: there is no such file')
   })
 
   test('refuses what is not importable, and names the cause', async () => {

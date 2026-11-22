@@ -256,7 +256,7 @@ test('the first call starts one server, reads the ready line in pieces and the t
   expect(seen.copied).toEqual([`http://127.0.0.1:4321/#token=${TOKEN_B}`])
   // The default browser opens the full link, and the reply shows it.
   expect(seen.runs.filter(r => OPENERS.includes(r.argv[0]!)).map(r => r.argv)).toEqual([['open', `http://127.0.0.1:4321/#token=${TOKEN_B}`]])
-  expect(seen.toasts).toEqual(['Mnemosyne dashboard opened in your browser.'])
+  expect(seen.toasts).toEqual(['HAL-M dashboard opened in your browser.'])
   expect(text).toContain('Opened in your default browser')
   expect(text).toContain(`Link: http://127.0.0.1:4321/#token=${TOKEN_B}`)
   expect(seen.logs.some(line => line.includes(TOKEN_B))).toBe(false)
@@ -286,7 +286,7 @@ test('when no opener works the reply says so and still shows the link', async ($
   const seen = world(on, { openers: [] })
   const text = textOf(await openUi($))
   expect(seen.runs.filter(r => OPENERS.includes(r.argv[0]!)).map(r => r.argv[0])).toEqual(OPENERS)
-  expect(seen.toasts).toEqual(['Mnemosyne dashboard: open its link from the reply.'])
+  expect(seen.toasts).toEqual(['HAL-M dashboard: open its link from the reply.'])
   expect(text).toContain('Could not open a browser')
   expect(text).toContain('the link is also on the clipboard')
   expect(text).toContain(`Link: http://127.0.0.1:4321/#token=${TOKEN_B}`)
@@ -515,7 +515,7 @@ test('a reused dashboard that started with the same setting says nothing about a
   const seen = world(on, { state: { port: 5555, token: TOKEN_A, pid: 42 }, startedWith: { pid: 42, extraction: 'haiku', embeddings: 'off' } })
   seen.session = 's2'
   const text = textOf(await openUi($))
-  expect(text).toContain('Mnemosyne dashboard running')
+  expect(text).toContain('HAL-M dashboard running')
   expect(text).not.toContain('restart')
 })
 

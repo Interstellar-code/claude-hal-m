@@ -147,7 +147,7 @@ const row = (id: string, content: string, owner = 'global') => ({ id, owner, con
 test('SESSION.2.a1: the block shows the summary first, then the pinned memories, each with id and owner', () => {
   const block = buildSessionBlock({ summary: row('s1', 'Last time we fixed the sweep.'), pinned: [row('p1', 'Rohit prefers short replies.'), row('p2', 'Never push to main.', 'project-x')] })!
   expect(block.text.split('\n')).toEqual([
-    'Mnemosyne: what we were doing last time, and pinned memories:',
+    'HAL-M: what we were doing last time, and pinned memories:',
     '- Last session [s1 owner=global] Last time we fixed the sweep.',
     '- Pinned [p1 owner=global] Rohit prefers short replies.',
     '- Pinned [p2 owner=project-x] Never push to main.',
@@ -566,7 +566,7 @@ test('SESSION.2.a1: the first prompt gets the block ahead of the recall; a pin t
   const out = await firstPrompt($)
   expect(out.context).toHaveLength(2)
   expect(out.context![0]).toBe(
-    ['Mnemosyne: what we were doing last time, and pinned memories:', '- Last session [sum1 owner=global] Last time we fixed the sweep and left the Windows path open.', '- Pinned [pin1 owner=global] Rohit prefers short replies.', '- Pinned [pin2 owner=global] Never push to main.'].join('\n'),
+    ['HAL-M: what we were doing last time, and pinned memories:', '- Last session [sum1 owner=global] Last time we fixed the sweep and left the Windows path open.', '- Pinned [pin1 owner=global] Rohit prefers short replies.', '- Pinned [pin2 owner=global] Never push to main.'].join('\n'),
   )
   expect(out.context![1]).toContain('- [r1 owner=global] use pnpm')
   expect(out.context![1]).not.toContain('pin1')

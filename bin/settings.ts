@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the settings file's reader and its one writer (0.8.5 settings plan, C1 and C5).
+// Claude HAL-M — the settings file's reader and its one writer (0.8.5 settings plan, C1 and C5).
 //   bun bin/settings.ts get [<key>] --root <dir>
 //   bun bin/settings.ts set <key> <value> --root <dir>      value is JSON (4, true, 0.9, ["two words"]); other text is taken as a string
 //   bun bin/settings.ts reset <key> --root <dir>

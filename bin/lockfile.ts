@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the one try-lock (moved from bin/activity.ts, SA.2).
+// Claude HAL-M — the one try-lock (moved from bin/activity.ts, SA.2).
 //
 // takeLock(file, staleMs) creates `file` with O_EXCL and closes it at once (on
 // Windows an open handle would block a later rename). It never waits: it

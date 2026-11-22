@@ -87,11 +87,11 @@ describe('IMPORT.3: Claude pins and unpins a memory', () => {
     const engineBefore = updates()
     for (const bad of ['yes', 1, 'true', {}]) {
       const refused = await host.tool('memory_update', { memory_id: id, pinned: bad })
-      expect(refused.deny).toBe('Mnemosyne: pinned must be true or false.')
+      expect(refused.deny).toBe('HAL-M: pinned must be true or false.')
     }
     expect(updates()).toBe(engineBefore)
     const empty = await host.tool('memory_update', { memory_id: id })
-    expect(empty.deny).toBe('Mnemosyne: memory_update needs content, importance, tags, kind or pinned.')
+    expect(empty.deny).toBe('HAL-M: memory_update needs content, importance, tags, kind or pinned.')
     expect((await host.tool('memory_update', { memory_id: id, pinned: true })).deny).toBeUndefined()
   })
 })

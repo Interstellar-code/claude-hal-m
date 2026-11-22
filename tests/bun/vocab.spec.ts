@@ -309,7 +309,7 @@ describe('VOCAB.2: tags through the real proxy and the real store', () => {
     if (replies.size === 0) throw new Error(`proxy gave no replies: ${stderr.slice(-400)}`)
     return replies
   }
-  const idOf = (reply: any) => JSON.parse(String(reply.result.content[0].text).split('\nMnemosyne')[0]!).memory_id as string
+  const idOf = (reply: any) => JSON.parse(String(reply.result.content[0].text).split('\nHAL-M')[0]!).memory_id as string
   const tagsOf = (id: string) => {
     const db = new Database(join(store, 'mnemopi.db'), { readonly: true })
     try {

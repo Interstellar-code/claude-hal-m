@@ -1,4 +1,4 @@
-// Claude Mnemosyne — the session work (plan phase SESSION): a summary of the last session, the pinned
+// Claude HAL-M — the session work (plan phase SESSION): a summary of the last session, the pinned
 // memories and that summary on a session's first prompt, and the unused-expiry sweep.
 //
 // Only the pure parts live here, so the hooks (register.ts), bin/memories.ts and the specs all use the same
@@ -282,5 +282,5 @@ export function buildSessionBlock(read: BlockRead, pinnedMax: number = BLOCK_PIN
     ids.push(row.id)
   }
   if (lines.length === 0) return undefined
-  return { text: `Mnemosyne: what we were doing last time, and pinned memories:\n${lines.join('\n')}`, ids }
+  return { text: `HAL-M: what we were doing last time, and pinned memories:\n${lines.join('\n')}`, ids }
 }
