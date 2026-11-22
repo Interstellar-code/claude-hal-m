@@ -6,6 +6,11 @@ import { join } from 'node:path'
 import { engineEnv } from '../../hooks/engine'
 
 const REAL_HOME = homedir()
+// Where an already-downloaded model cache may be, new root first (read only).
+export const REAL_MODEL_CACHES = [
+  join(REAL_HOME, '.hal-m', 'model-cache', 'cache'),
+  join(REAL_HOME, '.claude', 'mnemosyne', 'model-cache', 'cache'),
+]
 export const ROOT = join(import.meta.dir, '..', '..')
 export const INSTALLER = join(ROOT, 'bin', 'install-engine.ts')
 
@@ -34,9 +39,12 @@ export function isolatedEnv(prefix = 'isolated') {
   // symlink so tests do not re-download it; `logs/` stays a real folder in the
   // temp home and is removed with it. rmSync(home, { recursive: true }) deletes
   // the symlink, never its target.
-  const realCache = join(REAL_HOME, '.claude', 'mnemosyne', 'model-cache', 'cache')
+  // The real cache sits under the new root (~/.hal-m) or the old one (A-m3). It
+  // is linked into the temp home's old root only: making ~/.hal-m there too
+  // would give the temp home two real roots (state "both real", plan 3.2).
+  const realCache = REAL_MODEL_CACHES.find(dir => existsSync(dir))
   const link = join(piConfig, 'cache')
-  try { if (existsSync(realCache)) symlinkSync(realCache, link, 'dir') } catch {}
+  try { if (realCache !== undefined) symlinkSync(realCache, link, 'dir') } catch {}
   _isolatedHomes.add(home)
   // The package cache is a download cache, not user data; reusing it keeps
   // tests offline-fast and writes no logs to the real home.
